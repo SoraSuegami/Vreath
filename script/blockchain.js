@@ -9,7 +9,7 @@ var rlp = require('rlp');
 var db = levelup(leveldown('./db'));
 var currency_name = 'nix';
 var txlimit = 10;
-
+var password = "Sora"
 var beneficiaryPub = CryptoSet.PullMyPublic(password);
 var beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
 try{
@@ -47,7 +47,37 @@ try{
   });
 }
 console.log(BlockChain);
+/*
+var trie = new Trie(db);
+var gav = Buffer.from('8a40bfaa73256b60764c1bf40675a99083efb075', 'hex');
+//console.log(gav);
+var data = rlp.encode('Hello');
+trie.put(gav,data,function(){
+  trie.get(gav, function (err, value) {
+      //if(value) console.log(value.toString())
+    });
+});
+Proof.prove(trie,gav,function(err,proof){
+  Proof.verifyProof(trie.root,gav,proof,function(err,val) {
+    //console.log(rlp.decode(val).toString('utf-8'));
+  })
+});
+//console.log(trie.root.toString('hex'));
+var stream = trie.createReadStream();
 
+stream.on('data', function (data) {
+  //console.log('key:' + data.key.toString('hex'));
+
+  //accouts are rlp encoded
+  var decodedVal = rlp.decode(data.value).toString('utf-8');
+  //console.log(decodedVal);
+});
+
+stream.on('end', function (val) {
+  console.log('done reading!');
+  console.dir(trie);
+});
+*/
 
 function toHash(str){
   var sha256 = crypto.createHash('sha256');
@@ -140,6 +170,17 @@ function ChangeWorld(acstate){
     console.log(World.root.toString('hex'));
   });
 }
+
+
+/*var me = new AccoutState('PHaaaf75971931bbf95933d48941edb0');
+AccountState[me.address] = me.Json();
+ChangeWorld(me);
+fs.writeFile('./BlockChainData/PhoenixAccountState.json', JSON.stringify(AccountState),function(err){
+  if (err) {
+      throw err;
+  }
+});*/
+
 
 
 class Tx{
@@ -254,7 +295,17 @@ function CreateTx(password,from,from_key,to,to_key,value,gas,timelock={bigin:nul
   return NewTx;
 }
 
-
+//test_area
+var sora_nonce = AccountState['PHaaaf75971931bbf95933d48941edb0'].nonce+1;
+var sora_pub = CryptoSet.PullMyPublic("Sora");
+var sora_add = CryptoSet.AddressFromPublic(sora_pub);
+CryptoSet.GenerateKeys('Test');
+var test_pub = CryptoSet.PullMyPublic("Test");
+var test_add = CryptoSet.AddressFromPublic(test_pub);
+var test_tx = CreateTx("Sora",sora_add,sora_pub,test_add,test_pub,{[currency_name]:10},{[currency_name]:1});
+console.log(test_tx);
+console.log(test_tx.inValidTx());
+//test_area
 
 class Block{
   constructor(index,parentHash,Hash,timestamp,txnum,beneficiary,beneficiaryPub,stake,dags,gassum,signature,transactionsRoot,stateRoot,transactions){
@@ -417,3 +468,20 @@ function MakeBlock(transactions,beneficiary,beneficiaryPub,stake,dags,password) 
   new Block(index,parentHash,Hash,timestamp,txnum,beneficiary,beneficiaryPub,stake,dags,gassum,signature,transactionsRoot,stateRoot,transactions);
   return make_block;
 }
+/*trie.checkRoot('Hello',function(err,value){
+console.log(value);
+});*/
+
+/*var stream = trie.createReadStream();
+
+stream.on('data', function (data) {
+  console.log('key:' + data.key.toString('hex'));
+
+  //accouts are rlp encoded
+  var decodedVal = rlp.decode(data.value);
+  console.log(decodedVal);
+});
+
+stream.on('end', function (val) {
+  console.log('done reading!');
+});*/

@@ -13,40 +13,39 @@ var password = "Sora"
 var beneficiaryPub = CryptoSet.PullMyPublic(password);
 var beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
 try{
-  var States = JSON.parse(fs.readFileSync('./jons/PhoenixAccountState.json', 'utf8'));
+  var States = JSON.parse(fs.readFileSync('./jsons/PhoenixAccountState.json', 'utf8'));
 }catch(err){
   var States = {};
-  fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
+  fs.writeFile('./jsons/PhoenixAccountState.json', JSON.stringify(States),function(err){
     if (err) {
         throw err;
     }
   });
 }
-console.log(States);
+
 
 try{
-  var Pool = JSON.parse(fs.readFileSync('./jons/PhoenixTransactionPool.json', 'utf8'));
+  var Pool = JSON.parse(fs.readFileSync('./jsons/PhoenixTransactionPool.json', 'utf8'));
 }catch(err){
   var Pool = [];
-  fs.writeFile('./jons/PhoenixTransactionPool.json', JSON.stringify(Pool),function(err){
+  fs.writeFile('./jsons/PhoenixTransactionPool.json', JSON.stringify(Pool),function(err){
     if (err) {
         throw err;
     }
   });
 }
-console.log(Pool);
 
 try{
-  var BlockChain = JSON.parse(fs.readFileSync('./jons/PhoenixBlockChain.json', 'utf8'));
+  var BlockChain = JSON.parse(fs.readFileSync('./jsons/PhoenixBlockChain.json', 'utf8'));
 }catch(err){
   var BlockChain = [];
-  fs.writeFile('./jons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
+  fs.writeFile('./jsons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
     if (err) {
         throw err;
     }
   });
 }
-console.log(BlockChain);
+
 
 
 function toHash(str){
@@ -95,7 +94,7 @@ class AccountState{
       nonce:this.nonce,
       balance:this.balance
     };
-    fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
+    fs.writeFile('./jsons/PhoenixAccountState.json', JSON.stringify(States),function(err){
       if (err) {
           throw err;
       }
@@ -116,7 +115,7 @@ class AccountState{
       nonce:this.nonce,
       balance:this.balance
     };
-    fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
+    fs.writeFile('./jsons/PhoenixAccountState.json', JSON.stringify(States),function(err){
       if (err) {
           throw err;
       }
@@ -137,7 +136,7 @@ function ChangeWorld(acstate){
   var address = Buffer.from(acstate.address,'utf-8');
   var state = rlp.encode(JSON.stringify(acstate.Json()));
   World.put(address,state,function(){
-    console.log(World.root.toString('hex'));
+    return true;
   });
 }
 
@@ -145,7 +144,7 @@ function ChangeWorld(acstate){
 /*var me = new AccoutState('PHaaaf75971931bbf95933d48941edb0');
 States[me.address] = me.Json();
 ChangeWorld(me);
-fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
+fs.writeFile('./jsons/PhoenixAccountState.json', JSON.stringify(States),function(err){
   if (err) {
       throw err;
   }
@@ -191,7 +190,6 @@ class Tx{
     }catch(err){
       console.log(err);
     }
-    console.log(States);
   }
   inValidTx(){
     if(this.from!=CryptoSet.AddressFromPublic(this.from_key)){
@@ -215,6 +213,10 @@ class Tx{
       return false;
     }
     else if (CryptoSet.verifyData(this.hash,this.signature,this.from_key)==false){
+      console.error("invalid signature");
+      return false;
+    }
+    else if (DAGScript.inValidTxFromDag(this)) {
       console.error("invalid signature");
       return false;
     }
@@ -352,7 +354,7 @@ class Block{
   Add(){
     if(this.inValidBlock()==false) return false;
     BlockChain.push(this.Json());
-    fs.writeFile('./jons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
+    fs.writeFile('./jsons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
       if (err) {
           throw err;
       }
@@ -426,4 +428,7 @@ function MakeBlock(transactions,beneficiary,beneficiaryPub,stake,dags,password) 
   var make_block =
   new Block(index,parentHash,Hash,timestamp,txnum,beneficiary,beneficiaryPub,stake,dags,gassum,signature,transactionsRoot,stateRoot,transactions);
   return make_block;
+}
+module.exports = {
+  CreateTx:CreateTx
 }

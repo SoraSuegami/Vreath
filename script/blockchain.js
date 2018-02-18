@@ -6,29 +6,29 @@ var crypto = require("crypto");
 var levelup = require('levelup');
 var leveldown = require('leveldown');
 var rlp = require('rlp');
-var db = levelup(leveldown('./db'));
+var db = levelup(leveldown('./db/blockchain'));
 var currency_name = 'nix';
 var txlimit = 10;
 var password = "Sora"
 var beneficiaryPub = CryptoSet.PullMyPublic(password);
 var beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
 try{
-  var AccountState = JSON.parse(fs.readFileSync('./BlockChainData/PhoenixAccountState.json', 'utf8'));
+  var States = JSON.parse(fs.readFileSync('./jons/PhoenixAccountState.json', 'utf8'));
 }catch(err){
-  var AccountState = {};
-  fs.writeFile('./BlockChainData/PhoenixAccountState.json', JSON.stringify(AccountState),function(err){
+  var States = {};
+  fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
     if (err) {
         throw err;
     }
   });
 }
-console.log(AccountState);
+console.log(States);
 
 try{
-  var Pool = JSON.parse(fs.readFileSync('./BlockChainData/PhoenixTransactionPool.json', 'utf8'));
+  var Pool = JSON.parse(fs.readFileSync('./jons/PhoenixTransactionPool.json', 'utf8'));
 }catch(err){
   var Pool = [];
-  fs.writeFile('./BlockChainData/PhoenixTransactionPool.json', JSON.stringify(Pool),function(err){
+  fs.writeFile('./jons/PhoenixTransactionPool.json', JSON.stringify(Pool),function(err){
     if (err) {
         throw err;
     }
@@ -37,47 +37,17 @@ try{
 console.log(Pool);
 
 try{
-  var BlockChain = JSON.parse(fs.readFileSync('./BlockChainData/PhoenixBlockChain.json', 'utf8'));
+  var BlockChain = JSON.parse(fs.readFileSync('./jons/PhoenixBlockChain.json', 'utf8'));
 }catch(err){
   var BlockChain = [];
-  fs.writeFile('./BlockChainData/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
+  fs.writeFile('./jons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
     if (err) {
         throw err;
     }
   });
 }
 console.log(BlockChain);
-/*
-var trie = new Trie(db);
-var gav = Buffer.from('8a40bfaa73256b60764c1bf40675a99083efb075', 'hex');
-//console.log(gav);
-var data = rlp.encode('Hello');
-trie.put(gav,data,function(){
-  trie.get(gav, function (err, value) {
-      //if(value) console.log(value.toString())
-    });
-});
-Proof.prove(trie,gav,function(err,proof){
-  Proof.verifyProof(trie.root,gav,proof,function(err,val) {
-    //console.log(rlp.decode(val).toString('utf-8'));
-  })
-});
-//console.log(trie.root.toString('hex'));
-var stream = trie.createReadStream();
 
-stream.on('data', function (data) {
-  //console.log('key:' + data.key.toString('hex'));
-
-  //accouts are rlp encoded
-  var decodedVal = rlp.decode(data.value).toString('utf-8');
-  //console.log(decodedVal);
-});
-
-stream.on('end', function (val) {
-  console.log('done reading!');
-  console.dir(trie);
-});
-*/
 
 function toHash(str){
   var sha256 = crypto.createHash('sha256');
@@ -120,12 +90,12 @@ class AccountState{
         this.balance[kind] -= value[kind];
       }
     }
-    AccountState[this.address] = {
+    States[this.address] = {
       address:this.address,
       nonce:this.nonce,
       balance:this.balance
     };
-    fs.writeFile('./BlockChainData/PhoenixAccountState.json', JSON.stringify(AccountState),function(err){
+    fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
       if (err) {
           throw err;
       }
@@ -141,12 +111,12 @@ class AccountState{
         this.balance[kind] += value[kind];
       }
     }
-    AccountState[this.address] = {
+    States[this.address] = {
       address:this.address,
       nonce:this.nonce,
       balance:this.balance
     };
-    fs.writeFile('./BlockChainData/PhoenixAccountState.json', JSON.stringify(AccountState),function(err){
+    fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
       if (err) {
           throw err;
       }
@@ -173,9 +143,9 @@ function ChangeWorld(acstate){
 
 
 /*var me = new AccoutState('PHaaaf75971931bbf95933d48941edb0');
-AccountState[me.address] = me.Json();
+States[me.address] = me.Json();
 ChangeWorld(me);
-fs.writeFile('./BlockChainData/PhoenixAccountState.json', JSON.stringify(AccountState),function(err){
+fs.writeFile('./jons/PhoenixAccountState.json', JSON.stringify(States),function(err){
   if (err) {
       throw err;
   }
@@ -221,7 +191,7 @@ class Tx{
     }catch(err){
       console.log(err);
     }
-    console.log(AccountState);
+    console.log(States);
   }
   inValidTx(){
     if(this.from!=CryptoSet.AddressFromPublic(this.from_key)){
@@ -258,17 +228,17 @@ class Tx{
 
 function SetMyState(address){
   var my_state;
-  if(AccountState[address] == null){
+  if(States[address] == null){
     my_state = new AccountState(address);
     my_state.nonce = 0;
     my_state.balance = {[currency_name]:0};
-    AccountState[address] = my_state.Json();
+    States[address] = my_state.Json();
   }
   else{
     my_state = new AccountState(address);
-    my_state.nonce = AccountState[address].nonce;
+    my_state.nonce = States[address].nonce;
     //console.log(my_state.nonce);
-    my_state.balance = AccountState[address].balance;
+    my_state.balance = States[address].balance;
   }
   return my_state;
 }
@@ -295,17 +265,6 @@ function CreateTx(password,from,from_key,to,to_key,value,gas,timelock={bigin:nul
   return NewTx;
 }
 
-//test_area
-var sora_nonce = AccountState['PHaaaf75971931bbf95933d48941edb0'].nonce+1;
-var sora_pub = CryptoSet.PullMyPublic("Sora");
-var sora_add = CryptoSet.AddressFromPublic(sora_pub);
-CryptoSet.GenerateKeys('Test');
-var test_pub = CryptoSet.PullMyPublic("Test");
-var test_add = CryptoSet.AddressFromPublic(test_pub);
-var test_tx = CreateTx("Sora",sora_add,sora_pub,test_add,test_pub,{[currency_name]:10},{[currency_name]:1});
-console.log(test_tx);
-console.log(test_tx.inValidTx());
-//test_area
 
 class Block{
   constructor(index,parentHash,Hash,timestamp,txnum,beneficiary,beneficiaryPub,stake,dags,gassum,signature,transactionsRoot,stateRoot,transactions){
@@ -329,7 +288,7 @@ class Block{
       header:{
         index:this.index,
         parentHash:this.parentHash,
-        Hash:this.Hash;
+        Hash:this.Hash,
         timestamp:this.timestamp,
         txnum:this.txnum,
         beneficiary:this.beneficiary,
@@ -393,7 +352,7 @@ class Block{
   Add(){
     if(this.inValidBlock()==false) return false;
     BlockChain.push(this.Json());
-    fs.writeFile('./BlockChainData/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
+    fs.writeFile('./jons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
       if (err) {
           throw err;
       }
@@ -468,20 +427,3 @@ function MakeBlock(transactions,beneficiary,beneficiaryPub,stake,dags,password) 
   new Block(index,parentHash,Hash,timestamp,txnum,beneficiary,beneficiaryPub,stake,dags,gassum,signature,transactionsRoot,stateRoot,transactions);
   return make_block;
 }
-/*trie.checkRoot('Hello',function(err,value){
-console.log(value);
-});*/
-
-/*var stream = trie.createReadStream();
-
-stream.on('data', function (data) {
-  console.log('key:' + data.key.toString('hex'));
-
-  //accouts are rlp encoded
-  var decodedVal = rlp.decode(data.value);
-  console.log(decodedVal);
-});
-
-stream.on('end', function (val) {
-  console.log('done reading!');
-});*/

@@ -12,6 +12,364 @@ var txlimit = 10;
 var password = "Sora"
 var beneficiaryPub = CryptoSet.PullMyPublic(password);
 var beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
+
+
+function toHash(str){
+  var sha256 = crypto.createHash('sha256');
+  sha256.update(str);
+  var pre_hash = sha256.digest('hex');
+  var sha512 = crypto.createHash('sha512');
+  sha512.update(pre_hash);
+  var hash = sha512.digest('hex');
+  return hash;
+}
+
+function calculateHashForTx(Tx){
+  var edit_tx = Tx;
+  delete edit_tx.meta.hash;
+  delete edit_tx.meta.signature;
+  return toHash(JSON.stringify(edit_tx));
+}
+
+function ReadState(){
+  try{
+    var State = JSON.parse(fs.readFileSync('./jsons/PhoenixAccountState.json', 'utf8'));
+  }catch(err){
+    var State = {};
+    fs.writeFile('./jsons/PhoenixAccountState.json', JSON.stringify(State),function(err){
+      if (err) {
+          throw err;
+      }
+    });
+  }
+  return State;
+}
+
+function ReadBlocks(){
+  try{
+    var BlockChain = JSON.parse(fs.readFileSync('./jsons/PhoenixBlockChain.json', 'utf8'));
+  }catch(err){
+    var BlockChain = [];
+    fs.writeFile('./jsons/PhoenixBlockChain.json', JSON.stringify(BlockChain),function(err){
+      if (err) {
+          throw err;
+      }
+    });
+  }
+  return BlockChain;
+}
+
+function ReadPool(){
+  try{
+    var Pool = JSON.parse(fs.readFileSync('./jsons/PhoenixTransactionPool.json', 'utf8'));
+  }catch(err){
+    var Pool = [];
+    fs.writeFile('./jsons/PhoenixTransactionPool.json', JSON.stringify(Pool),function(err){
+      if (err) {
+          throw err;
+      }
+    });
+  }
+  return Pool;
+}
+
+function ReadDagData(){
+  try{
+    const DagData = JSON.parse(fs.readFileSync('./jsons/PhoenixDagData.json', 'utf8'));
+  }catch(err){
+    const DagData = {};
+    fs.writeFile('./jsons/PhoenixDagData.json', JSON.stringify(DagData),function(err){
+      if (err) {
+          throw err;
+      }
+    });
+  }
+  return DagData;
+}
+
+function TxJson(from,to,option,timestamp,fee,nonce,pure_hash,evidence,pre_tx=null,next_tx=null,hash){
+  return{
+    type:type,
+    from:from,
+    to:to,
+    timestamp:timestamp,
+    options:options,
+    fee:fee,
+    nonce:nonce,
+    pure_hash:pure_hash,
+    evidence:evidence,
+    pre_tx:pre_tx,
+    next_tx:next_tx,
+    hash:hash
+  }
+}
+
+function TxList(Txs){
+  return{
+    meta:{
+      num:num,
+      root_hash:root_hash
+    }
+    transactions:Txs;
+  }
+}
+
+function StateJson(address,nonce,balance,deposit,used_hash,issue_token,storage,code){
+  return{
+    address:address,
+    nonce:nonce,
+    balance:balance,
+    deposit:deposit,
+    used_hash:used_hash,
+    issue_token:issue_token,
+    storage:storage,
+    code:code
+  }
+}
+
+function SetState(address,StateData){
+  if(StateData[address]==null){
+    return StateJson(address,0,{[currency_name]:0},{},{},{},{},{});
+  }
+  else{
+    return StateData[address]
+  }
+}
+
+
+function pull_tx_type(tx){
+  return tx.type;
+}
+function pull_tx_from(tx){
+  return tx.from;
+}
+function pull_tx_to(tx){
+  return tx.to;
+}
+function pull_tx_timestamp(tx){
+  return tx.timestamp;
+}
+function pull_tx_options(tx){
+  return tx.options;
+}
+function pull_tx_fee(tx){
+  return tx.fee;
+}
+function pull_tx_nonce(tx){
+  return tx.nonce;
+}
+function pull_tx_pure_hash(tx){
+  return tx.pure_hash;
+}
+function pull_tx_evidence(tx){
+  return tx.evidence;
+}
+function pull_tx_pre_tx(tx){
+  return tx.pre_tx;
+}
+function pull_tx_next_tx(tx){
+  return tx.next_tx;
+}
+function pull_tx_hash(tx){
+  return tx.hash;
+}
+function pull_txlist_num(tx_list){
+  return tx_list.num;
+}
+function pull_txlist_root_hash(tx_list){
+  return tx_list.root_hash;
+}
+function pull_txlist_txs(tx_list){
+  return tx_list.transactions;
+}
+
+function calculateHashForPureTx(tx){
+  var edit_tx = tx;
+  delete edit_tx.pure_tx;
+  delete edit_tx.pre_tx;
+  delete edit_tx.next_tx;
+  delete edit_tx.hash;
+  return toHash(JSON.stringify(edit_dag));
+}
+
+function calculateHashForTx(tx){
+  var edit_tx = tx;
+  delete edit_tx.hash;
+  return toHash(JSON.stringify(edit_dag));
+}
+
+function Confirmes(dag,DagData){
+  var first_confirm = null;
+  var second_confirm = null;
+  for(var d of DagData){
+    if(pull_parenthash(d)==pull_hash(dag)){
+      first_confirm = pull_hash(d);
+      break;
+    }
+  }
+  for(var d of DagData){
+    if(pull_parenthash(d)==pull_hash(first_confirm)){
+      second_confirm = pull_hash(d);
+      break;
+    }
+  }
+  return second_confirm;
+}
+
+function invaildTx(tx,StateData,DagData){
+  const date = new Date();
+  const from = pull_tx_from(tx);
+  const state = SetState(from,StateData);
+  const dag = DagData[pull_tx_evidence(tx)];
+  if(pull_tx_timestamp(tx)>date.getTime()){
+    console.error("invalid timestamp");
+    return false;
+  }
+  else if(pull_tx_nonce(tx)!=state.nonce){
+    console.error("invalid nonce");
+    return false;
+  }
+  else if(pull_tx_pure_hash(tx)!=calculateHashForPureTx(tx)){
+    console.error("invalid pure hash");
+    return false;
+  }
+  else if((dag.meta.app!=from)||(state.used_hash[pull_tx_evidence(tx)]!=null)||(Confirmes(dag,DagData)==null)){
+    console.error("invalid evidence");
+    return false;
+  }
+  else if(pull_tx_hash(tx)!=calculateHashForTx(tx)){
+    console.error("invalid hash");
+    return false;
+  }
+  else if(1){
+    switch (pull_tx_type(tx)) {
+      case "remit":
+        const value = pull_tx_options(tx);
+        for(var kind in value){
+          if(state.balance[kind]==null || state.balance[kind]<value[kind]){
+            console.error("invaild value");
+            return false;
+            break;
+          }
+        }
+        break;
+      case "register_app":
+        const code = pull_tx_options(tx);
+        const code_id = code.code_id;
+        const code_buf = Buffer.from(code.data);
+        if(!from.match(/^PH/)){
+          console.error("You can't register code to this address");
+          return false;
+        }
+        else if(state.code[code_id]!=null){
+          console.error("This code id is already used");
+          return false;
+        }
+        else if(code_buf.length!=code.size){
+          console.error("invalid code size");
+          return false;
+        }
+        break;
+      case "issue_token":
+       break;
+      case "add_data":
+        break;
+      case "deposit":
+        break;
+      case "withdrawal":
+        break;
+      default:
+        console.error("invaild type");
+        return false;
+        break;
+    }
+  }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 try{
   var States = JSON.parse(fs.readFileSync('./jsons/PhoenixAccountState.json', 'utf8'));
 }catch(err){
@@ -65,7 +423,7 @@ class AccountState{
       this.nonce=0;
     }
     if(this.balance==null){
-      this.balance = {[currency_name]:100};
+      this.balance = {[currency_name]:0};
     }
   }
   SendMoney(nonce,value){

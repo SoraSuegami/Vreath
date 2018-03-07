@@ -12,6 +12,16 @@ function HashFromPass(password){
   return hash;
 }
 
+/*
+var hash = HashFromPass("saa");
+var num=0;
+for(var i=0; i<hash.length-1; i++){
+  num += hash.charCodeAt(i);
+  console.log(num);
+}
+console.log(num%546);
+*/
+
 function GenerateKeys(password){
   let Private
   do {
@@ -86,6 +96,7 @@ function SignData(data,password){
   return sign.signature;
 }
 
+
 function verifyData(data,sign,Public){
   if(data==null||sign==null)return false;
   data = crypto.createHash("sha256").update(data).digest();
@@ -113,7 +124,7 @@ function AppAddress(name){
     return false;
   }
   var hashed = HashFromPass(name).substr(0,add);
-  var address = 'PS' + name + hashed;
+  var address = 'PA' + name + hashed;
   return address;
 }
 

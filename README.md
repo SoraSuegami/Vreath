@@ -21,10 +21,16 @@
     * Slow Confirmations  
     * Transaction Fee  
     
-    Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it don't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when posting comments, it require fee of users.
-    
-1. Dag --- Post Block Chain
+    Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it don't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when posting comments, it require fee of users. 
 
+For these reasons, Block chain is not as yet realistic.
+
+1. Dag --- Post Block Chain
+    As it will be able to solve the above problems, Dag is often regarded as post block chain. Its Users confirm another person's transactions to add theirs there and have someone confirm them.(If they confirm invalid transactions, theirs won't be confirmed)  
+
+    It is very scalable. Even though its users increase, confirmers increase as well. Dag solve scalability issues at its foundation. It  is also very fast. Transactions are confirmed asynchronously, so users don't have to wait like block chain. We need no fee to add new transacitons. As mentioned above, other person confirm them for theirselves, in other words confirmer don't require any fee.
+
+    Dag looks perfect, but it has some disadvantage. One of them is less consistency. There is some possibility of permitting invalid remittance. For instance, even though Alice has only 5 coin, she may be able to send 5 coin to three other persons at almost the same time because her transactions are confirmed asynchronously. It is unstable to express value.
 
 ## Solution --- Dag marries Block Chain 
 1. Use Block Chain and Dag Properly 

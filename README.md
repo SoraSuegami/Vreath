@@ -3,6 +3,6 @@
 -------------------------------------------------------
 
 ## Introduction
-1.The beginning of decentralized world
+1. The beginning of decentralized world
 
  

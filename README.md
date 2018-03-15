@@ -25,7 +25,7 @@
     1. Hash Evidence 
     1. Dynamic Outputs
     1. Domino Transactions
-
+    
 1. Proof of Stake with Dag
 
 1. Triple Benefit Protocol
@@ -33,4 +33,16 @@
 1. zk-starks
 
 1. Deposit in App
+
+
+## Problems --- Delay of Selling Dag Data
+
+
+## Vision
+
+
+## Conclusion
+
+
+## References
 

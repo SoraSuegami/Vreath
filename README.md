@@ -9,6 +9,7 @@
     * Single point of failure 
     * Large expenses to manage apps 
     * Dictatorial of managing organizations  
+    
     Block chain solves them. Dapp(application running in block chain) has the following features. 
     * Decentralized
     * No cost to manage apps

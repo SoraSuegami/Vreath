@@ -28,7 +28,6 @@
 
 
 1. Dag --- Post Block Chain  
-
     As it will be able to solve the above problems, Dag is often regarded as post block chain. Its Users confirm another person's transactions to add theirs there and have someone confirm them.(If they confirm invalid transactions, theirs won't be confirmed)    
 
 

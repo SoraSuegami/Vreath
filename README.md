@@ -20,6 +20,7 @@
 
 
 1. Problems to Familiarize Block Chain  
+
     Block chain has a high potential, but it is not practical and user-friendly. The reasons are   
     * Not scalable  
     * Slow Confirmations  
@@ -27,8 +28,6 @@
   
   
     Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it don't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when posting comments, it require fee of users.  
-
-
     For these reasons, Block chain is not as yet realistic.
 
 

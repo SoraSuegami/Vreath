@@ -1,2 +1,4 @@
 # Phoenix
-Goodby, server down. Hello, Phoenix.
+~Make Your Apps Immortal~
+===
+Overview

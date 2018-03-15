@@ -4,5 +4,5 @@
 
 ## Introduction
 1. The beginning of decentralized world
-
+1. Problems to familiarize Block Chain
  

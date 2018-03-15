@@ -5,6 +5,7 @@
 
 ## Introduction
 1. The Beginning of Decentralized World  
+
   These days, a lot of applications support our living. However, most of them depend on centralized servers and organizations managing   them. This situation causes three problems.
     * Single Point of Failure
     * Large expenses to manage apps

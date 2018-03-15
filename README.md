@@ -28,11 +28,11 @@
   
     Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it don't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when posting comments, it require fee of users.  
 
+
     For these reasons, Block chain is not as yet realistic.
 
 
 1. Dag --- Post Block Chain  
-
 
     As it will be able to solve the above problems, Dag is often regarded as post block chain. Its Users confirm another person's transactions to add theirs there and have someone confirm them.(If they confirm invalid transactions, theirs won't be confirmed)    
 

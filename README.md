@@ -21,8 +21,8 @@
 
 
 ## Technical Points
-1. How to link Block Chain and Dag together 
-  1. Hash Evidence  
+1. How to link Block Chain and Dag together  
+  1. Hash Evidence   
   1. Dynamic Outputs  
   1. Domino Transactions  
 

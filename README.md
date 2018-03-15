@@ -6,16 +6,14 @@
 ## Introduction
 1. The Beginning of Decentralized World  
 These days, a lot of applications support our living. However, most of them depend on centralized servers and organizations managing   them. This situation causes three problems.
-  
-    * Single point of failure
-    * Large expenses to manage apps
-    * Dictatorial of managing organizations
+* Single point of failure
+* Large expenses to manage apps
+* Dictatorial of managing organizations
     
  Block chain solves them. Dapp(application running in block chain) has the following features.
-  
-    * Decentralized
-    * No cost to manage apps
-    * No manager
+* Decentralized
+* No cost to manage apps
+* No manager
 
 1. Problems to Familiarize Block Chain
 

@@ -17,9 +17,6 @@
 
 1. Problems to Familiarize Block Chain  
     Block chain has a high potential, but it is not practical and user-friendly. The reasons are  
-    * Decentralized
-    * No cost to manage apps
-    * No manager
     * Not scalable
     * Slow Confirmations
     * Transaction Fee

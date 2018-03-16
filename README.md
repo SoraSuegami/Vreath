@@ -48,7 +48,7 @@
 
      However, it has some problems such as ***Nothing at Stake.*** Validators (miners in PoS) have few loss when creating invalid blocks. This will confuse our system.
 
-     *Proof of Stake with Dag* --- original new consensus algorithm solves Nothing at Stake. Validators have to sacrifice data in dag which users created to earn confirming reward, so they buy data from users before confirming. They can't use same dag data as sacrifices again.(Even when creating invalid blocks) For these reasons, *they have great loss enough to refrain from creating invalid blocks* and *Proof of Stake with Dag* solves Nothing at Stake.
+     *Proof of Stake with Dag* --- original new consensus algorithm solves Nothing at Stake. Validators have to sacrifice data in dag which users created to earn confirming reward, so they buy data from users before confirming. They can't use same dag data as sacrifices again.(Even when creating invalid blocks) For these reasons, ***they have great loss enough to refrain from creating invalid blocks*** and *Proof of Stake with Dag* solves Nothing at Stake.
 
 ## Advantage --- By using apps, User and Developer make profits
 

@@ -51,7 +51,6 @@
      *Proof of Stake with Dag* --- original new consensus algorithm solves Nothing at Stake. Validators have to sacrifice data in dag which users created to earn confirming reward, so they buy data from users before confirming. They can't use same dag data as sacrifices again.(Even when creating invalid blocks) For these reasons, **they have great loss enough to refrain from creating invalid blocks** and *Proof of Stake with Dag* solves Nothing at Stake.
 
 ## Advantage --- Automatic Income
-
      Phoenix has a lot of advantages such as scalability, speed and security. Among them, the greatest one is automatic income. ***By using apps, user, app and validator make profits.*** It's magic of Proof of Stake with Dag.
 
      For example, validator buys data in dag at 2 coins. They are shared with user and app half-and-half.(Apps have their own addresses and balances. Their developers can make a withdrawal from their addresses by writing codes which remit to developers' addresses) After that, validator earns 3 coins as confirming reward. Looking back a circulation of money, you will find that everyone gain 1 coin. This is just automatic income.

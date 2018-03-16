@@ -36,7 +36,9 @@
  
 ## Solution --- Dag marries Block Chain
 1. Use Block Chain and Dag Properly
-    Our main idea is very simple, using block chain and dag properly.
+
+     Our main idea is very simple, using block chain and dag properly. Block Chain is only used for remittance, issue token and saving data hash. (Raw data is saved by some nodes.) Dag is in charge of the others processing. It means that only what demands consistency uses block chain. (You may think it's similar to the relationship between RDB and NoSQL.)
+
 1. More Secure Consensus Algorithmic with Dag
 
 

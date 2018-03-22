@@ -3,67 +3,16 @@ const net = require('net');
 const CryptoSet = require('./crypto_set.js');
 const BCScript = require('./blockchain.js');
 const Read = require('./read.js');
+const Write = require('./write.js');
 const crypto = require("crypto");
 const difficulty = 10000000000000000000000000000000000000000000000000;
-const password = 'Sora';
 const currency_name = 'nix';
 
-function pull_address(Dag){
- return Dag.meta.address || "";
-}
-function pull_pub_key(Dag){
-  return Dag.meta.pub_key || "";
-}
-function pull_app(Dag){
-  return Dag.meta.app || "";
-}
-function pull_code_id(Dag){
-  return Dag.meta.code_id || "";
-}
-function pull_timestamp(Dag){
-  return Dag.meta.timestamp || "";
-}
-function pull_app_rate(Dag){
-  return Dag.meta.app_rate || 50;
-}
-function pull_inputs(Dag){
-  return Dag.data.inputs || [];
-}
-function pull_outputs(Dag){
-  return Dag.deta.outputs || [];
-}
-function pull_inputs_hash(Dag){
-  return Dag.meta.inputs.inputs_hash || [];
-}
-function pull_outputs_hash(Dag){
-  return Dag.meta.outputs.outputs_hash || [];
-}
-function pull_inputs_size(Dag){
-  return Dag.meta.inputs.inputs_size || [];
-}
-function pull_outputs_size(Dag){
-  return Dag.meta.outputs.outputs_size || [];
-}
-function pull_nonce(Dag){
-  return Dag.meta.nonce || 0;
-}
-function pull_parenthash(Dag){
-  return Dag.meta.parenthash || "";
-}
-function pull_hash(Dag){
-  return Dag.meta.hash || "";
-}
-function pull_signature(Dag){
-  return Dag.meta.signature || "";
-}
-function pull_lastblock(Dag){
-  return Dag.meta.lastblock || 0;
-}
 
 function array_to_obj(array){
   return array.reduce((obj,val)=>{
-    if(val[1][1]!=null){
-      array_to_obj(val[1]);
+    if(val[1] instanceof Object){
+      val[1]=array_to_obj(Object.entries(val[1]));
     }
     obj[val[0]] = val[1];
     return obj
@@ -91,20 +40,29 @@ function calculateHashForDag(Dag) {
   return toHash(JSON.stringify(edited));
 }
 
-function nonce_count(hash) {
-  return (all.match(new RegExp('^0*', "g")) || []).length;
+function nonce_count(hash){
+  const sum =  hash.split("").reduce((result,val)=>{
+    if(val==0&&result[1]==true){
+      result[0] ++;
+      return result;
+    }
+    else{
+      result[1] = false;
+      return result;
+    }
+  },[0,true]);
+  return sum[0];
 }
 
 function GetEdgeDag(DagData){
-  var parents = [];
-  var children = [];
-  var edge = [];
   const filtered = Object.values(DagData).reduce((result,val)=>{
-    result.parents.push(pull_parenthash(val));
-    result.children.push(pull_hash(val));
-  },{});
+    result.parents.push(val.meta.parenthash);
+    result.children.push(val.meta.hash);
+    return result
+  },{parents:[],children:[]});
   const parents = filtered.parents;
   const children = filtered.children;
+  if(parents==null||children==null) return [];
   const edge = children.reduce((result,val)=>{
     const idx = parents.indexOf(val);
     if(parents.indexOf(val)==-1) result.push(val);
@@ -120,7 +78,7 @@ function mining(dag,difficulty){
     nonce ++;
     Dag.meta.nonce = nonce;
     var hashed = calculateHashForDag(Dag);
-  } while (0<nonce_count(hashed)<=Number(difficulty));
+  } while (nonce_count(hashed)<=0||Number(difficulty)<nonce_count(hashed));
   return {
     nonce:nonce,
     hash:hashed
@@ -130,29 +88,32 @@ function mining(dag,difficulty){
 function require_sign(tx,me,pub_key,signature){
   const tx_hash = toHash(JSON.stringify(tx));
   const buf = Buffer.from(JSON.stringify(tx));
-  if(me!=CryptoSet.AddressFromPublic(pub_key)){
-    console.error("inValid pub_key");
-    return false;
-  }
-  else if (CryptoSet.verifyData(tx_hash,signature,pub_key)==false){
-    console.error("inValid signature");
-    return false;
-  }
-  else{
-    return{
+  const Tx = ((tx,me,pub_key,signature)=>{
+    if(me!=CryptoSet.AddressFromPublic(pub_key)){
+      return []
+    }
+    else if (CryptoSet.verifyData(tx_hash,signature,pub_key)==false){
+      return []
+    }
+    else {
+      return tx;
+    }
+  })(tx,me,pub_key,signature);
+  return{
       meta:{
-        app_rate:{
-          app:50,
-          deposit:0
-        }
+        app_rate:[
+          {
+            app:50,
+            deposit:0
+          }
+        ]
       },
       data:[Tx]
-    }
-  }
+  };
 }
 
-function RunCode(func,inputs) {
-  var result = func.apply(this,inputs);
+function RunCode(func,inputs){
+  var result = func.apply(null,inputs);
   return result;
 }
 
@@ -190,59 +151,36 @@ function DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,outpu
 
 function inValidDag(dag,DagData,State,difficulty){
   const date = new Date();
-  const address = pull_address(dag);
-  const pub_key = pull_pub_key(dag);
-  const app = pull_app(dag);
-  const code_id = pull_code_id(dag);
-  const timestamp = pull_timestamp(dag);
-  const app_rate = pull_app_rate(dag);
-  const inputs = pull_inputs(dag);
-  const outputs = pull_outputs(dag);
-  const inputs_hash = pull_inputs_hash(dag);
-  const outputs_hash = pull_outputs_hash(dag);
-  const inputs_size = pull_inputs_size(dag);
-  const outputs_size = pull_outputs_size(dag);
-  const nonce = pull_nonce(dag);
-  const parenthash = pull_parenthash(dag);
-  const hash = pull_hash(dag);
-  const signature = pull_signature(dag);
-  const lastblock = pull_lastblock(dag);
+  const address = dag.meta.address;
+  const pub_key = dag.meta.pub_key;
+  const app = dag.meta.app;
+  const code_id = dag.meta.code_id;
+  const timestamp = dag.meta.timestamp;
+  const app_rate = dag.meta.app_rate;
+  const inputs = dag.data.inputs;
+  const outputs = dag.data.outputs;
+  const inputs_hash = dag.meta.inputs.hash;
+  const outputs_hash = dag.meta.outputs.hash;
+  const inputs_size = dag.meta.inputs.size;;
+  const outputs_size = dag.meta.outputs.size;
+  const nonce = dag.meta.nonce;
+  const parenthash = dag.meta.parenthash;
+  const hash = dag.meta.hash;
+  const signature = dag.meta.signature;
+  const lastblock = dag.meta.lastblock;
 
   const app_rate_check = Object.entries(app_rate).forEach(val=>{
-    if(val[1]<0 || 100<val[1] || val[1]!=outputs.meta.app_rate[val[0]]) return false;
+    if(val[1]<0 || 100<val[1] || val[1]!=outputs.meta.app_rate[val[0]]) return true;
   });
 
-  const inputs_check = inputs.forEach((val,i)=>{
-    const in_buf = Buffer.from(JSON.stringify(val));
-    if(inputs_hash[i]!=toHash(JSON.stringify(val))){
-      console.error("invalid inputs_hash");
-      return false;
+  const code = ((app,require_sign,State)=>{
+    if(app.match(/^PH/)){
+      return require_sign;
     }
-    else if(inputs_size[i]!=in_buf.length){
-      console.error("invalid inputs_size");
-      return false;
+    else{
+      return State[app]['code'][code_id]['data'] || null;
     }
-  });
-
-  const outputs_check = outputs.forEach((val,i)=>{
-    const out_buf = Buffer.from(JSON.stringify(val));
-    if(outputs_hash[i]!=toHash(JSON.stringify(val))){
-      console.error("invalid outputs_hash");
-      return false;
-    }
-    else if(outputs_size[i]!=out_buf.length){
-      console.error("invalid outputs_size");
-      return false;
-    }
-  });
-
-
-  if(app.match(/^PH/)){
-    const code = require_sign.toString();
-  }
-  else{
-    const code = State[app]['code'][code_id]['data'] || null;
-  }
+  })(app,require_sign,State);
 
 
   if(address!=CryptoSet.AddressFromPublic(pub_key)){
@@ -257,11 +195,11 @@ function inValidDag(dag,DagData,State,difficulty){
     console.error("invalid timestamp");
     return false;
   }
-  else if (0<nonce_count(this.hash)<=Number(difficulty)) {
+  else if (nonce_count(hash)<=0||Number(difficulty)<nonce_count(hash)) {
     console.error("invalid nonce");
     return false;
   }
-  else if (DagData[parenthash]==null||parenthash!=pull_hash(DagData[parenthash])) {
+  else if (DagData[parenthash]==null||parenthash!=DagData[parenthash].meta.hash) {
     console.error("invalid parenthash");
     return false;
   }
@@ -273,10 +211,28 @@ function inValidDag(dag,DagData,State,difficulty){
     console.error("invalid signature");
     return false;
   }
-  else if(app_rate_check==false || inputs_check==false || outputs_check==false){
+  else if(app_rate_check){
+    console.error("invalid app_rate");
     return false;
   }
-  else if(outputs!=RunCode(code,inputs)){
+  else if(inputs_hash!=toHash(JSON.stringify(inputs))){
+    console.log(inputs_hash);
+    console.error("invalid inputs_hash");
+    return false;
+  }
+  else if(inputs_size!=Buffer.from(JSON.stringify(inputs)).length){
+    console.error("invalid inputs_size");
+    return false;
+  }
+  else if(outputs_hash!=toHash(JSON.stringify(outputs))){
+    console.error("invalid outputs_hash");
+    return false;
+  }
+  else if(outputs_size!=Buffer.from(JSON.stringify(outputs)).length){
+    console.error("invalid outputs_size");
+    return false;
+  }
+  else if(toHash(JSON.stringify(outputs))!=toHash(JSON.stringify(RunCode(code,inputs)))){
     console.error("invalid outputs");
     return false;
   }
@@ -287,29 +243,32 @@ function inValidDag(dag,DagData,State,difficulty){
 
 function AddDagData(dag,DagData,State,difficulty){
   if(!inValidDag(dag,DagData,State,difficulty)) return false;
-  const hash = pull_hash(dag);
+  const hash = dag.meta.hash;
   if(DagData[hash]!=null){
     console.error("This dag exist");
+    return false;
   }
   const new_DagData = ((dags,hash,dag)=>{
     dags[hash] = dag;
+    return dags
   })(DagData,hash,dag);
   return new_DagData;
 }
 
 
-function CreateDag(password,address,pub_key,app,code_id,inputs,DagData,State,Blocks,difficulty){
+function CreateDag(password,address,pub_key,app,code_id,inputs,DagData,State,Blocks,difficulty,require_sign){
   const date = new Date();
   const timestamp = date.getTime();
-  if(app.match(/^PH/)){
-    const code = "";
-    const app_rate = "";
-  }
-  else{
-    const code = State[app]['code'][code_id]['data'] || "";
-    const app_rate = State[app]['code'][code_id]['rate'] || "";
-  }
+  const code = ((app,State)=>{
+    if(app.match(/^PH/)){
+      return require_sign;
+    }
+    else{
+      return State[app]['code'][code_id]['code_data'] || "";
+    }
+  })(app,State);
   const outputs = RunCode(code,inputs);
+  const app_rate = outputs.meta.app_rate;
   const inputs_hash = toHash(JSON.stringify(inputs));
   const outputs_hash = toHash(JSON.stringify(outputs));
   const in_buf = Buffer.from(JSON.stringify(inputs));
@@ -329,15 +288,15 @@ function CreateDag(password,address,pub_key,app,code_id,inputs,DagData,State,Blo
   return new_DagData;
 }
 
-// this is for test.
-var my_pub = CryptoSet.PullMyPublic(password);
-var my_address = CryptoSet.AddressFromPublic(my_pub);
+/* this is for test.
+const password = 'Sora';
+const my_pub = CryptoSet.PullMyPublic(password);
+const my_address = CryptoSet.AddressFromPublic(my_pub);
 CryptoSet.GenerateKeys("Test");
-var test_pub = CryptoSet.PullMyPublic("Test");
-var test_address = CryptoSet.AddressFromPublic(test_pub);
-// this is for test.
-
-
+const test_pub = CryptoSet.PullMyPublic("Test");
+const test_address = CryptoSet.AddressFromPublic(test_pub);
+console.log(CreateDag(password,my_address,my_pub,my_address,"",["b",my_address,my_pub,CryptoSet.SignData(toHash("a"),password)],Read.DagData(),Read.State(),Read.Chain(),difficulty,require_sign));
+*/
 
 module.exports = {
   CreateDag:CreateDag

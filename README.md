@@ -21,10 +21,10 @@
 
      Block chain has a high potential, but it is **not practical and user-friendly.** The reasons are  
     * Not scalable  
-    * Slow Confirmations  
-    * Transaction Fee  
+    * Slow confirmations  
+    * Transaction fee  
 
-     Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it doesn't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when users post comments, it require fee of them. Like this, Block chain is not as yet realistic.
+     Let's show you the case of Dapp SNS. Even if it has as many users as Facebook, it doesn't have enough throughput to deal with all users. Also, there are big time lags to reach your messages. Besides, when users post comments, it require fee of them. Like this, block chain is not as yet realistic.
 
 1. Dag --- Post Block Chain  
 
@@ -74,8 +74,24 @@
 
 
 ## Vision
+1. Next Nature Project
 
+   After developing Phoenix, we are going to move forward with Next Nature Project. We want to create **another nature in the block chain.**
 
+   This is one of the best way to apply block chain. Because it requires
+  * Zero down time
+  * Not to be censor
+  * Conservation of energy
+
+   We plan to create virtual living things in virtual space. Besides, we render energy onto a token. The living things have the following features.
+  * (Death) if it has no energy token, it stops functioning.
+  * (Breeding) it can make new codes like itself.
+  * (Feeding) it can take energy token from other living things.
+
+   We will provide this as one application in Phoenix. Users can raise their own living things like pets. (In addition, they can sell dag data which their pets made.)
+
+   We expect that intelligent life and civilizations will appear. This is the final goal of our project.
+  
 ## Conclusion
 
 

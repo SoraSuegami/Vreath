@@ -1,7 +1,6 @@
 const fs = require('fs');
 const net = require('net');
 const CryptoSet = require('./crypto_set.js');
-const BCScript = require('./blockchain.js');
 const Read = require('./read.js');
 const Write = require('./write.js');
 const crypto = require("crypto");
@@ -33,11 +32,7 @@ function calculateHashForDag(Dag) {
   const filtered = Object.entries(Dag.meta).filter(val=>{
     return val[0]!="hash" && val[0]!="signature";
   });
-  const edited = ((Dag,filtered)=>{
-    Dag.meta = array_to_obj(filtered);
-    return Dag;
-  })(Dag,filtered);
-  return toHash(JSON.stringify(edited));
+  return toHash(JSON.stringify(array_to_obj(filtered)));
 }
 
 function nonce_count(hash){
@@ -90,10 +85,10 @@ function require_sign(tx,me,pub_key,signature){
   const buf = Buffer.from(JSON.stringify(tx));
   const Tx = ((tx,me,pub_key,signature)=>{
     if(me!=CryptoSet.AddressFromPublic(pub_key)){
-      return []
+      return ""
     }
     else if (CryptoSet.verifyData(tx_hash,signature,pub_key)==false){
-      return []
+      return ""
     }
     else {
       return tx;
@@ -101,6 +96,7 @@ function require_sign(tx,me,pub_key,signature){
   })(tx,me,pub_key,signature);
   return{
       meta:{
+        type:["transaction"],
         app_rate:[
           {
             app:50,
@@ -148,6 +144,29 @@ function DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,outpu
   }
 }
 
+function edit_outputs(outputs){
+  const result = outputs.meta.type.reduce((outputs,val,i)=>{
+    if(val=="transaction"&&outputs.data[i].evidence!=null){
+      outputs.data[i] = array_to_obj(
+        Object.keys(outputs.data[i]).filter(val=>{
+          return val!="evidence";
+        })
+      );
+    }
+    return outputs;
+  },outputs);
+  return result;
+}
+
+
+function evi_added_outputs(outputs,evidence){
+  return outputs.meta.type.reduce((outputs,val,i)=>{
+    if(val=="transaction"){
+      outputs.data[i].evidence = evidence;
+    }
+    return outputs;
+  },outputs);
+}
 
 function inValidDag(dag,DagData,State,difficulty){
   const date = new Date();
@@ -161,7 +180,7 @@ function inValidDag(dag,DagData,State,difficulty){
   const outputs = dag.data.outputs;
   const inputs_hash = dag.meta.inputs.hash;
   const outputs_hash = dag.meta.outputs.hash;
-  const inputs_size = dag.meta.inputs.size;;
+  const inputs_size = dag.meta.inputs.size;
   const outputs_size = dag.meta.outputs.size;
   const nonce = dag.meta.nonce;
   const parenthash = dag.meta.parenthash;
@@ -182,6 +201,7 @@ function inValidDag(dag,DagData,State,difficulty){
     }
   })(app,require_sign,State);
 
+  const edited_outputs = edit_outputs(outputs);
 
   if(address!=CryptoSet.AddressFromPublic(pub_key)){
     console.error("invalid pub_key");
@@ -216,7 +236,6 @@ function inValidDag(dag,DagData,State,difficulty){
     return false;
   }
   else if(inputs_hash!=toHash(JSON.stringify(inputs))){
-    console.log(inputs_hash);
     console.error("invalid inputs_hash");
     return false;
   }
@@ -224,11 +243,11 @@ function inValidDag(dag,DagData,State,difficulty){
     console.error("invalid inputs_size");
     return false;
   }
-  else if(outputs_hash!=toHash(JSON.stringify(outputs))){
+  else if(outputs_hash!=toHash(JSON.stringify(edited_outputs))){
     console.error("invalid outputs_hash");
     return false;
   }
-  else if(outputs_size!=Buffer.from(JSON.stringify(outputs)).length){
+  else if(outputs_size!=Buffer.from(JSON.stringify(edited_outputs)).length){
     console.error("invalid outputs_size");
     return false;
   }
@@ -268,35 +287,37 @@ function CreateDag(password,address,pub_key,app,code_id,inputs,DagData,State,Blo
     }
   })(app,State);
   const outputs = RunCode(code,inputs);
+  const edited_outputs = edit_outputs(outputs);
   const app_rate = outputs.meta.app_rate;
   const inputs_hash = toHash(JSON.stringify(inputs));
-  const outputs_hash = toHash(JSON.stringify(outputs));
+  const outputs_hash = toHash(JSON.stringify(edited_outputs));
   const in_buf = Buffer.from(JSON.stringify(inputs));
   const inputs_size = in_buf.length;
-  const out_buf = Buffer.from(JSON.stringify(outputs));
+  const out_buf = Buffer.from(JSON.stringify(edited_outputs));
   const outputs_size = out_buf.length;
   const edges = GetEdgeDag(DagData);
   const parenthash = edges[Math.floor(Math.random() * edges.length)];
   const lastblock = Blocks.length-1;
-  const temporary = DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,outputs,inputs_hash,outputs_hash,inputs_size,outputs_size,"",parenthash,"","",lastblock);
+  const temporary = DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,edited_outputs,inputs_hash,outputs_hash,inputs_size,outputs_size,"",parenthash,"","",lastblock);
   const mined = mining(temporary);
   const nonce = mined.nonce;
   const hash = mined.hash;
   const signature = CryptoSet.SignData(hash,password);
-  const new_dag = DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,outputs,inputs_hash,outputs_hash,inputs_size,outputs_size,nonce,parenthash,hash,signature,lastblock);
+  const real_outputs = evi_added_outputs(outputs,hash);
+  const new_dag = DagDataJson(address,pub_key,app,code_id,timestamp,app_rate,inputs,real_outputs,inputs_hash,outputs_hash,inputs_size,outputs_size,nonce,parenthash,hash,signature,lastblock);
   const new_DagData = AddDagData(new_dag,DagData,State,difficulty);
   return new_DagData;
 }
 
-/* this is for test.
+/* this is for test.*/
 const password = 'Sora';
 const my_pub = CryptoSet.PullMyPublic(password);
 const my_address = CryptoSet.AddressFromPublic(my_pub);
 CryptoSet.GenerateKeys("Test");
 const test_pub = CryptoSet.PullMyPublic("Test");
 const test_address = CryptoSet.AddressFromPublic(test_pub);
-console.log(CreateDag(password,my_address,my_pub,my_address,"",["b",my_address,my_pub,CryptoSet.SignData(toHash("a"),password)],Read.DagData(),Read.State(),Read.Chain(),difficulty,require_sign));
-*/
+console.dir(CreateDag(password,my_address,my_pub,my_address,"",["b",my_address,my_pub,CryptoSet.SignData(toHash("a"),password)],Read.DagData(),Read.State(),Read.Chain(),difficulty,require_sign));
+
 
 module.exports = {
   CreateDag:CreateDag

@@ -12,22 +12,18 @@ const dag_exchange = CryptoSet.AppAddress('TheDagExchange');
 const dag_rate = 100;
 const tx_rate = 10;
 const lomgrange = 100;
-
 const txlimit = 10;
-const password = "Sora"
-const beneficiaryPub = CryptoSet.PullMyPublic(password);
-const beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
 
 function calculatePureHash(Tx){
-  const array = Object.entries(Tx.meta||{}).filter(function(val){
-    return (val[0]!="pure_hash"&&val[0]!="pre_hash"&&val[0]!="next_hash"&&val[0]!="hash");
+  const array = Object.entries(Tx||{}).filter(function(val){
+    return (val[0]!="pure_hash"&&val[0]!="pre_tx"&&val[0]!="next_tx"&&val[0]!="hash");
   });
   const edit_tx = _.array_to_obj(array);
   return _.toHash(JSON.stringify(edit_tx));
 }
 
 function calculateHashForTx(Tx){
-  const array = Object.entries(Tx.meta||{}).filter(function(val){
+  const array = Object.entries(Tx||{}).filter(function(val){
     return (val[0]!="hash"&&val[0]!="signature");
   });
   const edit_tx = _.array_to_obj(array);
@@ -35,7 +31,7 @@ function calculateHashForTx(Tx){
 }
 
 
-function TxJson(from,to,option,timestamp,fee,nonce,pure_hash,evidence,pre_tx="",next_tx="",hash){
+function TxJson(type,from,to,options,timestamp,fee,nonce,pure_hash,evidence,pre_tx="",next_tx="",hash){
   return{
     type:type,
     from:from,
@@ -52,53 +48,6 @@ function TxJson(from,to,option,timestamp,fee,nonce,pure_hash,evidence,pre_tx="",
   }
 }
 
-function TxList(Txs){
-  return{
-    meta:{
-      num:num,
-      root_hash:root_hash
-    },
-    transactions:Txs
-  }
-}
-
-function pull_tx_type(tx){
-  return tx.type;
-}
-function pull_tx_from(tx){
-  return tx.from;
-}
-function pull_tx_to(tx){
-  return tx.to;
-}
-function pull_tx_timestamp(tx){
-  return tx.timestamp;
-}
-function pull_tx_options(tx){
-  return tx.options;
-}
-function pull_tx_fee(tx){
-  return tx.fee;
-}
-function pull_tx_nonce(tx){
-  return tx.nonce;
-}
-function pull_tx_pure_hash(tx){
-  return tx.pure_hash;
-}
-function pull_tx_evidence(tx){
-  return tx.evidence;
-}
-function pull_tx_pre_tx(tx){
-  return tx.pre_tx;
-}
-function pull_tx_next_tx(tx){
-  return tx.next_tx;
-}
-function pull_tx_hash(tx){
-  return tx.hash;
-}
-
 function Confirmes(dag,DagData){
   const first_confirm = Object.values(DagData).find(function(val){
     return val[0][10]==this[0][11];
@@ -109,46 +58,61 @@ function Confirmes(dag,DagData){
   return second_confirm[0][10];
 }
 
+function good_fee(tx,tx_rate){
+  const filtered = Object.entries(tx||{}).filter(function(val){
+    return (val[0]!="fee"&&val[0]!="nonce"&&val[0]!="pure_hash"&&val[0]!="pre_tx"&&val[0]!="next_tx"&&val[0]!="hash");
+  });
+  return Buffer.from(JSON.stringify(_.array_to_obj(filtered))).length*tx_rate;
+};
 
 function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
   const date = new Date();
-  const from = pull_tx_from(tx);
-  const state = StateSet.State(from,StateData);
-  const dag = DagData[pull_tx_evidence(tx)];
+  const from = tx.from;
+  const state = StateSet.SetState(from,StateData);
+  const dag = DagData[tx.evidence];
+  const evidence_check = dag.data.outputs.data.reduce((res,val)=>{
+    if(res) return res;
+    else if((val==tx&&val.evidence==tx.evidence)||val.evidence==null){
+      res = false;
+      return res;
+    }
+    else return res;
+  },false);
+
   if(_.maybe(tx)){
     console.error("invalid object");
     return false;
   }
-  else if(pull_tx_timestamp(tx)>date.getTime()){
+  else if(tx.timestamp>date.getTime()){
     console.error("invalid timestamp");
     return false;
   }
-  else if(pull_tx_fee(tx)!=Buffer.from(tx).length){
+  else if(tx.fee!=good_fee(tx,tx_rate)){
     console.error("invalid fee");
     return false;
   }
-  else if(pull_tx_nonce(tx)!=state.nonce){
+  else if(tx.nonce!=state.nonce){
     console.error("invalid nonce");
     return false;
   }
-  else if(pull_tx_pure_hash(tx)!=calculatePureHash(tx)){
+  else if(tx.pure_hash!=calculatePureHash(tx)){
     console.error("invalid pure hash");
     return false;
   }
-  else if((dag.meta.app!=from)||(state.used_hash.indexOf(pull_tx_evidence(tx))!=-1)||(Confirmes(dag,DagData)==null)||(dag.data.indexOf(tx)==-1)){
+  else if((dag.meta.app!=from)||(state.used_hash.indexOf(tx.evidence)!=-1)||(Confirmes(dag,DagData)==null)||(dag.data.outputs.data.indexOf(tx)==-1)||(evidence_check)){
     console.error("invalid evidence");
     return false;
   }
-  else if(pull_tx_hash(tx)!=calculateHashForTx(tx)){
+  else if(tx.hash!=calculateHashForTx(tx)){
     console.error("invalid hash");
     return false;
   }
   else if(1){
-    const to = pull_tx_to(tx);
+    const to = tx.to;
     const storage = state.storage;
-    switch (pull_tx_type(tx)) {
+    switch (tx.type) {
       case "remit":
-        const value = pull_tx_options(tx);
+        const value = tx.options;
         Object.entries(value).reduce((state,val)=>{
           if(state.balance[val[0]]==null || state.balance[val[0]]<val[1]){
             console.error("invalid value");
@@ -157,8 +121,8 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         },state);
         break;
       case "register_code":
-        const app = StateSet.State(to,StateData);
-        const code = pull_tx_options(tx);
+        const app = StateSet.SetState(to,StateData);
+        const code = tx.options;
         const code_id = code.code_id;
         const code_buf = Buffer.from(code.data);
         if(to.match(/^PH/)){
@@ -179,7 +143,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         }
         break;
       case "issue_token":
-        const token = pull_tx_options(tx);
+        const token = tx.options;
         const token_name = from + '/' + token.id;
         const token_buf = Buffer.from(token_name);
         if(state.issue_token[token.id]!=null){
@@ -208,7 +172,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         }
        break;
       case "increase_token":
-        const inc = pull_tx_options(tx);
+        const inc = tx.options;
         const inc_token = state.issue_token[inc.token_id];
         if(inc_token==null){
           console.error("This token_id doesn't exist");
@@ -228,7 +192,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         }
         break;
       case "deposit":
-        const deposit = pull_tx_options(tx);
+        const deposit = tx.options;
         Object.entries(deposit).reduce((state,val)=>{
           if(state.balance[val[0]]==null || state.balance[val[0]]<val[1]){
             console.error("invalid deposit");
@@ -237,8 +201,8 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         },state);
         break;
       case "withdrawal":
-        const withdrawal = pull_tx_options(tx);
-        const savings  = StateSet.State(to,StateData);
+        const withdrawal = tx.options;
+        const savings  = StateSet.SetState(to,StateData);
         Object.entries(withdrawal).reduce((save,val)=>{
           if(savings.balance[val[0]]==null || savings.balance[val[0]]<val[1]){
             console.error("invalid withdrawal");
@@ -247,7 +211,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         },savings);
         break;
       case "set_data":
-        const set_data = pull_tx_options(tx);
+        const set_data = tx.options;
         const set_number = Math.ceil(set_data.size/(38*Math.pow(10,6)));
         if(storage[set_data.hash]!=null){
           console.error("This hash is already added");
@@ -263,14 +227,14 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         }
         break;
       case "remove_data":
-        const remove_data = pull_tx_options(tx);
+        const remove_data = tx.options;
         if(storage[remove_data.hash]==null){
           console.error("This hash doesn't exist");
           return false;
         }
         break;
       case "set_savers":
-        const set_savers = pull_tx_options(tx);
+        const set_savers = tx.options;
         if(storage[set_savers.root_hash]==null){
           console.error("This hash doesn't exist");
           return false;
@@ -301,7 +265,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
         }
         break;
       case "reset_savers":
-        const reset_savers = pull_tx_options(tx);
+        const reset_savers = tx.options;
         if(storage[reset_savers.root_hash]==null){
           console.error("This hash doesn't exist");
           return false;
@@ -319,7 +283,7 @@ function inValidTx(tx,StateData,DagData,currency_name,tx_rate){
 }
 
 function GetTreeroot(pre) {
-  if(union.length==1) return pre[0];
+  if(pre.length==1) return pre[0];
   else{
   const union = pre.forEach((val,index,array)=>{
     const i = Number(index);
@@ -338,19 +302,43 @@ function GetTreeroot(pre) {
   }
 }
 
+function TxList(Txs){
+  if(Txs.length==0){
+    return{
+      meta:{
+        num:0,
+        root_hash:toHash("")
+      },
+      transactions:[]
+    }
+  }
+  const num = Txs.length;
+  const hashs = Txs.map(val=>{
+    return val.hash;
+  });
+  const root_hash = GetTreeroot(hashs);
+  return{
+    meta:{
+      num:num,
+      root_hash:root_hash
+    },
+    transactions:Txs
+  }
+}
+
 function inValidTxList(list,StateData,DagData,currency_name,tx_rate){
   const tx_check = list.transactions.forEach(val=>{
     if(!inValidTx(val,StateData,DagData,currency_name,tx_rate)) return true;
   });
   const hashs = list.transactions.map(val=>{
-    return pull_tx_hash(val);
+    return val.hash;
   });
   const pure_hashs = list.transactions.map(val=>{
-    return pull_tx_pure_hash(val);
+    return val.pure_hash;
   });
   const relation_check = list.transactions.forEach((val,index,array)=>{
-    if(pull_tx_pre_tx(val)!=""&&pull_tx_pre_tx(val)!=this[index-1]) return true;
-    else if(pull_tx_next_tx(val)!=""&&pull_tx_next_tx(val)!=this[index+1]) return true;
+    if(val.pre_tx!=""&&val.pre_tx!=this[index-1]) return true;
+    else if(val.next_tx!=""&&val.next_tx!=this[index+1]) return true;
   },pure_hashs);
   if(list.meta.num!=list.transactions.length){
     console.error("invalid transactions number");
@@ -378,7 +366,41 @@ function TxListtoPool(list,StateData,DagData,currency_name,tx_rate,Pool){
   }
 }
 
+function CreateTx(type,from,to,option,tx_rate,evidence,pre_tx="",next_tx="",StateData){
+  const date = new Date();
+  const timestamp = date.getTime();
+  const first = TxJson(type,from,to,option,timestamp,"","","",evidence,"","","");
+  const fee = good_fee(first,tx_rate);
+  const state = StateSet.SetState(from,StateData);
+  const nonce = state.nonce;
+  const second = TxJson(type,from,to,option,timestamp,fee,nonce,"",evidence,"","","");
+  const pure_hash = calculatePureHash(second);
+  const third = TxJson(type,from,to,option,timestamp,fee,nonce,pure_hash,evidence,pre_tx,next_tx,"");
+  const hash = calculateHashForTx(third);
+  const new_tx = TxJson(type,from,to,option,timestamp,fee,nonce,pure_hash,evidence,pre_tx,next_tx,hash);
+  return new_tx;
+}
+
+function CreateTxList(txs,StateData,DagData,currency_name,tx_rate,Pool){
+  const list = TxList(txs);
+  return TxListtoPool(list,StateData,DagData,currency_name,tx_rate,Pool);
+}
+
+/*
+const password = 'Sora';
+const my_pub = CryptoSet.PullMyPublic(password);
+const my_address = CryptoSet.AddressFromPublic(my_pub);
+CryptoSet.GenerateKeys("Test");
+const test_pub = CryptoSet.PullMyPublic("Test");
+const test_address = CryptoSet.AddressFromPublic(test_pub);
+const t = CreateTx("remit",my_address,test_address,{nix:100},tx_rate,"","","",Read.State());
+console.log(t);
+*/
+
+
+
 module.exports = {
   GetTreeroot:GetTreeroot,
-  TxListtoPool:TxListtoPool
+  TxListtoPool:TxListtoPool,
+  CreateTx:CreateTx
 };

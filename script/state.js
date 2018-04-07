@@ -1,5 +1,4 @@
-const Trie = require('merkle-patricia-tree');
-const Proof = require('merkle-patricia-tree/proof');
+//const Proof = require('merkle-patricia-tree/proof');
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -10,44 +9,29 @@ const StateSet = require('./state.js');
 const Read = require('./read.js');
 const Write = require('./write.js');
 
-const levelup = require('levelup');
-const leveldown = require('leveldown');
+//const levelup = require('levelup');
+//const leveldown = require('leveldown');
 const rlp = require('rlp');
-const db = levelup(leveldown('./db/blockchain'));
+//const db = levelup(leveldown('./db/blockchain'));
 
 const currency_name = 'nix';
 const dag_exchange = CryptoSet.AppAddress('TheDagExchange');
 const dag_rate = 100;
 const tx_rate = 10;
 const lomgrange = 100;
-
 const txlimit = 10;
-const password = "Sora"
-const beneficiaryPub = CryptoSet.PullMyPublic(password);
-const beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
-
-function ChangeTrie(StateData,state){
-  const address = Buffer.from(state.address,'utf-8');
-  const en_state = rlp.encode(JSON.stringify(state));
-  return new Promise((resolve, reject)=>{
-    StateData.put(address,en_state,()=>{
-      resolve(StateData);
-    });
-  });
-}
-
 
 function GetState(StateData,address){
   const en_address = Buffer.from(address,'utf-8');
   return new Promise((resolve, reject)=>{
     StateData.get(en_address,(err,val)=>{
-      if(val) resolve(val);
+      if(val) resolve(JSON.parse(rlp.decode(val)));
       else if(err) reject(err);
     });
   });
 }
 
-function StateJson(address,nonce,balance,deposit,mortgage,used_hash,issue_token,storage,code){
+function StateJson(address,nonce,balance,deposit,mortgage,used_hash,issue_token,storage,code,developer){
   return{
     address:address,
     nonce:nonce,
@@ -87,7 +71,7 @@ function remit(tx,StateData){
     return balance;
   },from_to);
   const new_state = Object.values(states).reduce((all_state,val)=>{
-    ChangeTrie(all_state,val).then(result=>{return result;});
+    return Write.State(all_state,val);
   },StateData);
   return new_state;
 }
@@ -105,7 +89,7 @@ function register_code(tx,StateData){
     return app;
   })(app,from);
   const new_state = ((StateData,new_app) => {
-    ChangeTrie(StateData,new_app).then(result=>{return result;});
+    return Write.State(StateData,new_app)
   })(StateData,new_app);
   return new_state;
 }
@@ -129,7 +113,7 @@ function issue_token(tx,StateData,currency_name){
     return app_value_token;
   })(app_value,token);
   const new_state = ((StateData,app_mortgage) =>{
-    ChangeTrie(StateData,app_mortgage).then(result=>{return result;});
+    return Write.State(StateData,app_mortgage);
   })(StateData,app_mortgage);
   return new_state;
 }
@@ -148,7 +132,7 @@ function increase_token(tx,StateData,currency_name){
     return app_mortgage;
   })(app_mortgage,inc);
   const new_state = ((StateData,app_issue) =>{
-    ChangeTrie(StateData,app_issue).then(result=>{return result;});
+    return Write.State(StateData,app_issue);
   })(StateData,app_issue);
   return new_state;
 }
@@ -166,7 +150,7 @@ function deposit(tx,StateData){
     return state.deposit[val[0]] += val[1];
   },app);
   const new_state = [user_state,app_state].reduce((state,val)=>{
-    ChangeTrie(state,val).then(result=>{return result;});
+    return Write.State(state,val);
   },StateData);
   return new_state;
 }
@@ -184,7 +168,7 @@ function withdrawal(tx,StateData){
     return state.deposit[val[0]] -= val[1];
   },app);
   const new_state = [user_state,app_state].reduce((state,val)=>{
-    ChangeTrie(state,val).then(result=>{return result;});
+    return Write.State(state,val);
   },StateData);
   return new_state;
 }
@@ -198,7 +182,7 @@ function set_data(tx,StateData){
     return app;
   })(set_data,app);
   const new_state = ((StateData,new_storage) =>{
-    ChangeTrie(StateData,new_storage).then(result=>{return result;});
+    return Write.State(StateData,new_storage);
   })(StateData,new_storage);
   return new_state;
 }
@@ -213,7 +197,7 @@ function remove_data(tx,StateData){
     return app;
   })(remove_hash,app);
   const new_state = ((StateData,new_storage) =>{
-    ChangeTrie(StateData,new_storage).then(result=>{return result;});
+    return Write.State(StateData,new_storage);
   })(StateData,new_storage);
   return new_state;
 }
@@ -235,7 +219,7 @@ function set_savers(tx,StateData){
     return app;
   })(set_savers,app);
   const new_state = ((StateData,new_savers) =>{
-    ChangeTrie(StateData,new_savers).then(result=>{return result;});
+    return Write.State(StateData,new_savers);
   })(StateData,new_savers);
   return new_state;
 }
@@ -249,7 +233,7 @@ function reset_savers(tx,StateData){
     return app;
   })(remove_savers,app);
   const new_state = ((StateData,new_savers) =>{
-    ChangeTrie(StateData,new_savers).then(result=>{return result;});
+    return Write.State(StateData,new_savers);
   })(StateData,new_savers);
   return new_state;
 }
@@ -277,7 +261,7 @@ function ChangeState(tx,pre_StateData,currency_name){
     }
   })(SetState(tx.from,pre_StateData),tx);
   const StateData = ((pre,new_s)=>{
-    ChangeTrie(pre,new_s).then(result=>{return result;});
+    return Write.State(pre,new_s);
   })(pre_StateData,new_state);
   switch (tx.type) {
     case "remit":
@@ -350,8 +334,26 @@ function sacrifice_dags(block,StateData,dag_exchange){
       s.storage = n;
       return s;
     })(exchange_state,new_storage);
-    ChangeTrie(StateData,new_state).then(result=>{return result});
+    return Write.State(StateData,new_state);
 }
+
+
+const password = 'Sora';
+const my_pub = CryptoSet.PullMyPublic(password);
+const my_address = CryptoSet.AddressFromPublic(my_pub);
+CryptoSet.GenerateKeys("Test");
+const test_pub = CryptoSet.PullMyPublic("Test");
+const test_address = CryptoSet.AddressFromPublic(test_pub);
+
+const first_state = StateJson(my_address,0,{nix:10000000},{},{},{},{},{},{},"");
+
+//console.log(Write.State(Read.State(),first_state));
+Write.State(Read.State(),first_state).then(res=>{
+  console.log(res);
+  console.log(Read.State().root.toString('hex'));
+  GetState(Read.State(),first_state.address).then(s=>{console.log(s);});
+});
+//GetState(Read.State(),first_state.address).then(s=>{console.log(s);});
 
 module.exports = {
   SetState:SetState,

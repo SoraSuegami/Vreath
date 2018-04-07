@@ -12,15 +12,6 @@ function HashFromPass(password){
   return hash;
 }
 
-/*
-var hash = HashFromPass("saa");
-var num=0;
-for(var i=0; i<hash.length-1; i++){
-  num += hash.charCodeAt(i);
-  console.log(num);
-}
-console.log(num%546);
-*/
 
 function GenerateKeys(password){
   let Private
@@ -41,7 +32,6 @@ function GenerateKeys(password){
     public:Public
   }
 }
-
 
 function PullMyPrivate(password){
   var hash = HashFromPass(password);

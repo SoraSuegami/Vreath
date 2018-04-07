@@ -6,20 +6,18 @@ import * as Trie from './merkle_patricia'
 import * as StateSet from './state'
 import * as IpfsSet from './ipfs'
 
-const {map,reduce,filter,forEach} = require('p-iteration');
+const {map,reduce,filter,forEach,some} = require('p-iteration');
 const RadixTree = require('dfinity-radix-tree');
 const levelup = require('levelup');
 const leveldown = require('leveldown');
 const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
+const {NodeVM, VMScript} = require('vm2');
 
 const CryptoSet = require('./crypto_set.js');
 
-//const node = new IPFS();
-/*type PutMeta = {
-  hash:string;
-  size:number;
-}*/
+const node = new IPFS();
+
 export type DataHash = {
   selfhash: string;
   ipfshash: string;
@@ -37,16 +35,6 @@ export type Output = {
   new_token: StateSet.Token[];
   log: any;
 }
-
-/*type Input = {
-  meta: PutMeta;
-  contents: InputCon;
-}
-
-type Output = {
-  meta: PutMeta;
-  contents: OutputCon;
-}*/
 
 type Codetype = 'issue_code' | 'change_code' | 'scrap_code' | 'create_code';
 
@@ -96,7 +84,8 @@ const HashForUnit = (unit:Unit):string=>{
   return _.toHash(unit.meta.nonce+JSON.stringify(unit.contents));
 };
 
-const RunCode = (input:Input,t_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string):Output=>{
+
+const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string,addressroot:string):Output=>{
   //const raw = IpfsSet.node_ready(node,())
   const Dag = new RadixTree({
     db: db,
@@ -108,16 +97,53 @@ const RunCode = (input:Input,t_state:StateSet.Token,type:Codetype,raw:string[],d
     root: worldroot
   });
 
-  const states = {
+  const Address = new RadixTree({
+    db: db,
+    root: addressroot
+  });
+
+  const tokens = new RadixTree({
+    db: db,
+    root: token_state.stateroot
+  });
+
+  /*const states = {
     dag:Dag,
     world:World,
-    t_state:t_state
+    t_state:t_state,
+    tokens:tokens
   }
 
-  const code:StateSet.Code = t_state[type];
-  const result:Output = code(input,raw,states);
+  const library = {
+    crypto:CryptoSet,
+    map:map,
+    reduce:reduce,
+    filter:filter,
+    forEach:forEach,
+    some:some
+  }*/
+
+  const vm = new NodeVM({
+    sandbox:{
+      input:input,
+      token_state:token_state,
+      DagState:Dag,
+      WorldState:World,
+      AddressState:Address,
+      tokens:tokens,
+      RawData:raw
+    },
+    require:{
+      external: true,
+      root:"./library_for_js.js"
+    }
+  });
+  const code = token_state[type];
+  const script = new VMScript("module.exports = (()=>{"+code+"})()");
+  const result:Output = vm.run(script);
   return result;
 };
+
 
 async function input_raws(node,datahashs:DataHash[]){
   await node.on('ready');
@@ -139,7 +165,7 @@ async function output_raws(node,states:StateSet.T_state[]){
   return result;
 }
 
-async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
+async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string,parents_dag_root:string,worldroot:string,addressroot:string){
   const nonce = unit.meta.nonce;
   const hash = unit.meta.hash;
   const signature = unit.meta.signature;
@@ -164,14 +190,32 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
     db: db,
     root: t_state.stateroot
   });
-  const raw_inputs = await input_raws(IpfsSet.node,input.options);
+
   const valid_input_check = await input.options.some((hashs:DataHash,i:number)=>{
     return hashs.selfhash!=_.toHash(this[i]);
-  },raw_inputs);
+  },await input_raws(IpfsSet.node,input.options));
 
   const valid_output_check = await output.states.some((state:StateSet.T_state,i:number)=>{
-    return state.contents.data.selfhash!=_.toHash(this[i]);
+    return state.contents.data.selfhash!=_.toHash(this[i]) || Buffer.from(JSON.stringify(state.contents.tag)).length>1000 || Buffer.from(JSON.stringify(output.log)).length>1000;
   },await output_raws(IpfsSet.node,output.states));
+
+  const parents_dag = new RadixTree({
+    db: db,
+    root: parents_dag_root
+  });
+
+  const others_check = await some(input.others, async (key:string)=>{
+    const unit:Unit = await DagData.get(Trie.en_key(key))
+    const check = await ValidUnit(unit,t_state,dag_root,parents_dag_root,worldroot,addressroot);
+    if(check==true){
+      return false;
+    }
+    else{
+      return true;
+    }
+    /*await NotDoubleConfirmed(key,DagData,parents_dag);
+    return check;*/
+  });
 
   const pre_amount = await reduce(input.token_id, async (sum:number,key:string)=>{
     const geted:StateSet.T_state = await pre_states.get(Trie.en_key(key));
@@ -191,11 +235,11 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
     console.log("invalid hash");
     return false;
   }
-  else if (address!="common"&&CryptoSet.verifyData(hash,signature,pub_key)==false){
+  else if (address!=token&&CryptoSet.verifyData(hash,signature,pub_key)==false){
     console.log("invalid signature");
     return false;
   }
-  else if(address!="common"&&!address.match(/^PH/)){
+  else if(address!=token&&!address.match(/^PH/)){
     console.log("invalid address");
     return false;
   }
@@ -207,7 +251,7 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
     console.log("invalid timestamp");
     return false;
   }
-  else if(address!="common"&&address!=CryptoSet.AddressFromPublic(pub_key)){
+  else if(address!=token&&address!=CryptoSet.AddressFromPublic(pub_key)){
     console.log("invalid pub_key");
     return false;
   }
@@ -222,6 +266,12 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
   else if(await valid_output_check){
     console.log("invalid output");
     return false;
+  }
+  else if(others_check){
+    console.log("invalid quotation units");
+  }
+  else if(t_state[codetype]==""){
+    console.log("invalid codetype");
   }
   else if(codetype=='issue_code'&&input.token_id.length!=0){
     console.log("invalid codetype");
@@ -239,7 +289,7 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
     console.log("invalid codetype");
     return false;
   }
-  else if(_.toHash(JSON.stringify(output))!=_.toHash(JSON.stringify(RunCode(input,t_state,codetype,raw_inputs,db,dag_root,"")))){
+  else if(_.toHash(JSON.stringify(output))!=_.toHash(JSON.stringify(RunCode(input,t_state,codetype,raw_inputs,db,dag_root,worldroot,addressroot)))){
     console.log("invalid result");
     return false;
   }
@@ -248,8 +298,8 @@ async function ValidUnit(unit:Unit,t_state:StateSet.Token,dag_root:string){
   }
 }
 
-async function AddUnittoDag(unit:Unit,t_state:StateSet.Token,dag_root:string){
-  if(!ValidUnit(unit,t_state,dag_root)) return dag_root;
+async function AddUnittoDag(unit:Unit,t_state:StateSet.Token,dag_root:string,parents_dag_root:string,worldroot:string,addressroot:string){
+  if(!ValidUnit(unit,t_state,dag_root,parents_dag_root,worldroot,addressroot)) return dag_root;
   const dag = new RadixTree({
     db: db,
     root: dag_root

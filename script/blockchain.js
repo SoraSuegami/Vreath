@@ -14,7 +14,7 @@ const tx_rate = 10;
 const lomgrange = 100;
 
 const txlimit = 10;
-const password = "Sora"
+const password = "Sora";
 const beneficiaryPub = CryptoSet.PullMyPublic(password);
 const beneficiary = CryptoSet.AddressFromPublic(beneficiaryPub);
 

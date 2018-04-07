@@ -386,16 +386,15 @@ function CreateTxList(txs,StateData,DagData,currency_name,tx_rate,Pool){
   return TxListtoPool(list,StateData,DagData,currency_name,tx_rate,Pool);
 }
 
-/*
+
 const password = 'Sora';
 const my_pub = CryptoSet.PullMyPublic(password);
 const my_address = CryptoSet.AddressFromPublic(my_pub);
 CryptoSet.GenerateKeys("Test");
 const test_pub = CryptoSet.PullMyPublic("Test");
 const test_address = CryptoSet.AddressFromPublic(test_pub);
-const t = CreateTx("remit",my_address,test_address,{nix:100},tx_rate,"","","",Read.State());
-console.log(t);
-*/
+/*const t = CreateTx("remit",my_address,test_address,{nix:100},tx_rate,"","","",Read.State());
+console.log(t);*/
 
 
 

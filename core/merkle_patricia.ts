@@ -41,11 +41,15 @@ export const en_key = (key:string):string[]=>{
   return result;
 };
 
-const en_value = (value:any):string=>{
+const en_value = (value):string=>{
   return rlp.encode(JSON.stringify(value));
 }
 
-export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:string){
+const de_value = (value)=>{
+  return JSON.parse(rlp.decode(value));
+}
+
+/*export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:string){
   const trie = new RadixTree({
     db: db,
     root: world_root
@@ -63,7 +67,7 @@ export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:
     await Trie.delete(en_key(key));
     return Trie;
   },token_trie);
-  const seted = await reduce(outputs.states,async (Trie,state:StateSet.T_state)=>{
+  const seted = await reduce(outputs.states,async (Trie,state:StateSet.State)=>{
     await Trie.set(en_key(state.hash),state);
     return Trie;
   },removed);
@@ -75,7 +79,7 @@ export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:
     root: addressroot
   });
   const address_aliases:ChainSet.AddressAlias[] = await AddressData.get(en_key(unit.contents.address));
-  const address_added =outputs.states.reduce((aliases,state:StateSet.T_state)=>{
+  const address_added =outputs.states.reduce((aliases,state:StateSet.State)=>{
     return aliases.concat({
       kind:token,
       key:state.hash
@@ -89,4 +93,4 @@ export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:
   await AddressData.set(en_key(unit.contents.address),state);
   const new_address_root = await AddressData.flush();
   return {worldroot:new_world_root,addressroot:new_address_root};
-}
+}*/

@@ -21,21 +21,30 @@ const test_pub = CryptoSet.PullMyPublic("Test");
 const test_address = CryptoSet.AddressFromPublic(test_pub);
 // These are for test.
 
-type T_state_con = {
+type StateContent = {
   owner: string;
-  amount: number;
+  token: string;
   tag: {[key:string]: any;};
   data: DagSet.DataHash;
+  product: string;
 };
 
-export type T_state = {
+export type State = {
   hash: string;
-  contents: T_state_con;
+  amount: number;
+  contents: StateContent;
 };
 
 export type Code = (input:DagSet.Input,raw:string[],states:{dag:any;world:any;t_state:Token,tokens:any},library:{crypto:any,map:any,reduce:any,filter:any,forEach:any,some:any})=>DagSet.Output;
 
 export type Token = {
+  token: string;
+  issued: number;
+  codehash:string;
+  developer: string;
+};
+
+/*export type Token = {
   token: string;
   issued: number;
   stateroot: string;
@@ -44,21 +53,21 @@ export type Token = {
   scrap_code: string;
   create_code: string;
   developer: string;
-};
+};*/
 
 function FunctoStr(func):string{
   return func.toString().replace(/^\(\)\s=>\s{/,"").replace(/}$/,"");
 }
 
-async function empty_tree(db){
+/*async function empty_tree(db){
   const key_currency_tree = new RadixTree({
     db: db
   });
   const empty_tree = await key_currency_tree.emptyTreeState();
   const empty_tree_root = await empty_tree.flush();
   return empty_tree_root;
-}
-
+}*/
+/*
 const key_change_code = async ()=>{
   const lib = require('./library_for_js');
   const new_states = (async()=>{
@@ -100,7 +109,7 @@ const key_change_code = async ()=>{
     new_token:[],
     log:""
   };
-}
+};
 
 const create_new_token = async ()=>{
   const lib = require('./library_for_js');
@@ -164,7 +173,7 @@ const PNS_register = async ()=>{
     new_token:[],
     log:""
   };
-}
+};
 
 const PNS_change = async ()=>{
   const lib = require('./library_for_js');
@@ -200,7 +209,7 @@ const PNS_change = async ()=>{
     new_token:[],
     log:""
   };
-}
+};
 
 const buy_dags = async ()=>{
   const lib = require('./library_for_js');
@@ -257,8 +266,8 @@ const buy_dags = async ()=>{
     new_token:[],
     log:""
   };
-}
-
+};*/
+/*
 empty_tree(db).then(root=>{
   const KeyCurrency:Token = {
     token:'nix_0.0.1',
@@ -292,4 +301,4 @@ empty_tree(db).then(root=>{
     create_code:"",
     developer:my_address
   };
-});
+});*/

@@ -46,8 +46,17 @@ export type Tx = {
   data:TxData;
 }
 
+async function get_raws(node,states:StateSet.State[]){
+  await node.on('ready');
+  const result = await map(states,async (state:StateSet.State)=>{
+    const ipfshash:string = state.contents.data.ipfshash;
+    const cated = await node.cat(ipfshash);
+    return cated.toString('utf-8');
+  });
+  return result;
+}
 
-function ValidTx(tx:Tx,dag_root:string,stateroot:string,_state:StateSet.Token){
+async function ValidTx(tx:Tx,dag_root:string,stateroot:string){
   const hash = tx.meta.hash;
   const signature = tx.meta.signature;
   const evidence = tx.meta.evidence;
@@ -64,22 +73,27 @@ function ValidTx(tx:Tx,dag_root:string,stateroot:string,_state:StateSet.Token){
 
   const date = new Date();
 
-  const DagData:RadixTree = new RadixTree({
+  const DagData = new RadixTree({
     db: db,
     root: dag_root
   });
 
-  const StateData:RadixTree = new RadixTree({
+  const StateData = new RadixTree({
     db: db,
     root: stateroot
   });
 
-  const unit:DagSet.Unit = await DagData.get(Trie.en_key(key));
+  const unit:DagSet.Unit = await DagData.get(Trie.en_key(evidence));
 
   const input_state = await reduce(unit.contents.input.token_id,async (array:StateSet.State[],id:string)=>{
     const geted:StateSet.State = await StateData.get(Trie.en_key(id));
     if(geted!=null) return array.concat(geted);
+    else return array;
   },[]);
+
+  const state_check = await output.some((state:StateSet.State,i:number)=>{
+    return state.contents.data.selfhash!=_.toHash(this[i]) || Buffer.from(JSON.stringify(state.contents.tag)).length>1000;
+  },await get_raws(IpfsSet.node,output));
 
   const pre_amount = input_state.reduce((sum:number,state:StateSet.State)=>{
     return sum + state.amount;
@@ -89,7 +103,7 @@ function ValidTx(tx:Tx,dag_root:string,stateroot:string,_state:StateSet.Token){
     return sum + state.amount;
   },0);
 
-  if(hash!=_.toHash(tx.data)){
+  if(hash!=_.toHash(JSON.stringify(tx.data))){
     console.log("invalid hash");
     return false;
   }
@@ -97,11 +111,11 @@ function ValidTx(tx:Tx,dag_root:string,stateroot:string,_state:StateSet.Token){
     console.log("invalid signature");
     return false;
   }
-  else if(unit.contents.output.tx.indexOf(tx.data) == -1){
+  else if(unit.contents.output.tx.indexOf(_.toHash(JSON.stringify(tx.data))) == -1||address!=unit.contents.address){
     console.log("invalid evidence");
     return false;
   }
-  else if(purehash!=_.toHash(tx.data.contents)){
+  else if(purehash!=_.toHash(JSON.stringify(tx.data.contents))){
     console.log("invalid purehash");
     return false;
   }
@@ -117,19 +131,58 @@ function ValidTx(tx:Tx,dag_root:string,stateroot:string,_state:StateSet.Token){
     console.log("invalid timestamp");
     return false;
   }
-  else if(token!=t_state.token){
+  /*else if(token!=t_state.token){
     console.log("invalid token name");
     return false;
-  }
+  }*/
   else if(input.length!=input_state.length){
     console.log("invalid input");
+    return false;
+  }
+  else if(state_check){
+    console.log("invalid output");
+    return false;
+  }
+  else if(type=='issue'&&pre_amount>=new_amount){
+    console.log("invalid type");
     return false;
   }
   else if(type=='change'&&pre_amount!=new_amount){
     console.log("invalid type");
     return false;
   }
+  else if(type=='scrap'&&pre_amount<=new_amount){
+    console.log("invalid type");
+    return false;
+  }
   else{
     return true;
   }
+}
+
+function TxIsuue(tx:Tx,inputs:StateSet.State[]):StateSet.State[]{
+  if(tx.data.contents.type!="issue") return inputs;
+  const outputs = tx.data.contents.output;
+  return outputs;
+}
+
+function TxChange(tx:Tx,inputs:StateSet.State[]):StateSet.State[]{
+  if(tx.data.contents.type!="change") return inputs;
+  return inputs.map((state:StateSet.State,i:number)=>{
+    const output = tx.data.contents.output[i];
+    state.amount += output.amount;
+    state.contents = output.contents;
+    return state;
+  });
+}
+
+function TxScrap(tx:Tx,inputs:StateSet.State[]):StateSet.State[]{
+  if(tx.data.contents.type!="scrap") return inputs;
+  else return [];
+}
+
+function TxCreate(tx:Tx,inputs:StateSet.State[]):StateSet.State[]{
+  if(tx.data.contents.type!="create") return inputs;
+  const outputs = tx.data.contents.output;
+  return outputs;
 }

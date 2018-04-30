@@ -42,7 +42,7 @@ const nonce_count = (hash) => {
     return sum;
 };
 const HashForUnit = (unit) => {
-    return _.toHash(unit.meta.nonce + JSON.stringify(unit.contents));
+    return _.toHash(unit.meta.nonce + unit.meta.parenthash + JSON.stringify(unit.contents));
 };
 const RunCode = (input, token_state, type, raw, db, dag_root, worldroot, addressroot) => {
     //const raw = IpfsSet.node_ready(node,())
@@ -58,10 +58,10 @@ const RunCode = (input, token_state, type, raw, db, dag_root, worldroot, address
         db: db,
         root: addressroot
     });
-    const tokens = new RadixTree({
-        db: db,
-        root: token_state.stateroot
-    });
+    /*const tokens = new RadixTree({
+      db: db,
+      root: token_state.stateroot
+    });*/
     /*const states = {
       dag:Dag,
       world:World,
@@ -84,7 +84,6 @@ const RunCode = (input, token_state, type, raw, db, dag_root, worldroot, address
             DagState: Dag,
             WorldState: World,
             AddressState: Address,
-            tokens: tokens,
             RawData: raw
         },
         require: {
@@ -108,28 +107,18 @@ function input_raws(node, datahashs) {
         return result;
     });
 }
-function output_raws(node, states) {
-    return __awaiter(this, void 0, void 0, function* () {
-        yield node.on('ready');
-        const result = yield map(states, (state) => __awaiter(this, void 0, void 0, function* () {
-            const ipfshash = state.contents.data.ipfshash;
-            const cated = yield node.cat(ipfshash);
-            return cated.toString('utf-8');
-        }));
-        return result;
-    });
-}
-function ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, addressroot) {
+function ValidUnit(unit, dag_root, parents_dag_root, worldroot, addressroot, block, difficulty, key_currency) {
     return __awaiter(this, void 0, void 0, function* () {
         const nonce = unit.meta.nonce;
         const hash = unit.meta.hash;
+        const parenthash = unit.meta.parenthash;
         const signature = unit.meta.signature;
         const address = unit.contents.address;
         const token = unit.contents.token;
         const timestamp = unit.contents.timestamp;
+        const last = unit.contents.last;
+        const fee = unit.contents.fee;
         const pub_key = unit.contents.pub_key;
-        const codetype = unit.contents.codetype;
-        const parenthash = unit.contents.parenthash;
         const input = unit.contents.input;
         const output = unit.contents.output;
         const date = new Date();
@@ -137,42 +126,48 @@ function ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, address
             db: db,
             root: dag_root
         });
+        const count = nonce_count(hash);
         const parent = yield DagData.get(Trie.en_key(parenthash));
-        const pre_states = new RadixTree({
+        const before_dag_data = new RadixTree({
             db: db,
-            root: t_state.stateroot
+            root: block.contents.parenthash
         });
+        const before_address_data = new RadixTree({
+            db: db,
+            root: block.contents.addressroot
+        });
+        const state_hashs = yield before_address_data.get(Trie.en_key(address));
+        const balance = yield reduce(state_hashs, (sum, key) => __awaiter(this, void 0, void 0, function* () {
+            const state = yield before_dag_data.get(Trie.en_key(key));
+            if (state.contents.owner == address && state.contents.token == key_currency) {
+                return sum + state.amount;
+            }
+            else
+                return sum;
+        }), 0);
         const valid_input_check = yield input.options.some((hashs, i) => {
             return hashs.selfhash != _.toHash(this[i]);
         }, yield input_raws(IpfsSet.node, input.options));
-        const valid_output_check = yield output.states.some((state, i) => {
-            return state.contents.data.selfhash != _.toHash(this[i]) || Buffer.from(JSON.stringify(state.contents.tag)).length > 1000 || Buffer.from(JSON.stringify(output.log)).length > 1000;
-        }, yield output_raws(IpfsSet.node, output.states));
+        const valid_log_check = output.log.some((log) => {
+            return Buffer.from(JSON.stringify(log)).length > 10000000;
+        });
         const parents_dag = new RadixTree({
             db: db,
             root: parents_dag_root
         });
-        const others_check = yield some(input.others, (key) => __awaiter(this, void 0, void 0, function* () {
-            const unit = yield DagData.get(Trie.en_key(key));
-            const check = yield ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, addressroot);
-            if (check == true) {
-                return false;
-            }
-            else {
-                return true;
-            }
-            /*await NotDoubleConfirmed(key,DagData,parents_dag);
-            return check;*/
-        }));
-        const pre_amount = yield reduce(input.token_id, (sum, key) => __awaiter(this, void 0, void 0, function* () {
-            const geted = yield pre_states.get(Trie.en_key(key));
-            const new_sum = (yield sum) + geted.contents.amount;
-            return new_sum;
-        }), 0);
-        const new_amount = output.states.reduce((sum, state) => {
-            return sum + state.contents.amount;
-        }, 0);
-        if (nonce_count(hash) <= 0) {
+        /*const others_check = await some(input.others, async (key:string)=>{
+          const unit:Unit = await DagData.get(Trie.en_key(key))
+          const check = await ValidUnit(unit,t_state,dag_root,parents_dag_root,worldroot,addressroot);
+          if(check==true){
+            return false;
+          }
+          else{
+            return true;
+          }
+          /*await NotDoubleConfirmed(key,DagData,parents_dag);
+          return check;*/
+        /*});*/
+        if (count <= 0 || count > difficulty) {
             console.log("invalid nonce");
             return false;
         }
@@ -184,12 +179,12 @@ function ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, address
             console.log("invalid signature");
             return false;
         }
-        else if (address != token && !address.match(/^PH/)) {
-            console.log("invalid address");
+        else if (parenthash != parent.meta.hash) {
+            console.log("invalid parenthash");
             return false;
         }
-        else if (token != t_state.token) {
-            console.log("invalid token name");
+        else if (address != token && !address.match(/^PH/)) {
+            console.log("invalid address");
             return false;
         }
         else if (timestamp > date.getTime()) {
@@ -200,52 +195,37 @@ function ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, address
             console.log("invalid pub_key");
             return false;
         }
-        else if (parenthash != parent.meta.hash) {
-            console.log("invalid parenthash");
+        else if (last.index != block.contents.index || last.hash != block.meta.hash) {
+            console.log("invalid last");
+            return false;
+        }
+        else if (fee < 0 || fee > balance) {
+            console.log("invalid fee");
             return false;
         }
         else if (yield valid_input_check) {
             console.log("invalid input");
             return false;
         }
-        else if (yield valid_output_check) {
-            console.log("invalid output");
+        else if (valid_log_check) {
+            console.log("Too big log");
             return false;
         }
-        else if (others_check) {
-            console.log("invalid quotation units");
-        }
-        else if (t_state[codetype] == "") {
-            console.log("invalid codetype");
-        }
-        else if (codetype == 'issue_code' && input.token_id.length != 0) {
-            console.log("invalid codetype");
-            return false;
-        }
-        else if (codetype == 'change_code' && pre_amount != new_amount) {
-            console.log("invalid codetype");
-            return false;
-        }
-        else if (codetype == 'scrap_code' && output.states.length != 0) {
-            console.log("invalid codetype");
-            return false;
-        }
-        else if (codetype == 'create_code' && output.new_token.length == 0) {
-            console.log("invalid codetype");
-            return false;
-        }
-        else if (_.toHash(JSON.stringify(output)) != _.toHash(JSON.stringify(RunCode(input, t_state, codetype, raw_inputs, db, dag_root, worldroot, addressroot)))) {
-            console.log("invalid result");
-            return false;
-        }
+        /*else if(others_check){
+          console.log("invalid quotation units");
+        }*/
+        /*else if(_.toHash(JSON.stringify(output))!=_.toHash(JSON.stringify(RunCode(input,t_state,codetype,raw_inputs,db,dag_root,worldroot,addressroot)))){
+          console.log("invalid result");
+          return false;
+        }*/
         else {
             return true;
         }
     });
 }
-function AddUnittoDag(unit, t_state, dag_root, parents_dag_root, worldroot, addressroot) {
+function AddUnittoDag(unit, dag_root, parents_dag_root, worldroot, addressroot, block, difficulty, key_currency) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (!ValidUnit(unit, t_state, dag_root, parents_dag_root, worldroot, addressroot))
+        if (!ValidUnit(unit, dag_root, parents_dag_root, worldroot, addressroot, block, difficulty, key_currency))
             return dag_root;
         const dag = new RadixTree({
             db: db,
@@ -256,7 +236,7 @@ function AddUnittoDag(unit, t_state, dag_root, parents_dag_root, worldroot, addr
         return new_world_root;
     });
 }
-function CreateUnit(password, address, token, pub_key, codetype, input, output_con) {
+function CreateUnit(password, address, token, pub_key, codetype, input) {
     return __awaiter(this, void 0, void 0, function* () {
     });
 }

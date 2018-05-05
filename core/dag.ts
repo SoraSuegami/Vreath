@@ -15,10 +15,13 @@ const leveldown = require('leveldown');
 const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
 const {NodeVM, VMScript} = require('vm2');
+const rlp = require('rlp');
 
 const CryptoSet = require('./crypto_set.js');
 
-const node = new IPFS();
+//const node = new IPFS();
+
+const log_limit = 10000000;
 /*
 export type DataHash = {
   selfhash: string;
@@ -93,11 +96,10 @@ type RawData = {
 type UnitMeta = {
   nonce: string;
   hash: string;
-  parenthash: string;
   signature: string;
 }
 
-type UnitContents = {
+/*type UnitContents = {
   address: string;
   token: string;
   timestamp: number;
@@ -106,11 +108,19 @@ type UnitContents = {
   pub_key: string;
   input: Input;
   output: Output;
+}*/
+
+type UnitContents = {
+  data:TxSet.RefreshContents;
+  parenthash: string;
+  difficulty:number;
+  log_hash:string;
 }
 
 export type Unit = {
   meta: UnitMeta;
   contents: UnitContents;
+  log_raw:any[];
 }
 
 const nonce_count = (hash:string)=>{
@@ -129,11 +139,115 @@ const nonce_count = (hash:string)=>{
 }
 
 const HashForUnit = (unit:Unit):string=>{
-  return _.toHash(unit.meta.nonce+unit.meta.parenthash+JSON.stringify(unit.contents));
+  return _.toHash(unit.meta.nonce+JSON.stringify(unit.contents));
 };
 
+async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[]){
+  const nonce = unit.meta.nonce;
+  const hash = unit.meta.hash;
+  const signature = unit.meta.signature;
+  const tx_data = unit.contents.data;
+  const address = tx_data.address;
+  const pub_key = tx_data.pub_key;
+  const timestamp = tx_data.timestamp;
+  const parenthash = unit.contents.parenthash;
+  const difficulty = unit.contents.difficulty;
+  const log_hash = unit.contents.log_hash;
+  const log_raw = unit.log_raw;
 
-const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string,addressroot:string):Output=>{
+  const date = new Date();
+
+  const count = nonce_count(hash);
+
+  const request_tx:TxSet.RequestTx = chain[tx_data.index].transactions.reduce((result:TxSet.RequestTx[],tx:TxSet.Tx)=>{
+    if(tx.kind=="request"&&tx.meta.hash==tx_data.request) return result.concat(tx);
+  },[])[0];
+
+  const token = request_tx.contents.data.token;
+
+  const DagData = new RadixTree({
+    db: db,
+    root: dag_root
+  });
+
+  const parent:Unit = JSON.parse(rlp.decode(await DagData.get(Trie.en_key(parenthash))));
+
+  const log_size = log_raw.reduce((sum:number,log:any)=>{
+    return sum + Buffer.from(JSON.stringify(log)).length;
+  },0);
+
+  if(count<=0||count>difficulty){
+    console.log("invalid nonce");
+    return false;
+  }
+  else if(hash!=HashForUnit(unit)){
+    console.log("invalid hash");
+    return false;
+  }
+  else if (address!=token&&CryptoSet.verifyData(hash,signature,pub_key)==false){
+    console.log("invalid signature");
+    return false;
+  }
+  else if(address!=token&&!address.match(/^PH/)){
+    console.log("invalid address");
+    return false;
+  }
+  else if(address!=token&&address!=CryptoSet.AddressFromPublic(pub_key)){
+    console.log("invalid pub_key");
+    return false;
+  }
+  else if(timestamp>date.getTime()){
+    console.log("invalid timestamp");
+    return false;
+  }
+  else if (parenthash!=parent.meta.hash){
+    console.log("invalid parenthash");
+    return false;
+  }
+  else if(log_hash!=_.toHash(JSON.stringify(log_raw))){
+    console.log("invalid log_hash");
+    return false;
+  }
+  else if(log_size>log_limit){
+    console.log("This Log is too big");
+    return false;
+  }
+  else{
+    return true;
+  }
+}
+
+async function Unit_to_Dag(unit:Unit,dag_root:string){
+  const DagData = new RadixTree({
+    db: db,
+    root: dag_root
+  });
+  await DagData.set(Trie.en_key(unit.meta.hash),rlp.decode(JSON.stringify(unit)));
+  const new_root = await DagData.flush();
+  return new_root;
+}
+
+async function Unit_to_Memory(unit:Unit,memory_root:string){
+  const Memory = new RadixTree({
+    db: db,
+    root: memory_root
+  });
+  const target:string[] = JSON.parse(rlp.decode(await Memory.get(Trie.en_key(unit.contents.data.request)))) || [];
+  await Memory.set(Trie.en_key(unit.contents.data.request),rlp.decode(JSON.stringify(target.concat(unit.meta.hash))));
+  const new_root = await Memory.flush();
+  return new_root;
+}
+
+async function AcceptUnit(unit:Unit,dag_root:string,memory_root:string,log_limit:number,chain:ChainSet.Block[]){
+  if(!await ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[])) return {dag:dag_root,memory:memory_root};
+  const new_dag_root = await Unit_to_Dag(unit,dag_root);
+  const new_memory_root = await Unit_to_Memory(unit,memory_root);
+  return {
+    dag:new_dag_root,
+    memory:new_memory_root
+  }
+}
+/*const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string,addressroot:string):Output=>{
   //const raw = IpfsSet.node_ready(node,())
   const Dag = new RadixTree({
     db: db,
@@ -170,7 +284,7 @@ const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string
     forEach:forEach,
     some:some
   }*/
-
+  /*
   const vm = new NodeVM({
     sandbox:{
       input:input,
@@ -189,10 +303,10 @@ const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string
   const script = new VMScript("module.exports = (()=>{"+code+"})()");
   const result:Output = vm.run(script);
   return result;
-};
+};*/
 
 
-async function input_raws(node,datahashs:DataHash[]){
+/*async function input_raws(node,datahashs:DataHash[]){
   await node.on('ready');
   const result = await map(datahashs,async (hashs:DataHash)=>{
     const ipfshash:string = hashs.ipfshash;
@@ -200,9 +314,9 @@ async function input_raws(node,datahashs:DataHash[]){
     return cated.toString('utf-8');
   });
   return result;
-}
+}*/
 
-
+/*
 async function ValidUnit(unit:Unit,dag_root:string,parents_dag_root:string,worldroot:string,addressroot:string,block:ChainSet.Block,difficulty:number,key_currency:string){
   const nonce = unit.meta.nonce;
   const hash = unit.meta.hash;
@@ -274,7 +388,7 @@ async function ValidUnit(unit:Unit,dag_root:string,parents_dag_root:string,world
   /*});*/
 
 
-  if(count<=0||count>difficulty){
+  /*if(count<=0||count>difficulty){
     console.log("invalid nonce");
     return false;
   }
@@ -317,7 +431,7 @@ async function ValidUnit(unit:Unit,dag_root:string,parents_dag_root:string,world
   else if(valid_log_check){
     console.log("Too big log");
     return false;
-  }
+  }*/
   /*else if(others_check){
     console.log("invalid quotation units");
   }*/
@@ -325,11 +439,11 @@ async function ValidUnit(unit:Unit,dag_root:string,parents_dag_root:string,world
     console.log("invalid result");
     return false;
   }*/
-  else{
+  /*else{
     return true;
   }
-}
-
+}*/
+/*
 async function AddUnittoDag(unit:Unit,dag_root:string,parents_dag_root:string,worldroot:string,addressroot:string,block:ChainSet.Block,difficulty:number,key_currency:string){
   if(!ValidUnit(unit,dag_root,parents_dag_root,worldroot,addressroot,block,difficulty,key_currency)) return dag_root;
   const dag = new RadixTree({
@@ -344,3 +458,4 @@ async function AddUnittoDag(unit:Unit,dag_root:string,parents_dag_root:string,wo
 async function CreateUnit(password:string,address:string,token:string,pub_key:string,codetype:Codetype,input:Input){
 
 }
+*/

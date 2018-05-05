@@ -261,11 +261,14 @@ export async function ValidRefreshTx(tx:RefreshTx,dag_root:string,chain:ChainSet
   },[]);
 
   const new_request_state = ((tx:RequestTx,bases:StateSet.State[]):StateSet.State[]=>{
+    const type = tx.contents.data.type;
     if(type=="issue") return TxIsuue(tx,bases);
     else if(type=="change") return TxChange(tx,bases);
     else if(type=="scrap") return TxScrap(tx,bases);
     else return bases;
-  })(tx,base_state);
+  })(request_tx,base_state);
+
+  const fee = request_tx.contents.data.fee;
 
   const state_check = new_request_state.some((state:StateSet.State)=>{
     if(state.hash==solvency_state.hash){
@@ -427,10 +430,10 @@ async function RefreshRequestRoot(request:RequestTx,refresh:RefreshTx,index:numb
   const new_root = await StateData.flush();
   return new_root;
 }*/
-async function Fee_to_Verifier(solvency:StateSet.State,payee:StateSet.State,key_currency:string){
+async function Fee_to_Verifier(solvency:StateSet.State,payee:StateSet.State,fee:number,key_currency:string){
   if(solvency.contents.token!=key_currency||payee.contents.token!=key_currency) return [solvency,payee];
-  solvency.amount -= request.contents.data.fee;
-  payee.amount += request.contents.data.fee;
+  solvency.amount -= fee;
+  payee.amount += fee;
   return [solvency,payee];
 }
 
@@ -465,8 +468,7 @@ async function Fee_to_Validator(pay_state:StateSet.State,validator_state:StateSe
   return new_root;
 }*/
 
-export async function AcceptRequestTx(tx:RequestTx,chain:ChainSet.Block[],validator:string,request_root:string,key_currency:string){
-  const stateroot = chain[chain.length-1].contents.stateroot;
+export async function AcceptRequestTx(tx:RequestTx,chain:ChainSet.Block[],validator:string,stateroot:string,request_root:string,key_currency:string){
   const StateData = new RadixTree({
     db: db,
     root: stateroot
@@ -476,18 +478,17 @@ export async function AcceptRequestTx(tx:RequestTx,chain:ChainSet.Block[],valida
     return state;
   });
   const validator_fee_payed = await Fee_to_Validator(for_fee_state[0],for_fee_state[1],Buffer.from(JSON.stringify(tx)).length,key_currency);
-  await StateData.set(Trie.en_key(_.toHash(validator_fee_payed[0].contents)),rlp.encode(JSON.stringify(validator_fee_payed[0])));
-  await StateData.set(Trie.en_key(_.toHash(validator_fee_payed[1].contents)),rlp.encode(JSON.stringify(validator_fee_payed[1])));
+  await StateData.set(Trie.en_key(_.toHash(JSON.stringify(validator_fee_payed[0].contents))),rlp.encode(JSON.stringify(validator_fee_payed[0])));
+  await StateData.set(Trie.en_key(_.toHash(JSON.stringify(validator_fee_payed[1].contents))),rlp.encode(JSON.stringify(validator_fee_payed[1])));
   const new_stateroot = await StateData.flush();
   return [new_stateroot,request_root];
 }
 
-export async function AcceptRefreshTx(tx:RefreshTx,chain:ChainSet.Block[],validator:string,index:number,request_root:string,key_currency:string){
+export async function AcceptRefreshTx(tx:RefreshTx,chain:ChainSet.Block[],validator:string,index:number,stateroot:string,request_root:string,key_currency:string){
   const request_tx:RequestTx = chain[index].transactions.reduce((result:RequestTx[],t:Tx)=>{
     if(t.kind=="request"&&t.meta.hash==tx.contents.request) return result.concat(t);
   },[])[0];
   const new_request_root = await RefreshRequestRoot(request_tx,tx,index,request_root);
-  const stateroot = chain[chain.length-1].contents.stateroot;
   const StateData = new RadixTree({
     db: db,
     root: stateroot
@@ -509,11 +510,11 @@ export async function AcceptRefreshTx(tx:RefreshTx,chain:ChainSet.Block[],valida
     const state = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(key))));
     return state;
   });
-  const verifier_fee_payed = await Fee_to_Verifier(for_fee_state[0],for_fee_state[1],key_currency);
+  const verifier_fee_payed = await Fee_to_Verifier(for_fee_state[0],for_fee_state[1],request_tx.contents.data.fee,key_currency);
   const validator_fee_payed = await Fee_to_Validator(verifier_fee_payed[1],for_fee_state[2],Buffer.from(JSON.stringify(tx)).length,key_currency);
-  await StateData.set(Trie.en_key(_.toHash(verifier_fee_payed[0].contents)),rlp.encode(JSON.stringify(verifier_fee_payed[0])));
-  await StateData.set(Trie.en_key(_.toHash(validator_fee_payed[0].contents)),rlp.encode(JSON.stringify(validator_fee_payed[0])));
-  await StateData.set(Trie.en_key(_.toHash(validator_fee_payed[1].contents)),rlp.encode(JSON.stringify(validator_fee_payed[1])));
+  await StateData.set(Trie.en_key(_.toHash(JSON.stringify(verifier_fee_payed[0].contents))),rlp.encode(JSON.stringify(verifier_fee_payed[0])));
+  await StateData.set(Trie.en_key(_.toHash(JSON.stringify(validator_fee_payed[0].contents))),rlp.encode(JSON.stringify(validator_fee_payed[0])));
+  await StateData.set(Trie.en_key(_.toHash(JSON.stringify(validator_fee_payed[1].contents))),rlp.encode(JSON.stringify(validator_fee_payed[1])));
   const new_stateroot = await StateData.flush();
   return [new_stateroot,new_request_root];
 }

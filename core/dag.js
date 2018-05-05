@@ -7,31 +7,50 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g;
+    return g = { next: verb(0), "throw": verb(1), "return": verb(2) }, typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (_) try {
+            if (f = 1, y && (t = y[op[0] & 2 ? "return" : op[0] ? "throw" : "next"]) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [0, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-const _ = __importStar(require("./basic"));
-const Trie = __importStar(require("./merkle_patricia"));
-const ChainSet = __importStar(require("./chain"));
-const { map, reduce, filter, forEach, some } = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
-const { NodeVM, VMScript } = require('vm2');
-const rlp = require('rlp');
-const CryptoSet = require('./crypto_set.js');
+exports.__esModule = true;
+var _ = require("./basic");
+var Trie = require("./merkle_patricia");
+var _a = require('p-iteration'), map = _a.map, reduce = _a.reduce, filter = _a.filter, forEach = _a.forEach, some = _a.some;
+var RadixTree = require('dfinity-radix-tree');
+var levelup = require('levelup');
+var leveldown = require('leveldown');
+var db = levelup(leveldown('./db/state'));
+var IPFS = require('ipfs');
+var _b = require('vm2'), NodeVM = _b.NodeVM, VMScript = _b.VMScript;
+var rlp = require('rlp');
+var CryptoSet = require('./crypto_set.js');
 //const node = new IPFS();
-const log_limit = 10000000;
-const nonce_count = (hash) => {
-    let check = true;
-    const sum = hash.split("").reduce((result, val) => {
+var log_limit = 10000000;
+var nonce_count = function (hash) {
+    var check = true;
+    var sum = hash.split("").reduce(function (result, val) {
         if (val == String(0) && check == true) {
             result++;
             return result;
@@ -43,111 +62,157 @@ const nonce_count = (hash) => {
     }, 0);
     return sum;
 };
-const HashForUnit = (unit) => {
+var HashForUnit = function (unit) {
     return _.toHash(unit.meta.nonce + JSON.stringify(unit.contents));
 };
 function ValidUnit(unit, dag_root, log_limit, chain) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const nonce = unit.meta.nonce;
-        const hash = unit.meta.hash;
-        const signature = unit.meta.signature;
-        const tx_data = unit.contents.data;
-        const address = tx_data.address;
-        const pub_key = tx_data.pub_key;
-        const timestamp = tx_data.timestamp;
-        const parenthash = unit.contents.parenthash;
-        const difficulty = unit.contents.difficulty;
-        const log_hash = unit.contents.log_hash;
-        const log_raw = unit.log_raw;
-        const date = new Date();
-        const count = nonce_count(hash);
-        const request_tx = chain[tx_data.index].transactions.reduce((result, tx) => {
-            if (tx.kind == "request" && tx.meta.hash == tx_data.request)
-                return result.concat(tx);
-        }, [])[0];
-        const token = request_tx.contents.data.token;
-        const DagData = new RadixTree({
-            db: db,
-            root: dag_root
+    return __awaiter(this, void 0, void 0, function () {
+        var nonce, hash, signature, tx_data, address, pub_key, timestamp, parenthash, difficulty, log_hash, log_raw, date, count, request_tx, token, DagData, parent, _a, _b, _c, _d, log_size;
+        return __generator(this, function (_e) {
+            switch (_e.label) {
+                case 0:
+                    nonce = unit.meta.nonce;
+                    hash = unit.meta.hash;
+                    signature = unit.meta.signature;
+                    tx_data = unit.contents.data;
+                    address = tx_data.address;
+                    pub_key = tx_data.pub_key;
+                    timestamp = tx_data.timestamp;
+                    parenthash = unit.contents.parenthash;
+                    difficulty = unit.contents.difficulty;
+                    log_hash = unit.contents.log_hash;
+                    log_raw = unit.log_raw;
+                    date = new Date();
+                    count = nonce_count(hash);
+                    request_tx = chain[tx_data.index].transactions.reduce(function (result, tx) {
+                        if (tx.kind == "request" && tx.meta.hash == tx_data.request)
+                            return result.concat(tx);
+                    }, [])[0];
+                    token = request_tx.contents.data.token;
+                    DagData = new RadixTree({
+                        db: db,
+                        root: dag_root
+                    });
+                    _b = (_a = JSON).parse;
+                    _d = (_c = rlp).decode;
+                    return [4 /*yield*/, DagData.get(Trie.en_key(parenthash))];
+                case 1:
+                    parent = _b.apply(_a, [_d.apply(_c, [_e.sent()])]);
+                    log_size = log_raw.reduce(function (sum, log) {
+                        return sum + Buffer.from(JSON.stringify(log)).length;
+                    }, 0);
+                    if (count <= 0 || count > difficulty) {
+                        console.log("invalid nonce");
+                        return [2 /*return*/, false];
+                    }
+                    else if (hash != HashForUnit(unit)) {
+                        console.log("invalid hash");
+                        return [2 /*return*/, false];
+                    }
+                    else if (address != token && CryptoSet.verifyData(hash, signature, pub_key) == false) {
+                        console.log("invalid signature");
+                        return [2 /*return*/, false];
+                    }
+                    else if (address != token && !address.match(/^PH/)) {
+                        console.log("invalid address");
+                        return [2 /*return*/, false];
+                    }
+                    else if (address != token && address != CryptoSet.AddressFromPublic(pub_key)) {
+                        console.log("invalid pub_key");
+                        return [2 /*return*/, false];
+                    }
+                    else if (timestamp > date.getTime()) {
+                        console.log("invalid timestamp");
+                        return [2 /*return*/, false];
+                    }
+                    else if (parenthash != parent.meta.hash) {
+                        console.log("invalid parenthash");
+                        return [2 /*return*/, false];
+                    }
+                    else if (log_hash != _.toHash(JSON.stringify(log_raw))) {
+                        console.log("invalid log_hash");
+                        return [2 /*return*/, false];
+                    }
+                    else if (log_size > log_limit) {
+                        console.log("This Log is too big");
+                        return [2 /*return*/, false];
+                    }
+                    else {
+                        return [2 /*return*/, true];
+                    }
+                    return [2 /*return*/];
+            }
         });
-        const parent = JSON.parse(rlp.decode(yield DagData.get(Trie.en_key(parenthash))));
-        const log_size = log_raw.reduce((sum, log) => {
-            return sum + Buffer.from(JSON.stringify(log)).length;
-        }, 0);
-        if (count <= 0 || count > difficulty) {
-            console.log("invalid nonce");
-            return false;
-        }
-        else if (hash != HashForUnit(unit)) {
-            console.log("invalid hash");
-            return false;
-        }
-        else if (address != token && CryptoSet.verifyData(hash, signature, pub_key) == false) {
-            console.log("invalid signature");
-            return false;
-        }
-        else if (address != token && !address.match(/^PH/)) {
-            console.log("invalid address");
-            return false;
-        }
-        else if (address != token && address != CryptoSet.AddressFromPublic(pub_key)) {
-            console.log("invalid pub_key");
-            return false;
-        }
-        else if (timestamp > date.getTime()) {
-            console.log("invalid timestamp");
-            return false;
-        }
-        else if (parenthash != parent.meta.hash) {
-            console.log("invalid parenthash");
-            return false;
-        }
-        else if (log_hash != _.toHash(JSON.stringify(log_raw))) {
-            console.log("invalid log_hash");
-            return false;
-        }
-        else if (log_size > log_limit) {
-            console.log("This Log is too big");
-            return false;
-        }
-        else {
-            return true;
-        }
     });
 }
 function Unit_to_Dag(unit, dag_root) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const DagData = new RadixTree({
-            db: db,
-            root: dag_root
+    return __awaiter(this, void 0, void 0, function () {
+        var DagData, new_root;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    DagData = new RadixTree({
+                        db: db,
+                        root: dag_root
+                    });
+                    return [4 /*yield*/, DagData.set(Trie.en_key(unit.meta.hash), rlp.decode(JSON.stringify(unit)))];
+                case 1:
+                    _a.sent();
+                    return [4 /*yield*/, DagData.flush()];
+                case 2:
+                    new_root = _a.sent();
+                    return [2 /*return*/, new_root];
+            }
         });
-        yield DagData.set(Trie.en_key(unit.meta.hash), rlp.decode(JSON.stringify(unit)));
-        const new_root = yield DagData.flush();
-        return new_root;
     });
 }
 function Unit_to_Memory(unit, memory_root) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const Memory = new RadixTree({
-            db: db,
-            root: memory_root
+    return __awaiter(this, void 0, void 0, function () {
+        var Memory, target, _a, _b, _c, _d, new_root;
+        return __generator(this, function (_e) {
+            switch (_e.label) {
+                case 0:
+                    Memory = new RadixTree({
+                        db: db,
+                        root: memory_root
+                    });
+                    _b = (_a = JSON).parse;
+                    _d = (_c = rlp).decode;
+                    return [4 /*yield*/, Memory.get(Trie.en_key(unit.contents.data.request))];
+                case 1:
+                    target = _b.apply(_a, [_d.apply(_c, [_e.sent()])]) || [];
+                    return [4 /*yield*/, Memory.set(Trie.en_key(unit.contents.data.request), rlp.decode(JSON.stringify(target.concat(unit.meta.hash))))];
+                case 2:
+                    _e.sent();
+                    return [4 /*yield*/, Memory.flush()];
+                case 3:
+                    new_root = _e.sent();
+                    return [2 /*return*/, new_root];
+            }
         });
-        const target = JSON.parse(rlp.decode(yield Memory.get(Trie.en_key(unit.contents.data.request)))) || [];
-        yield Memory.set(Trie.en_key(unit.contents.data.request), rlp.decode(JSON.stringify(target.concat(unit.meta.hash))));
-        const new_root = yield Memory.flush();
-        return new_root;
     });
 }
 function AcceptUnit(unit, dag_root, memory_root, log_limit, chain) {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (!(yield ValidUnit(unit, Unit, dag_root, string, log_limit, number, chain, ChainSet.Block[])))
-            return { dag: dag_root, memory: memory_root };
-        const new_dag_root = yield Unit_to_Dag(unit, dag_root);
-        const new_memory_root = yield Unit_to_Memory(unit, memory_root);
-        return {
-            dag: new_dag_root,
-            memory: new_memory_root
-        };
+    return __awaiter(this, void 0, void 0, function () {
+        var new_dag_root, new_memory_root;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, ValidUnit(unit, dag_root, log_limit, chain)];
+                case 1:
+                    if (!(_a.sent()))
+                        return [2 /*return*/, { dag: dag_root, memory: memory_root }];
+                    return [4 /*yield*/, Unit_to_Dag(unit, dag_root)];
+                case 2:
+                    new_dag_root = _a.sent();
+                    return [4 /*yield*/, Unit_to_Memory(unit, memory_root)];
+                case 3:
+                    new_memory_root = _a.sent();
+                    return [2 /*return*/, {
+                            dag: new_dag_root,
+                            memory: new_memory_root
+                        }];
+            }
+        });
     });
 }
 /*const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string,addressroot:string):Output=>{

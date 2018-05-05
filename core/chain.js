@@ -7,35 +7,55 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g;
+    return g = { next: verb(0), "throw": verb(1), "return": verb(2) }, typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (_) try {
+            if (f = 1, y && (t = y[op[0] & 2 ? "return" : op[0] ? "throw" : "next"]) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [0, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-const _ = __importStar(require("./basic"));
-const Trie = __importStar(require("./merkle_patricia"));
-const TxSet = __importStar(require("./tx"));
-const { map, reduce, filter, forEach, some } = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
-const rlp = require('rlp');
-const CryptoSet = require('./crypto_set.js');
+exports.__esModule = true;
+var _ = require("./basic");
+var Trie = require("./merkle_patricia");
+var TxSet = require("./tx");
+var _a = require('p-iteration'), map = _a.map, reduce = _a.reduce, filter = _a.filter, forEach = _a.forEach, some = _a.some;
+var RadixTree = require('dfinity-radix-tree');
+var levelup = require('levelup');
+var leveldown = require('leveldown');
+var db = levelup(leveldown('./db/state'));
+var IPFS = require('ipfs');
+var rlp = require('rlp');
+var CryptoSet = require('./crypto_set.js');
 exports.fee_by_size = 10;
 function GetTreeroot(pre) {
     if (pre.length == 1)
         return pre[0];
     else {
-        const union = pre.reduce((result, val, index, array) => {
-            const i = Number(index);
+        var union = pre.reduce(function (result, val, index, array) {
+            var i = Number(index);
             if (i % 2 == 0) {
-                const left = val;
-                const right = ((left, i, array) => {
+                var left = val;
+                var right = (function (left, i, array) {
                     if (array[i + 1] == null)
                         return "";
                     else
@@ -64,14 +84,16 @@ function GetTreeroot(pre) {
   return used==null;
 }*/
 function SortCandidates(candidates) {
-    return candidates.sort((a, b) => {
+    return candidates.sort(function (a, b) {
         return _.get_unicode(a.address) - _.get_unicode(b.address);
     });
 }
-function elected(sorted, result, now = -1, i = 0) {
+function elected(sorted, result, now, i) {
+    if (now === void 0) { now = -1; }
+    if (i === void 0) { i = 0; }
     if (result > sorted.length - 1)
         return "";
-    const new_now = now + sorted[i].amount;
+    var new_now = now + sorted[i].amount;
     if (new_now < result)
         return elected(sorted, result, new_now, i + 1);
     else
@@ -84,185 +106,194 @@ function elected(sorted, result, now = -1, i = 0) {
     return not_confirmed_check==true || used_tx_check==true;
   });
 }*/
-function ValidBlock(block, chain, now_stateroot, now_request_root, fee_by_size, key_currency) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const hash = block.meta.hash;
-        const validatorSign = block.meta.validatorSign;
-        const index = block.contents.index;
-        const parenthash = block.contents.parenthash;
-        const timestamp = block.contents.timestamp;
-        const stateroot = block.contents.stateroot;
-        /*const addressroot = block.contents.addressroot;
-        const used_dagroot = block.contents.used_dagroot;
-        const used_txroot = block.contents.used_txroot;*/
-        const request_root = block.contents.request_root;
-        const tx_root = block.contents.tx_root;
-        const fee = block.contents.fee;
-        const difficulty = block.contents.difficulty;
-        const validator = block.contents.validator;
-        const validatorPub = block.contents.validatorPub;
-        const candidates = block.contents.candidates;
-        const txs = block.transactions;
-        const last = chain[chain.length - 1];
-        const date = new Date();
-        /*const DagData = new RadixTree({
-          db: db,
-          root: dag_root
-        });*/
-        /*const parents_dag = new RadixTree({
-          db: db,
-          root: parents_dag_root
-        });*/
-        /*const AddressState = new RadixTree({
-          db: db,
-          root: now_addressroot
-        });*/
-        const StateData = new RadixTree({
-            db: db,
-            root: now_stateroot
+function ValidBlock(block, chain, now_stateroot, now_request_root, dag_root, fee_by_size, key_currency, tag_limit) {
+    return __awaiter(this, void 0, void 0, function () {
+        var _this = this;
+        var hash, validatorSign, index, parenthash, timestamp, stateroot, request_root, tx_root, fee, difficulty, validator, validatorPub, candidates, txs, last, date, StateData, tx_hash_map, size_sum, right_validator, validator_state, _a, _b, _c, _d, address, valid_txs;
+        return __generator(this, function (_e) {
+            switch (_e.label) {
+                case 0:
+                    hash = block.meta.hash;
+                    validatorSign = block.meta.validatorSign;
+                    index = block.contents.index;
+                    parenthash = block.contents.parenthash;
+                    timestamp = block.contents.timestamp;
+                    stateroot = block.contents.stateroot;
+                    request_root = block.contents.request_root;
+                    tx_root = block.contents.tx_root;
+                    fee = block.contents.fee;
+                    difficulty = block.contents.difficulty;
+                    validator = block.contents.validator;
+                    validatorPub = block.contents.validatorPub;
+                    candidates = block.contents.candidates;
+                    txs = block.transactions;
+                    last = chain[chain.length - 1];
+                    date = new Date();
+                    StateData = new RadixTree({
+                        db: db,
+                        root: now_stateroot
+                    });
+                    tx_hash_map = txs.map(function (tx) {
+                        return tx.meta.hash;
+                    });
+                    size_sum = txs.reduce(function (sum, tx) {
+                        return sum + Buffer.from(JSON.stringify(tx)).length;
+                    }, 0);
+                    right_validator = elected(SortCandidates(last.contents.candidates), _.get_unicode(block.meta.hash));
+                    _b = (_a = JSON).parse;
+                    _d = (_c = rlp).decode;
+                    return [4 /*yield*/, StateData.get(Trie.en_key(validator))];
+                case 1:
+                    validator_state = _b.apply(_a, [_d.apply(_c, [_e.sent()])]);
+                    address = validator_state.contents.owner;
+                    return [4 /*yield*/, some(txs, function (tx) { return __awaiter(_this, void 0, void 0, function () {
+                            var _a, new_roots, _b, new_roots;
+                            return __generator(this, function (_c) {
+                                switch (_c.label) {
+                                    case 0:
+                                        _a = tx.kind == "request";
+                                        if (!_a) return [3 /*break*/, 2];
+                                        return [4 /*yield*/, TxSet.ValidRequestTx(tx, this[0], tag_limit, key_currency, fee_by_size)];
+                                    case 1:
+                                        _a = (_c.sent());
+                                        _c.label = 2;
+                                    case 2:
+                                        if (!_a) return [3 /*break*/, 4];
+                                        return [4 /*yield*/, TxSet.AcceptRequestTx(tx, chain, validator, this[0], this[1], key_currency)];
+                                    case 3:
+                                        new_roots = _c.sent();
+                                        this[0] = new_roots[0];
+                                        this[1] = new_roots[1];
+                                        return [2 /*return*/, false];
+                                    case 4:
+                                        _b = tx.kind == "refresh";
+                                        if (!_b) return [3 /*break*/, 6];
+                                        return [4 /*yield*/, TxSet.ValidRefreshTx(tx, dag_root, chain, this[0], this[1], key_currency, fee_by_size)];
+                                    case 5:
+                                        _b = (_c.sent());
+                                        _c.label = 6;
+                                    case 6:
+                                        if (!_b) return [3 /*break*/, 8];
+                                        return [4 /*yield*/, TxSet.AcceptRefreshTx(tx, chain, validator, tx.contents.index, this[0], this[1], key_currency)];
+                                    case 7:
+                                        new_roots = _c.sent();
+                                        this[0] = new_roots[0];
+                                        this[1] = new_roots[1];
+                                        return [2 /*return*/, false];
+                                    case 8: return [2 /*return*/, true];
+                                }
+                            });
+                        }); }, [stateroot, request_root])];
+                case 2:
+                    valid_txs = _e.sent();
+                    if (hash != _.toHash(JSON.stringify(block.contents))) {
+                        console.log("invalid hash");
+                        return [2 /*return*/, false];
+                    }
+                    else if (CryptoSet.verifyData(hash, validatorSign, validatorPub) == false) {
+                        console.log("invalid signature");
+                        return [2 /*return*/, false];
+                    }
+                    else if (index != chain.length) {
+                        console.log("invalid index");
+                        return [2 /*return*/, false];
+                    }
+                    else if (parenthash != last.meta.hash) {
+                        console.log("invalid parenthash");
+                        return [2 /*return*/, false];
+                    }
+                    else if (timestamp > date.getTime()) {
+                        console.log("invalid timestamp");
+                        return [2 /*return*/, false];
+                    }
+                    else if (stateroot != now_stateroot) {
+                        console.log("invalid stateroot");
+                        return [2 /*return*/, false];
+                    }
+                    /*else if(addressroot!=now_addressroot){
+                      console.log("invalid addressroot");
+                      return false;
+                    }
+                    else if(used_dagroot!=now_used_dagroot){
+                      console.log("invalid used_dagroot");
+                      return false;
+                    }
+                    else if(used_txroot!=now_used_txroot){
+                      console.log("invalid used_txroot");
+                      return false;
+                    }*/
+                    else if (request_root != now_request_root) {
+                        console.log("invalid request_root");
+                        return [2 /*return*/, false];
+                    }
+                    else if (tx_root != GetTreeroot(tx_hash_map)) {
+                        console.log("invalid tx_root");
+                        return [2 /*return*/, false];
+                    }
+                    /*else if(TxCheckintoChain(txs,parents_dag,UsedTx)){
+                      console.log("invalid transactions");
+                      return false;
+                    }*/
+                    else if (fee != fee_by_size * size_sum) {
+                        console.log("invalid fee");
+                    }
+                    else if (validator_state.contents.token != key_currency || address != right_validator) {
+                        console.log("invalid validator");
+                        return [2 /*return*/, false];
+                    }
+                    else if (address != CryptoSet.AddressFromPublic(validatorPub)) {
+                        console.log("invalid validator pub_key");
+                        return [2 /*return*/, false];
+                    }
+                    else if (valid_txs) {
+                        console.log("invalid transactions");
+                        return [2 /*return*/, false];
+                    }
+                    else {
+                        return [2 /*return*/, true];
+                    }
+                    return [2 /*return*/];
+            }
         });
-        /*const UsedTx = new RadixTree({
-          db: db,
-          root: now_used_txroot
-        });*/
-        /*const evidences = txs.reduce((result:string[],tx:TxSet.Tx)=>{
-          return result.concat(tx.meta.evidence);
-        },[]);
-      
-        const evidences_units = await reduce(evidences, async (array:DagSet.Unit[],key:string)=>{
-          const unit:DagSet.Unit = await DagData.get(Trie.en_key(key));
-          return array.concat(unit)
-        },[]);*/
-        /*const input_check = await some(evidences_units,(unit:DagSet.Unit)=>{
-          const this_token:StateSet.Token = await World.get(Trie.en_key(unit.contents.token));
-          return await some(unit.contents.input.token_id,(id:string)=>{
-            const tokens =  new RadixTree({
-              db: db,
-              root:this
-            });
-            const input = await tokens.get(Trie.en_key(id));
-            return input==null;
-          },this_token.stateroot);
-        });*/
-        const tx_hash_map = txs.map((tx) => {
-            return tx.meta.hash;
-        });
-        /*
-        const RequestStates = new RadixTree({
-          db: db,
-          root: now_request_root
-        });
-      
-        const request_map = await map(txs,async (tx:TxSet.Tx)=>{
-          if(tx.kind=="request") return tx;
-          else if(tx.kind=="refresh"){
-            const request:TxSet.RequestTx = chain[tx.contents.index].transactions.reduce((result:TxSet.RequestTx[],t:TxSet.Tx)=>{
-              if(t.kind=="request"&&t.meta.hash==tx.contents.request) return result.concat(t);
-            },[])[0];
-            const state:"waiting" | "refreshed" = await RequestStates.get(Trie.en_key(request.meta.hash));
-            if(state=="waiting") return request
-            else return ""
-          }
-          else return "";
-        })
-      
-        const fee_sum = request_map.filter(t=>t!="").reduce((sum:number,tx:TxSet.RequestTx)=>{
-          return sum + tx.contents.data.fee;
-        });*/
-        const size_sum = txs.reduce((sum, tx) => {
-            return sum + Buffer.from(JSON.stringify(tx)).length;
-        }, 0);
-        const right_validator = elected(SortCandidates(last.contents.candidates), _.get_unicode(block.meta.hash));
-        const validator_state = JSON.parse(rlp.decode(yield StateData.get(Trie.en_key(validator))));
-        const address = validator_state.contents.owner;
-        /*const PnsData = await World.get(Trie.en_key('pns'));
-        const pns:AddressAlias[] = await AddressState.get(Trie.en_key('pns'));
-        const sacrifice_holders = await reduce(pns,async (result,alias:AddressAlias)=>{
-          const state:StateSet.T_state = await PnsData.get(Trie.en_key(alias.key));
-          if(result[state.contents.tag.])
-        },{});*/
-        if (hash != _.toHash(JSON.stringify(block.contents))) {
-            console.log("invalid hash");
-            return false;
-        }
-        else if (CryptoSet.verifyData(hash, validatorSign, validatorPub) == false) {
-            console.log("invalid signature");
-            return false;
-        }
-        else if (index != chain.length) {
-            console.log("invalid index");
-            return false;
-        }
-        else if (parenthash != last.meta.hash) {
-            console.log("invalid parenthash");
-            return false;
-        }
-        else if (timestamp > date.getTime()) {
-            console.log("invalid timestamp");
-            return false;
-        }
-        else if (stateroot != now_stateroot) {
-            console.log("invalid stateroot");
-            return false;
-        }
-        /*else if(addressroot!=now_addressroot){
-          console.log("invalid addressroot");
-          return false;
-        }
-        else if(used_dagroot!=now_used_dagroot){
-          console.log("invalid used_dagroot");
-          return false;
-        }
-        else if(used_txroot!=now_used_txroot){
-          console.log("invalid used_txroot");
-          return false;
-        }*/
-        else if (request_root != now_request_root) {
-            console.log("invalid request_root");
-            return false;
-        }
-        else if (tx_root != GetTreeroot(tx_hash_map)) {
-            console.log("invalid tx_root");
-            return false;
-        }
-        /*else if(TxCheckintoChain(txs,parents_dag,UsedTx)){
-          console.log("invalid transactions");
-          return false;
-        }*/
-        else if (fee != fee_by_size * size_sum) {
-            console.log("invalid fee");
-        }
-        else if (validator_state.contents.token != key_currency || address != right_validator) {
-            console.log("invalid validator");
-            return false;
-        }
-        else if (address != CryptoSet.AddressFromPublic(validatorPub)) {
-            console.log("invalid validator pub_key");
-            return false;
-        }
     });
 }
 function AcceptBlock(block, chain, tag_limit, request_root, request_index, fee_by_size, key_currency, dag_root) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const stateroot = chain[chain.length - 1].contents.stateroot;
-        const validator = block.contents.validator;
-        if (!(yield ValidBlock(block, chain, stateroot, request_root, fee_by_size, key_currency)))
-            const new_roots = yield reduce(block.transactions, (roots, tx) => __awaiter(this, void 0, void 0, function* () {
-                if (tx.kind == "request" && (yield TxSet.ValidRequestTx(tx, roots[0], tag_limit, key_currency, fee_by_size))) {
-                    return yield TxSet.AcceptRequestTx(tx, chain, validator, roots[1], key_currency);
-                }
-                else if (tx.kind == "refresh" && (yield TxSet.ValidRefreshTx(tx, dag_root, chain, roots[0], roots[1], key_currency, fee_by_size))) {
-                    return yield TxSet.AcceptRefreshTx(tx, chain, validator, request_index, roots[1], key_currency);
-                }
-                else {
-                    return roots;
-                }
-            }), [stateroot, request_root]);
-        const new_chain = chain.concat(block);
-        return {
-            chain: new_chain,
-            stateroot: new_roots[0],
-            request_root: new_roots[1]
-        };
+    return __awaiter(this, void 0, void 0, function () {
+        var _this = this;
+        var stateroot, validator, new_roots, new_chain;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    stateroot = block.contents.stateroot;
+                    validator = block.contents.validator;
+                    return [4 /*yield*/, ValidBlock(block, chain, stateroot, request_root, dag_root, fee_by_size, key_currency, tag_limit)];
+                case 1:
+                    if (!(_a.sent()))
+                        return [2 /*return*/, [stateroot, request_root]];
+                    return [4 /*yield*/, reduce(block.transactions, function (roots, tx) { return __awaiter(_this, void 0, void 0, function () {
+                            return __generator(this, function (_a) {
+                                switch (_a.label) {
+                                    case 0:
+                                        if (!(tx.kind == "request")) return [3 /*break*/, 2];
+                                        return [4 /*yield*/, TxSet.AcceptRequestTx(tx, chain, validator, roots[0], roots[1], key_currency)];
+                                    case 1: return [2 /*return*/, _a.sent()];
+                                    case 2:
+                                        if (!(tx.kind == "refresh")) return [3 /*break*/, 4];
+                                        return [4 /*yield*/, TxSet.AcceptRefreshTx(tx, chain, validator, request_index, roots[0], roots[1], key_currency)];
+                                    case 3: return [2 /*return*/, _a.sent()];
+                                    case 4: return [2 /*return*/, roots];
+                                }
+                            });
+                        }); }, [stateroot, request_root])];
+                case 2:
+                    new_roots = _a.sent();
+                    new_chain = chain.concat(block);
+                    return [2 /*return*/, {
+                            chain: new_chain,
+                            stateroot: new_roots[0],
+                            request_root: new_roots[1]
+                        }];
+            }
+        });
     });
 }

@@ -239,7 +239,7 @@ async function Unit_to_Memory(unit:Unit,memory_root:string){
 }
 
 async function AcceptUnit(unit:Unit,dag_root:string,memory_root:string,log_limit:number,chain:ChainSet.Block[]){
-  if(!await ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[])) return {dag:dag_root,memory:memory_root};
+  if(!await ValidUnit(unit,dag_root,log_limit,chain)) return {dag:dag_root,memory:memory_root};
   const new_dag_root = await Unit_to_Dag(unit,dag_root);
   const new_memory_root = await Unit_to_Memory(unit,memory_root);
   return {

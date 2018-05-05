@@ -6,6 +6,7 @@ import * as Trie from './merkle_patricia'
 import * as StateSet from './state'
 import * as DagSet from './dag'
 import * as TxSet from './tx'
+import * as PoolSet from './tx_pool'
 import * as IpfsSet from './ipfs'
 
 const {map,reduce,filter,forEach,some} = require('p-iteration');
@@ -121,7 +122,7 @@ function elected(sorted:Candidates[],result:number,now=-1,i=0):string{
   });
 }*/
 
-async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_request_root:string,fee_by_size:number,key_currency:string){
+async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_request_root:string,dag_root:string,fee_by_size:number,key_currency:string,tag_limit:number){
   const hash = block.meta.hash;
   const validatorSign = block.meta.validatorSign;
   const index = block.contents.index;
@@ -228,6 +229,23 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     const state:StateSet.T_state = await PnsData.get(Trie.en_key(alias.key));
     if(result[state.contents.tag.])
   },{});*/
+  const valid_txs = await some(txs, async (tx:TxSet.Tx)=>{
+    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,this[0],tag_limit,key_currency,fee_by_size))){
+      const new_roots =  await TxSet.AcceptRequestTx(tx,chain,validator,this[0],this[1],key_currency);
+      this[0] = new_roots[0];
+      this[1] = new_roots[1];
+      return false;
+    }
+    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,dag_root,chain,this[0],this[1],key_currency,fee_by_size))){
+      const new_roots = await TxSet.AcceptRefreshTx(tx,chain,validator,tx.contents.index,this[0],this[1],key_currency);
+      this[0] = new_roots[0];
+      this[1] = new_roots[1];
+      return false;
+    }
+    else{
+      return true;
+    }
+  },[stateroot,request_root]);
 
   if(hash!=_.toHash(JSON.stringify(block.contents))){
     console.log("invalid hash");
@@ -288,18 +306,25 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     console.log("invalid validator pub_key");
     return false;
   }
+  else if(valid_txs){
+    console.log("invalid transactions");
+    return false;
+  }
+  else{
+    return true;
+  }
 }
 
 async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,request_root:string,request_index:number,fee_by_size:number,key_currency:string,dag_root:string){
-  const stateroot = chain[chain.length-1].contents.stateroot;
+  const stateroot = block.contents.stateroot;
   const validator = block.contents.validator;
-  if(!await ValidBlock(block,chain,stateroot,request_root,fee_by_size,key_currency))
+  if(!await ValidBlock(block,chain,stateroot,request_root,dag_root,fee_by_size,key_currency,tag_limit)) return [stateroot,request_root];
   const new_roots = await reduce(block.transactions, async (roots,tx:TxSet.Tx)=>{
-    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,roots[0],tag_limit,key_currency,fee_by_size))){
-      return await TxSet.AcceptRequestTx(tx,chain,validator,roots[1],key_currency);
+    if(tx.kind=="request"){
+      return await TxSet.AcceptRequestTx(tx,chain,validator,roots[0],roots[1],key_currency);
     }
-    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,dag_root,chain,roots[0],roots[1],key_currency,fee_by_size))){
-      return await TxSet.AcceptRefreshTx(tx,chain,validator,request_index,roots[1],key_currency);
+    else if(tx.kind=="refresh"){
+      return await TxSet.AcceptRefreshTx(tx,chain,validator,request_index,roots[0],roots[1],key_currency);
     }
     else{
       return roots

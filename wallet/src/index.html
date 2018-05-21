@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Phoenix Message App Demo</title>
+</head>
+<body>
+  <h1>Phoenix Message App Demo</h1>
+  <div id="app">
+    <input v-model="password" type="password">
+    <button v-on:click="set_address">Set Address</button><br>
+    <p>Your Address:{{address}}</p><br>
+    <p>Destination:<input type="text" v-model="destination"></p><br>
+    <input type="number" v-model="amount">
+    <button v-on:click="remit">Remit</button><br>
+    <p>Your Balance:{{balance}}</p>
+    <input  v-model="message" type="text">
+    <button v-on:click="send">Send Message</button><br>
+    <ul>
+      <li v-for="(item,index) in msg_list">
+        {{item}}
+      </li>
+    </ul>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+  <script type="text/javascript" src="script.js"></script>
+</body>
+</html>

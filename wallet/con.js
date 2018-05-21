@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const levelup = require('levelup');
+const leveldown = require('leveldown');
+exports.db = levelup(leveldown('./db'));
+exports.db.close();
+exports.tag_limit = 10000;
+exports.key_currency = "nix";
+exports.fee_by_size = 0.0001;
+exports.log_limit = 10000000;

@@ -1,15 +1,19 @@
 declare function require(x: string): any;
+
 import * as crypto from 'crypto'
-import * as Trie from './merkle_patricia'
+import * as _ from './basic'
+import {Trie} from './merkle_patricia'
+import * as StateSet from './state'
 import * as DagSet from './dag'
+import * as ChainSet from './chain'
 import * as IpfsSet from './ipfs'
 
 const CryptoSet = require('./crypto_set.js');
 const {map,reduce,filter,forEach} = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
+//const RadixTree = require('dfinity-radix-tree');
+//const levelup = require('levelup');
+//const leveldown = require('leveldown');
+//const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
 
 // These are for test.
@@ -21,11 +25,11 @@ const test_pub = CryptoSet.PullMyPublic("Test");
 const test_address = CryptoSet.AddressFromPublic(test_pub);
 // These are for test.
 
-type StateContent = {
+export type StateContent = {
   owner: string;
   token: string;
   tag: {[key:string]: any;};
-  data: DagSet.DataHash;
+  data: string;
   product: string;
 };
 
@@ -35,7 +39,7 @@ export type State = {
   contents: StateContent;
 };
 
-export type Code = (input:DagSet.Input,raw:string[],states:{dag:any;world:any;t_state:Token,tokens:any},library:{crypto:any,map:any,reduce:any,filter:any,forEach:any,some:any})=>DagSet.Output;
+/*export type Code = (input:DagSet.Input,raw:string[],states:{dag:any;world:any;t_state:Token,tokens:any},library:{crypto:any,map:any,reduce:any,filter:any,forEach:any,some:any})=>DagSet.Output;*/
 
 export type Token = {
   token: string;
@@ -43,6 +47,8 @@ export type Token = {
   codehash:string;
   developer: string;
 };
+
+
 
 /*export type Token = {
   token: string;
@@ -57,6 +63,26 @@ export type Token = {
 
 function FunctoStr(func):string{
   return func.toString().replace(/^\(\)\s=>\s{/,"").replace(/}$/,"");
+}
+
+export function CreateState(amount:number,owner:string,token:string,tag:{[key:string]:any},data:string,product:string){
+  const pre_1:State = {
+    hash:"",
+    amount:amount,
+    contents:{
+      owner:owner,
+      token:token,
+      tag:tag,
+      data:data,
+      product:product
+    }
+  }
+  const hash = _.toHash(JSON.stringify(pre_1.contents));
+  const state = ((pre_1,hash)=>{
+    pre_1.hash = hash;
+    return pre_1;
+  })(pre_1,hash);
+  return state;
 }
 
 /*async function empty_tree(db){

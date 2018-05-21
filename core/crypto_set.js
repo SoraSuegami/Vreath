@@ -40,26 +40,28 @@ function PullMyPrivate(password){
   var decipher = crypto.createDecipher('aes-256-cbc', password);
   var dec = decipher.update(private_file, 'hex', 'hex');
   dec += decipher.final('hex');
-  return Buffer.from(dec,'hex');
+  return dec
+  //return Buffer.from(dec,'hex');
 }
 
 function PullMyPublic(password){
   var hash = HashFromPass(password);
   var filename = "./keys/public/"+hash+".txt";
   var public_file = fs.readFileSync(filename,'hex');
-  return Buffer.from(public_file,'hex');
+  return public_file;
+  //return Buffer.from(public_file,'hex');
 }
 
 function PublicFromPrivate(Private){
-  var Public = secp256k1.publicKeyCreate(Private);
-  return Public;
+  var Public = secp256k1.publicKeyCreate(Buffer.from(Private,'hex'));
+  return Public.toString('hex');
 }
 
 function EncryptData(data,mypass,Public){
   if(data==null)return false;
-  var Private = PullMyPrivate(mypass);
+  var Private = Buffer.from(PullMyPrivate(mypass),'hex');
   var ecdh = crypto.createECDH('secp256k1');
-  var secret = secp256k1.ecdh(Public,Private);
+  var secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
   var cipher = crypto.createCipher('aes-256-cbc', secret);
   var crypted = cipher.update(data, 'utf-8', 'hex');
   crypted += cipher.final('hex');
@@ -68,9 +70,9 @@ function EncryptData(data,mypass,Public){
 
 function DecryptData(data,mypass,Public){
   if(data==null)return false;
-  var Private = PullMyPrivate(mypass);
+  var Private = Buffer.from(PullMyPrivate(mypass),'hex');
   var ecdh = crypto.createECDH('secp256k1');
-  var secret = secp256k1.ecdh(Public,Private);
+  var secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
   var decipher = crypto.createDecipher('aes-256-cbc', secret);
   var dec = decipher.update(data, 'hex', 'utf-8');
   dec += decipher.final('utf-8');
@@ -80,17 +82,17 @@ function DecryptData(data,mypass,Public){
 
 function SignData(data,password){
   if(data==null)return false;
-  var Private = PullMyPrivate(password);
+  var Private = Buffer.from(PullMyPrivate(password),'hex');
   data = crypto.createHash("sha256").update(data).digest();
   var sign = secp256k1.sign(data,Private);
-  return sign.signature;
+  return sign.signature.toString('hex');
 }
 
 
 function verifyData(data,sign,Public){
   if(data==null||sign==null)return false;
   data = crypto.createHash("sha256").update(data).digest();
-  var verify = secp256k1.verify(data,sign,Public);
+  var verify = secp256k1.verify(data,Buffer.from(sign,'hex'),Buffer.from(Public,'hex'));
   return verify
 }
 
@@ -117,6 +119,8 @@ function AppAddress(name){
   var address = 'PA' + name + hashed;
   return address;
 }
+
+
 
 module.exports ={
   HashFromPass:HashFromPass,

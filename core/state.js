@@ -1,11 +1,19 @@
 "use strict";
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+const _ = __importStar(require("./basic"));
 const CryptoSet = require('./crypto_set.js');
 const { map, reduce, filter, forEach } = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
+//const RadixTree = require('dfinity-radix-tree');
+//const levelup = require('levelup');
+//const leveldown = require('leveldown');
+//const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
 // These are for test.
 const password = 'Sora';
@@ -27,6 +35,26 @@ const test_address = CryptoSet.AddressFromPublic(test_pub);
 function FunctoStr(func) {
     return func.toString().replace(/^\(\)\s=>\s{/, "").replace(/}$/, "");
 }
+function CreateState(amount, owner, token, tag, data, product) {
+    const pre_1 = {
+        hash: "",
+        amount: amount,
+        contents: {
+            owner: owner,
+            token: token,
+            tag: tag,
+            data: data,
+            product: product
+        }
+    };
+    const hash = _.toHash(JSON.stringify(pre_1.contents));
+    const state = ((pre_1, hash) => {
+        pre_1.hash = hash;
+        return pre_1;
+    })(pre_1, hash);
+    return state;
+}
+exports.CreateState = CreateState;
 /*async function empty_tree(db){
   const key_currency_tree = new RadixTree({
     db: db

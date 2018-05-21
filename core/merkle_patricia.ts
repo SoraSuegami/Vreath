@@ -20,15 +20,18 @@ stream.on('data', function (data) {
 import * as DagSet from './dag'
 import * as StateSet from './state'
 import * as ChainSet from './chain'
+import * as util from 'util'
+import * as PromiseSet from 'es6-promise'
 
+const Merkle = require('merkle-patricia-tree');
 const {map,reduce,filter,forEach} = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
+const promise = PromiseSet.Promise;
+/*const levelup = require('levelup');
 const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
+const db = levelup(leveldown('./db/state'));*/
 const rlp = require('rlp');
 
-export const en_key = (key:string):string[]=>{
+/*export const en_key = (key:string):string[]=>{
   const result:string[] =  key.split("").reduce((array:string[],val:string)=>{
     const asclled:string = val.charCodeAt(0).toString(16);
     const splited:string[] = asclled.split("").reduce((a:string[],v:string)=>{
@@ -39,7 +42,15 @@ export const en_key = (key:string):string[]=>{
     return new_array;
   },[]);
   return result;
-};
+};*/
+
+const en_key = (key:string):string=>{
+  return rlp.encode(key);
+}
+
+const de_key = (key:string):string=>{
+  return rlp.decode(key);
+}
 
 const en_value = (value):string=>{
   return rlp.encode(JSON.stringify(value));
@@ -48,6 +59,58 @@ const en_value = (value):string=>{
 const de_value = (value)=>{
   return JSON.parse(rlp.decode(value));
 }
+
+export class Trie {
+  private trie
+  constructor(db,root:string=""){
+    if(root=="") this.trie = new Merkle(db);
+    else this.trie = new Merkle(db,Buffer.from(root,'hex'));
+  }
+
+  async get(key:string){
+    const result = await util.promisify(this.trie.get).bind(this.trie)(en_key(key));
+    if(result==null) return {};
+    return de_value(result);
+  }
+
+  async put(key:string,value){
+    await util.promisify(this.trie.put).bind(this.trie)(en_key(key),en_value(value));
+    return this.trie;
+  }
+
+  async delete(key:string){
+    await util.promisify(this.trie.del).bind(this.trie)(en_key(key));
+    return this.trie;
+  }
+
+  now_root():string{
+    return this.trie.root.toString("hex");
+  }
+
+  async filter(check:(key:string,value:any)=>boolean=(key:string,value)=>{return true}){
+    let result:{[key:string]:any;} = {};
+    const stream = this.trie.createReadStream();
+    /*stream.on('data',(data)=>{
+      const key = de_key(data.key);
+      const value = de_value(data.value);
+      if(check(key,value)) result[key] = value;
+    });
+    return result;*/
+    return new promise<{[key:string]:any;}>((resolve,reject)=>{
+      stream.on('data',(data)=>{
+        const key = de_key(data.key);
+        const value = de_value(data.value);
+        if(check(key,value)) result[key] = value;
+      });
+
+      stream.on('end',(val)=>{
+        resolve(result);
+      });
+    });
+  }
+}
+
+
 
 /*export async function ChangeTrie(unit:DagSet.Unit,world_root:string,addressroot:string){
   const trie = new RadixTree({

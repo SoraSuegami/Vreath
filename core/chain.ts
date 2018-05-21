@@ -2,18 +2,19 @@ declare function require(x: string): any;
 
 import * as crypto from 'crypto'
 import * as _ from './basic'
-import * as Trie from './merkle_patricia'
+import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
 import * as DagSet from './dag'
 import * as TxSet from './tx'
 import * as PoolSet from './tx_pool'
 import * as IpfsSet from './ipfs'
+import * as R from 'ramda'
 
 const {map,reduce,filter,forEach,some} = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
+//const RadixTree = require('dfinity-radix-tree');
+//const levelup = require('levelup');
+//const leveldown = require('leveldown');
+//const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
 const rlp = require('rlp');
 
@@ -64,8 +65,9 @@ export type Block = {
   transactions: TxSet.Tx[];
 }
 
-function GetTreeroot(pre:string[]){
-  if(pre.length==1) return pre[0];
+function GetTreeroot(pre:string[]):string[]{
+  if(pre.length==0) return [_.toHash("")];
+  else if(pre.length==1) return pre;
   else{
   const union = pre.reduce((result:string[],val:string,index:number,array:string[]):string[]=>{
     const i = Number(index);
@@ -100,10 +102,13 @@ function GetTreeroot(pre:string[]){
   const used = await used_tx.get(Trie.en_key(hash));
   return used==null;
 }*/
+function HextoNum(str:string):number{
+  return parseInt(str, 16);
+}
 
 function SortCandidates(candidates:Candidates[]){
   return candidates.sort((a:Candidates,b:Candidates)=>{
-    return _.get_unicode(a.address) - _.get_unicode(b.address);
+    return HextoNum(a.address) - HextoNum(b.address);
   });
 }
 
@@ -122,7 +127,8 @@ function elected(sorted:Candidates[],result:number,now=-1,i=0):string{
   });
 }*/
 
-async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_request_root:string,dag_root:string,fee_by_size:number,key_currency:string,tag_limit:number){
+async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_request_root:string,dag_root:string,fee_by_size:number,key_currency:string,tag_limit:number,db){
+  await db.open();
   const hash = block.meta.hash;
   const validatorSign = block.meta.validatorSign;
   const index = block.contents.index;
@@ -159,10 +165,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     root: now_addressroot
   });*/
 
-  const StateData = new RadixTree({
-    db: db,
-    root: now_stateroot
-  });
+  const StateData = new Trie(db,now_stateroot);
 
   /*const UsedTx = new RadixTree({
     db: db,
@@ -221,7 +224,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
 
   const right_validator = elected(SortCandidates(last.contents.candidates),_.get_unicode(block.meta.hash));
 
-  const validator_state:StateSet.State = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(validator))));
+  const validator_state:StateSet.State = await StateData.get(validator);
   const address = validator_state.contents.owner;
   /*const PnsData = await World.get(Trie.en_key('pns'));
   const pns:AddressAlias[] = await AddressState.get(Trie.en_key('pns'));
@@ -229,24 +232,42 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     const state:StateSet.T_state = await PnsData.get(Trie.en_key(alias.key));
     if(result[state.contents.tag.])
   },{});*/
+  let changed_roots = [stateroot,request_root];
+
   const valid_txs = await some(txs, async (tx:TxSet.Tx)=>{
-    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,this[0],tag_limit,key_currency,fee_by_size))){
-      const new_roots =  await TxSet.AcceptRequestTx(tx,chain,validator,this[0],this[1],key_currency);
-      this[0] = new_roots[0];
-      this[1] = new_roots[1];
+    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,changed_roots[0],tag_limit,key_currency,fee_by_size,db))){
+      const new_roots =  await TxSet.AcceptRequestTx(tx,chain,validator,changed_roots[0],changed_roots[1],key_currency,db);
+      changed_roots[0] = new_roots[0];
+      changed_roots[1] = new_roots[1];
       return false;
     }
-    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,dag_root,chain,this[0],this[1],key_currency,fee_by_size))){
-      const new_roots = await TxSet.AcceptRefreshTx(tx,chain,validator,tx.contents.index,this[0],this[1],key_currency);
-      this[0] = new_roots[0];
-      this[1] = new_roots[1];
+    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,dag_root,chain,changed_roots[0],changed_roots[1],key_currency,fee_by_size,tag_limit,db))){
+      const new_roots = await TxSet.AcceptRefreshTx(tx,chain,validator,changed_roots[0],changed_roots[1],key_currency,db);
+      changed_roots[0] = new_roots[0];
+      changed_roots[1] = new_roots[1];
       return false;
     }
     else{
       return true;
     }
-  },[stateroot,request_root]);
+  });
 
+  const Sacrifice:{[key:string]:StateSet.State} = await StateData.filter((key:string,value):boolean=>{
+    const state:StateSet.State = value;
+    return state.contents.token=="sacrifice"&&state.amount>0;
+  });
+
+  const collected:{[key:string]:Candidates;} = R.values(Sacrifice).reduce((result:{[key:string]:Candidates;},state:StateSet.State)=>{
+    const address = state.contents.owner;
+    const amount = state.amount;
+    if(result[address]==null) result[address] = {address:address,amount:0};
+    result[address]["amount"] += amount;
+    return result;
+  },{});
+
+  const sorted = SortCandidates(R.values(collected));
+
+  await db.close();
   if(hash!=_.toHash(JSON.stringify(block.contents))){
     console.log("invalid hash");
     return false;
@@ -287,7 +308,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     console.log("invalid request_root");
     return false;
   }
-  else if(tx_root!=GetTreeroot(tx_hash_map)){
+  else if(tx_root!=GetTreeroot(tx_hash_map)[0]){
     console.log("invalid tx_root");
     return false;
   }
@@ -298,7 +319,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
   else if(fee!=fee_by_size*size_sum){
     console.log("invalid fee");
   }
-  else if(validator_state.contents.token!=key_currency||address!=right_validator){
+  else if(validator_state.contents.token!=key_currency/*||address!=right_validator*/){
     console.log("invalid validator");
     return false;
   }
@@ -315,16 +336,16 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
   }
 }
 
-async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,request_root:string,request_index:number,fee_by_size:number,key_currency:string,dag_root:string){
+export async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,request_root:string,fee_by_size:number,key_currency:string,dag_root:string,db){
   const stateroot = block.contents.stateroot;
   const validator = block.contents.validator;
-  if(!await ValidBlock(block,chain,stateroot,request_root,dag_root,fee_by_size,key_currency,tag_limit)) return [stateroot,request_root];
+  if(!await ValidBlock(block,chain,stateroot,request_root,dag_root,fee_by_size,key_currency,tag_limit,db)) return [chain,stateroot,request_root];
   const new_roots = await reduce(block.transactions, async (roots,tx:TxSet.Tx)=>{
     if(tx.kind=="request"){
-      return await TxSet.AcceptRequestTx(tx,chain,validator,roots[0],roots[1],key_currency);
+      return await TxSet.AcceptRequestTx(tx,chain,validator,roots[0],roots[1],key_currency,db);
     }
     else if(tx.kind=="refresh"){
-      return await TxSet.AcceptRefreshTx(tx,chain,validator,request_index,roots[0],roots[1],key_currency);
+      return await TxSet.AcceptRefreshTx(tx,chain,validator,roots[0],roots[1],key_currency,db);
     }
     else{
       return roots
@@ -337,3 +358,83 @@ async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,request_ro
     request_root:new_roots[1]
   }
 }
+
+export function CreateBlock(password:string,chain:Block[],stateroot:string,request_root:string,fee_by_size:number,difficulty:number,validator:string,validatorPub:string,candidates:Candidates[],txs:TxSet.Tx[]){
+  const last:Block = chain[chain.length-1];
+  const index = chain.length;
+  const parenthash = last.meta.hash;
+  const date = new Date();
+  const timestamp = date.getTime();
+  const tx_hash_map = txs.map((tx:TxSet.Tx)=>{
+    return tx.meta.hash;
+  });
+  const tx_root = GetTreeroot(tx_hash_map)[0];
+  const fee = txs.reduce((sum:number,tx:TxSet.Tx)=>{
+    return (sum + fee_by_size * Buffer.from(JSON.stringify(tx)).length);
+  },0);
+  const pre_1:Block = {
+    meta:{
+      hash:"",
+      validatorSign:""
+    },
+    contents:{
+      index:index,
+      parenthash:parenthash,
+      timestamp:timestamp,
+      stateroot:stateroot,
+      request_root:request_root,
+      tx_root:tx_root,
+      fee:fee,
+      difficulty:difficulty,
+      validator:validator,
+      validatorPub:validatorPub,
+      candidates:candidates
+    },
+    transactions:txs
+  };
+  const hash = _.toHash(JSON.stringify(pre_1.contents));
+  const signature:string = CryptoSet.SignData(hash,password);
+  const block:Block = ((pre_1,hash,signature)=>{
+    pre_1.meta.hash = hash;
+    pre_1.meta.validatorSign = signature;
+    return pre_1;
+  })(pre_1,hash,signature);
+  return block;
+}
+
+
+/*async function empty_tree(db){
+  const StateData = new RadixTree({
+    db: db
+  });
+  /*await StateData.set("a","b");
+  await StateData.delete("a");
+  const empty_tree_root = await StateData.flush();
+  console.log(empty_tree_root);
+  return empty_tree_root;*/
+/*}
+const StateData = new RadixTree({
+  db: db
+});
+StateData.flush()*/
+/*const first:Block = {
+  meta:{
+    hash:"",
+    validatorSign:""
+  },
+  contents:{
+    index:0,
+    parenthash:"2f6c5d2f6d5a5011f9f498476cf424b57b6ad5f90cf225c03525de77b78ed45ec57f6d9ebddaa20a130f555cb871f00bbefd5d3fea501b24ca5d5578122acfd2",
+    timestamp:1525596393758,
+    stateroot:stateroot,
+    request_root:request_root,
+    tx_root:tx_root,
+    fee:fee,
+    difficulty:difficulty,
+    validator:validator,
+    validatorPub:validatorPub,
+    candidates:candidates
+  },
+  transactions:txs
+}*/
+//const block = CreateBlock("Sora",pub,"",0,"","",3,[]);

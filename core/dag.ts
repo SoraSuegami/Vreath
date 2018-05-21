@@ -2,17 +2,18 @@ declare function require(x: string): any;
 
 import * as crypto from 'crypto'
 import * as _ from './basic'
-import * as Trie from './merkle_patricia'
+import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
 import * as TxSet from './tx'
 import * as ChainSet from './chain'
 import * as IpfsSet from './ipfs'
+import * as R from 'ramda'
+
 
 const {map,reduce,filter,forEach,some} = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
-const levelup = require('levelup');
-const leveldown = require('leveldown');
-const db = levelup(leveldown('./db/state'));
+//const RadixTree = require('dfinity-radix-tree');
+////const leveldown = require('leveldown');
+//const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
 const {NodeVM, VMScript} = require('vm2');
 const rlp = require('rlp');
@@ -138,11 +139,26 @@ const nonce_count = (hash:string)=>{
   return sum;
 }
 
+const mining = (unit:Unit,difficulty:number)=>{
+  let nonce = -1;
+  let hashed = "";
+  do {
+    nonce ++;
+    unit.meta.nonce = nonce.toString();
+    hashed = HashForUnit(unit);
+  } while (nonce_count(hashed)<difficulty);
+  return {
+    nonce:nonce.toString(),
+    hash:hashed
+  }
+}
+
 const HashForUnit = (unit:Unit):string=>{
   return _.toHash(unit.meta.nonce+JSON.stringify(unit.contents));
 };
 
-async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[]){
+async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[],db){
+  await db.open();
   const nonce = unit.meta.nonce;
   const hash = unit.meta.hash;
   const signature = unit.meta.signature;
@@ -163,19 +179,14 @@ async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainS
     if(tx.kind=="request"&&tx.meta.hash==tx_data.request) return result.concat(tx);
   },[])[0];
 
-  const token = request_tx.contents.data.token;
+  const token = request_tx.contents.data.token || "";
 
-  const DagData = new RadixTree({
-    db: db,
-    root: dag_root
-  });
-
-  const parent:Unit = JSON.parse(rlp.decode(await DagData.get(Trie.en_key(parenthash))));
-
+  const DagData = new Trie(db,dag_root);
+  const parent:Unit = await DagData.get(parenthash);
   const log_size = log_raw.reduce((sum:number,log:any)=>{
     return sum + Buffer.from(JSON.stringify(log)).length;
   },0);
-
+  await db.close();
   if(count<=0||count>difficulty){
     console.log("invalid nonce");
     return false;
@@ -217,36 +228,100 @@ async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainS
   }
 }
 
-async function Unit_to_Dag(unit:Unit,dag_root:string){
-  const DagData = new RadixTree({
-    db: db,
-    root: dag_root
-  });
-  await DagData.set(Trie.en_key(unit.meta.hash),rlp.decode(JSON.stringify(unit)));
-  const new_root = await DagData.flush();
+async function Unit_to_Dag(unit:Unit,dag_root:string,db){
+  await db.open();
+  const DagData = new Trie(db,dag_root);
+  await DagData.put(unit.meta.hash,unit);
+  const new_root = DagData.now_root();
+  await db.close();
   return new_root;
 }
 
-async function Unit_to_Memory(unit:Unit,memory_root:string){
-  const Memory = new RadixTree({
-    db: db,
-    root: memory_root
-  });
-  const target:string[] = JSON.parse(rlp.decode(await Memory.get(Trie.en_key(unit.contents.data.request)))) || [];
-  await Memory.set(Trie.en_key(unit.contents.data.request),rlp.decode(JSON.stringify(target.concat(unit.meta.hash))));
-  const new_root = await Memory.flush();
+async function Unit_to_Memory(unit:Unit,memory_root:string,db){
+  await db.open();
+  const Memory = new Trie(db,memory_root);
+  let target:string[] = await Memory.get(unit.contents.data.request);
+  if(Object.keys(target).length==0) target = []
+  await Memory.put(unit.contents.data.request,target.concat(unit.meta.hash));
+  const new_root = Memory.now_root();
+  await db.close()
   return new_root;
 }
 
-async function AcceptUnit(unit:Unit,dag_root:string,memory_root:string,log_limit:number,chain:ChainSet.Block[]){
-  if(!await ValidUnit(unit,dag_root,log_limit,chain)) return {dag:dag_root,memory:memory_root};
-  const new_dag_root = await Unit_to_Dag(unit,dag_root);
-  const new_memory_root = await Unit_to_Memory(unit,memory_root);
-  return {
-    dag:new_dag_root,
-    memory:new_memory_root
-  }
+export async function AcceptUnit(unit:Unit,dag_root:string,memory_root:string,log_limit:number,chain:ChainSet.Block[],db){
+  if(!await ValidUnit(unit,dag_root,log_limit,chain,db)) return [dag_root,memory_root];
+  console.log("OK")
+  const new_dag_root = await Unit_to_Dag(unit,dag_root,db);
+  const new_memory_root = await Unit_to_Memory(unit,memory_root,db);
+  return [new_dag_root,new_memory_root];
 }
+
+async function GetEdgeDag(root:string,db){
+  await db.open();
+  const DagData = new Trie(db,root);
+  const filtered:{parents:string[],children:string[]} = R.values(await DagData.filter()).reduce((result:{parents:string[],children:string[]},val:Unit)=>{
+    result.parents.push(val.contents.parenthash);
+    result.children.push(val.meta.hash);
+    return result
+  },{parents:[],children:[]});
+  await db.close();
+  const parents:string[] = filtered.parents;
+  const children:string[] = filtered.children;
+  if(parents==[]||children==[]) return [];
+  const edge = children.reduce((result:string[],val)=>{
+    const idx:number = parents.indexOf(val);
+    if(parents.indexOf(val)==-1) return result.concat(val);
+    else return result;
+  },[]);
+  return edge;
+}
+
+export async function CreateUnit(password:string,pub_key:string,request:string,index:number,payee:string,dag_root:string,difficulty:number,log:any[],db){
+  const address = CryptoSet.AddressFromPublic(pub_key);
+  const date = new Date();
+  const timestamp = date.getTime();
+  const log_hash = _.toHash(JSON.stringify(log));
+  const data:TxSet.RefreshContents = {
+    address:address,
+    pub_key:pub_key,
+    timestamp:timestamp,
+    request:request,
+    index:index,
+    payee:payee
+  };
+  const edges = await GetEdgeDag(dag_root,db);
+  const parenthash = edges[Math.floor(Math.random() * edges.length)];
+  const pre_1:Unit = {
+    meta:{
+      nonce:"0",
+      hash:"",
+      signature:""
+    },
+    contents:{
+      data:data,
+      parenthash:parenthash,
+      difficulty:difficulty,
+      log_hash:log_hash
+    },
+    log_raw:log
+  };
+  const mined = mining(pre_1,difficulty);
+  const nonce = mined.nonce;
+  const hash = mined.hash;
+  const signature = CryptoSet.SignData(hash,password);
+  const unit:Unit = ((pre_1,nonce,hash,signature)=>{
+    pre_1.meta.nonce = nonce;
+    pre_1.meta.hash = hash;
+    pre_1.meta.signature = signature;
+    return pre_1;
+  })(pre_1,nonce,hash,signature);
+  return unit;
+}
+
+/*ValidUnit(unit,"",1000,[]).then(check=>{
+  console.log(check);
+});*/
+
 /*const RunCode = (input:Input,token_state:StateSet.Token,type:Codetype,raw:string[],db,dag_root:string,worldroot:string,addressroot:string):Output=>{
   //const raw = IpfsSet.node_ready(node,())
   const Dag = new RadixTree({

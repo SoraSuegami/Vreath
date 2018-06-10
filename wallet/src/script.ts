@@ -10,34 +10,31 @@ let app = new Vue({
     amount:10,
     balance:0,
     message:"",
-    msg_list:["Messages"]
+    msg_list:[]
   },
   computed:{
 
   },
   methods:{
     set_address:()=>{
-      ipcRenderer.on('R_GetAddress', (event, arg) => {
-          app.address = arg;
-          ipcRenderer.on('R_GetBalance', (event, arg) => {
-            app.balance = arg;
+      ipcRenderer.on('R_GetAddress', (event, address) => {
+          app.address = address;
+          ipcRenderer.on('R_GetBalance', (event, balance) => {
+            app.balance = balance;
+            ipcRenderer.on('new_message', (event, msg) => {
+              app.msg_list = msg;
+            });
           });
           ipcRenderer.send('GetBalance', app.address);
       });
       ipcRenderer.send('GetAddress', app.password);
     },
     send:()=>{
-      app.msg_list.push(app.message);
-      app.message = "";
-      ipcRenderer.on('R_CreateUnit', (event, arg) => {
-          console.dir(arg);
-          app.address = arg;
-      });
       ipcRenderer.send('CreateUnit', [app.password,[app.message]]);
+      app.message="";
     },
     remit:()=>{
       ipcRenderer.on('R_CreateRequestTx', (event, arg) => {
-          console.dir(arg);
       });
       ipcRenderer.send('CreateRequestTx', [app.password,app.amount,app.destination]);
     }

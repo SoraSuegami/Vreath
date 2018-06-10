@@ -2,6 +2,7 @@ declare function require(x: string): any;
 
 import * as crypto from 'crypto'
 import * as fs from 'fs'
+import {execSync} from 'child_process'
 import * as _ from '../core/basic'
 import {Trie} from '../core/merkle_patricia'
 import * as StateSet from '../core/state'
@@ -21,10 +22,12 @@ const rlp = require('rlp');
 const request = require('request');
 /*const express = require('express');
 const app = express();*/
-db.close();
 
 const url = require('url');
 const path = require('path');
+
+const express = require('express');
+const bodyParser = require('body-parser');
 
 
 const lib_func = (name:string,args:any[])=>{
@@ -217,6 +220,8 @@ const ipc = electron.ipcMain;
 // メインウィンドウはGCされないようにグローバル宣言
 let mainWindow;
 
+db.close().then(()=>{
+//execSync('node ./wallet/server.js');
 // 全てのウィンドウが閉じたら終了
 main.on('window-all-closed', function() {
  if (process.platform != 'darwin') {
@@ -227,22 +232,34 @@ main.on('window-all-closed', function() {
 // Electronの初期化完了後に実行
 main.on('ready', ()=>{
  // メイン画面の表示。ウィンドウの幅、高さを指定できる
+ //execSync('node ./wallet/server.js');
  mainWindow = new BrowserWindow({width: 1000, height: 800, 'node_integration':false});
  mainWindow.loadURL('file://'+__dirname+'/src/index.html');
- const peer_json = [
+ /*const peer_json = [
    {ip:"127.0.0.1",port:51753},
    {ip:"localhost",port:51754}
  ];
- fs.writeFileSync("./json/peer.json",JSON.stringify(peer_json));
+ fs.writeFileSync("./json/peer.json",JSON.stringify(peer_json));*/
+ const fsw = fs.watch('./wallet/messages.json',{},()=>{
+  /* console.log('changed');
+   const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json","utf-8"));
+   const DagData = new Trie(db,genesis_root_json.dag_root);
+   const filtered = await DagData.filter();
+   const logs:string[] = R.values(filtered).reduce((logs:string[],unit:DagSet.Unit)=>{
+     return logs.concat(unit.log_raw);
+   },[]);
+   //console.log(logs)
+   await db.close();*/
+   const messages = JSON.parse(fs.readFileSync('./wallet/messages.json','utf-8'));
+   mainWindow.webContents.send('new_message', messages);
+ });
 
  ipc.on('GetAddress', async (event, arg)=>{
-    await db.open();
     const result = ((arg)=>{
       const pub_key = CryptoSet.PullMyPublic(arg);
       if(pub_key==null) CryptoSet.GenerateKeys(arg);
       return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
     })(arg);
-    await db.close();
     event.sender.send('R_GetAddress',result);
   });
 
@@ -254,7 +271,6 @@ main.on('ready', ()=>{
     const result:{[key:string]:StateSet.State;} = await StateData.filter((key:string,value:StateSet.State)=>{
       return address==value.contents.owner && key_currency==value.contents.token;
     });
-    console.log(await StateData.filter())
     for(let key in result){
       sum += result[key].amount;
     }
@@ -288,17 +304,16 @@ main.on('ready', ()=>{
       else return reduced;
     },{from:[],to:[],base:[]});
     const from = states.from[0];
-    const to = states.to[0] || StateSet.CreateState(amount,destination,key_currency,{},"","");
+    const to = states.to[0] || StateSet.CreateState(amount,destination,key_currency,{},_.toHash(""),"");
     const base = states.base;
     const new_state = ((from,to,amount)=>{
       from.amount = (-1)*amount;
       to.amount = amount;
       return [from,to];
     })(from,to,amount);
-    const tx = await TxSet.CreateRequestTx(password,"","",pub_key,0,from.hash,"change",key_currency,base,[],[],[],new_state,genesis_root_json.stateroot,db);
+    const tx = await TxSet.CreateRequestTx(password,"","",pub_key,0,from.hash,"change",key_currency,base,[],[],[],new_state,StateData);
     const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync("./json/blockchain.json","utf-8"));
     const block = ChainSet.CreateBlock(password,chain,genesis_root_json.stateroot,genesis_root_json.request_root,fee_by_size,1,from.hash,pub_key,[],[tx]);
-    console.log(block);
     await db.close();
     const peers:{ip:string,port:number}[] = JSON.parse(fs.readFileSync("./json/peer.json","utf-8"));
     await forEach(peers,async (peer:{ip:string,port:number})=>{
@@ -326,19 +341,28 @@ main.on('ready', ()=>{
     const pub_key = CryptoSet.PullMyPublic(password);
     const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync("./json/blockchain.json","utf-8"));
     const RequestData = new Trie(db,genesis_root_json.request_root);
-    const requests:{hash:string,index:number} = chain.reduce((result:{hash:string,index:number},block:ChainSet.Block,index:number)=>{
-      return block.transactions.reduce((r:{hash:string,index:number},tx:TxSet.Tx)=>{
+    const requests:{hash:string,index:number} = await reduce(chain,async (result:{hash:string,index:number},block:ChainSet.Block,index:number)=>{
+      const reduced:{hash:string,index:number} = await reduce(block.transactions,async (r:{hash:string,index:number},tx:TxSet.Tx)=>{
         if(tx.kind=="refresh") return r;
+        const req = await RequestData.get(tx.meta.hash);
+        if(Object.keys(req).length!=0) return r;
         r.hash = tx.meta.hash;
         r.index = index;
         return r;
       },result);
+      return reduced
     });
     const StateData = new Trie(db,genesis_root_json.stateroot);
     const payee:{[key:string]:StateSet.State;} = await StateData.filter((key:string,value:StateSet.State)=>{
       return value.contents.owner == CryptoSet.AddressFromPublic(pub_key);
     });
-    const unit = await DagSet.CreateUnit(password,pub_key,requests.hash,requests.index,R.values(payee)[0],genesis_root_json.dag_root,1,log,db);
+    const DagData = new Trie(db,genesis_root_json.dag_root);
+    /*await DagData.delete("07adeb4ec8dba3f6c60e2148ad818f78e01e72955d1517b2710826db81e02c6a8e96a059175b6906e1922d5a1679a2ae6637cc7776af1bca98c94de22f54ce31");*/
+    const unit = await DagSet.CreateUnit(password,pub_key,requests.hash,requests.index,R.values(payee)[0].hash,1,log,DagData);
+    console.log(unit)
+    const refresh = TxSet.CreateRefreshTx(password,unit);
+    const block = ChainSet.CreateBlock(password,chain,genesis_root_json.stateroot,genesis_root_json.request_root,fee_by_size,1,R.values(payee)[0].hash,pub_key,[],[refresh]);
+    console.log(block)
     /*await db.close();
     await db.open();
     const DagData = new Trie(db);
@@ -352,12 +376,106 @@ main.on('ready', ()=>{
         url:"http://"+peer.ip+":"+peer.port+"/unit",
         headers:headers,
         json:unit
-      });
+      }).catch(e=>{console.log(e)});
     });
-    event.sender.send('R_GetAddress',unit);
+    console.log("unit sended");
+    await forEach(peers, async (peer:{ip:string,port:number})=>{
+      await util.promisify(request.post)({
+        url:"http://"+peer.ip+":"+peer.port+"/tx",
+        headers:headers,
+        json:refresh
+      }).catch(e=>{console.log(e)});
+    });
+    console.log("refresh sended")
+    await forEach(peers, async (peer:{ip:string,port:number})=>{
+      await util.promisify(request.post)({
+        url:"http://"+peer.ip+":"+peer.port+"/block",
+        headers:headers,
+        json:block
+      }).catch(e=>{console.log(e)});
+    });
+    console.log("block sended")
    });
 // ウィンドウが閉じられたらアプリも終了
  mainWindow.on('closed', function() {
  mainWindow = null;
  });
+
+ const app = express();
+ app.use(bodyParser.urlencoded({
+     extended: true
+ }));
+ app.use(bodyParser.json());
+ app.post('/tx', async (req,res)=>{
+   await db.open();
+   const tx:TxSet.Tx = req.body;
+   console.log(tx);
+   const pool:PoolSet.Pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8'));
+   const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+   const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+   const stateroot:string = roots.stateroot;
+   const dag_root:string = roots.dag_root;
+   const request_root:string = roots.request_root;
+   const StateData = new Trie(db,stateroot);
+   const DagData = new Trie(db,dag_root);
+   const RequestData = new Trie(db,request_root);
+   const new_pool:PoolSet.Pool = await PoolSet.Tx_to_Pool(pool,tx,tag_limit,key_currency,fee_by_size,chain,StateData,DagData,RequestData);
+   console.log("OK")
+   await db.close();
+   fs.writeFileSync("./json/tx_pool.json",JSON.stringify(new_pool));
+   res.json(new_pool);
+
+ });
+
+ app.post('/block',async (req,res)=>{
+   await db.open();
+   const block:ChainSet.Block = req.body;
+   console.log(block)
+   const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+   const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+   const stateroot:string = roots.stateroot;
+   const dag_root:string = roots.dag_root;
+   const request_root:string = roots.request_root;
+   const StateData = new Trie(db,stateroot);
+   const DagData = new Trie(db,dag_root);
+   const RequestData = new Trie(db,request_root);
+   const accepted = await ChainSet.AcceptBlock(block,chain,tag_limit,fee_by_size,key_currency,StateData,DagData,RequestData);
+   fs.writeFileSync("./json/blockchain.json",JSON.stringify(accepted.chain));
+   const new_roots = ((pre,accepted)=>{
+     roots.stateroot = accepted.state;
+     roots.request_root = accepted.request;
+     return roots;
+   })(roots,accepted);
+   console.log(new_roots)
+   await db.close();
+   fs.writeFileSync("./json/root.json",JSON.stringify(new_roots));
+   res.json(accepted)
+ });
+
+ app.post('/unit',async (req,res)=>{
+   await db.open()
+   const unit:DagSet.Unit = req.body;
+   //console.log(unit);
+   const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+   const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+   const dag_root:string = roots.dag_root;
+   const memory_root:string = roots.memory_root;
+   const DagData = new Trie(db,dag_root);
+   const MemoryData = new Trie(db,memory_root);
+   const accepted = await DagSet.AcceptUnit(unit,log_limit,chain,DagData,MemoryData);
+   const new_roots = ((pre,accepted)=>{
+       roots.dag_root = accepted[0].now_root();
+       roots.memory_root = accepted[1].now_root();
+       return roots
+   })(roots,accepted);
+   await db.close();
+   fs.writeFileSync('./json/root.json',JSON.stringify(new_roots));
+   const old_msgs:string[] = JSON.parse(fs.readFileSync('./wallet/messages.json','utf-8'));
+   fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(unit.log_raw[0])));
+   res.json(unit);
+ });
+
+ const server = app.listen(process.env.Phoenix_PORT, process.env.Phoenix_IP);
+
+});
 });

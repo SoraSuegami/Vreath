@@ -1,7 +1,7 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const levelup = require('levelup');
-const leveldown = require('leveldown');
+exports.__esModule = true;
+var levelup = require('levelup');
+var leveldown = require('leveldown');
 exports.db = levelup(leveldown('./db'));
 exports.db.close();
 exports.tag_limit = 10000;

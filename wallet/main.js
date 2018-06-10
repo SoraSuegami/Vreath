@@ -8,11 +8,13 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
+const _ = __importStar(require("../core/basic"));
 const merkle_patricia_1 = require("../core/merkle_patricia");
 const StateSet = __importStar(require("../core/state"));
 const DagSet = __importStar(require("../core/dag"));
 const TxSet = __importStar(require("../core/tx"));
 const ChainSet = __importStar(require("../core/chain"));
+const PoolSet = __importStar(require("../core/tx_pool"));
 const con_1 = require("./con");
 const R = __importStar(require("ramda"));
 const util = __importStar(require("util"));
@@ -23,9 +25,10 @@ const rlp = require('rlp');
 const request = require('request');
 /*const express = require('express');
 const app = express();*/
-con_1.db.close();
 const url = require('url');
 const path = require('path');
+const express = require('express');
+const bodyParser = require('body-parser');
 const lib_func = (name, args) => {
     switch (name) {
         case "GetAddress":
@@ -204,145 +207,255 @@ const BrowserWindow = electron.BrowserWindow;
 const ipc = electron.ipcMain;
 // メインウィンドウはGCされないようにグローバル宣言
 let mainWindow;
-// 全てのウィンドウが閉じたら終了
-main.on('window-all-closed', function () {
-    if (process.platform != 'darwin') {
-        main.quit();
-    }
-});
-// Electronの初期化完了後に実行
-main.on('ready', () => {
-    // メイン画面の表示。ウィンドウの幅、高さを指定できる
-    mainWindow = new BrowserWindow({ width: 1000, height: 800, 'node_integration': false });
-    mainWindow.loadURL('file://' + __dirname + '/src/index.html');
-    const peer_json = [
-        { ip: "127.0.0.1", port: 51753 },
-        { ip: "localhost", port: 51754 }
-    ];
-    fs.writeFileSync("./json/peer.json", JSON.stringify(peer_json));
-    ipc.on('GetAddress', async (event, arg) => {
-        await con_1.db.open();
-        const result = ((arg) => {
-            const pub_key = CryptoSet.PullMyPublic(arg);
-            if (pub_key == null)
-                CryptoSet.GenerateKeys(arg);
-            return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
-        })(arg);
-        await con_1.db.close();
-        event.sender.send('R_GetAddress', result);
-    });
-    ipc.on('GetBalance', async (event, address) => {
-        await con_1.db.open();
-        const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
-        const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
-        let sum = 0;
-        const result = await StateData.filter((key, value) => {
-            return address == value.contents.owner && con_1.key_currency == value.contents.token;
-        });
-        console.log(await StateData.filter());
-        for (let key in result) {
-            sum += result[key].amount;
+con_1.db.close().then(() => {
+    //execSync('node ./wallet/server.js');
+    // 全てのウィンドウが閉じたら終了
+    main.on('window-all-closed', function () {
+        if (process.platform != 'darwin') {
+            main.quit();
         }
-        await con_1.db.close();
-        event.sender.send('R_GetBalance', sum);
     });
-    ipc.on('CreateRequestTx', async (event, arg) => {
-        await con_1.db.open();
-        const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
-        const password = arg[0];
-        const amount = arg[1];
-        const destination = arg[2];
-        const pub_key = CryptoSet.PullMyPublic(password);
-        const address = CryptoSet.AddressFromPublic(pub_key);
-        const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
-        const result = await StateData.filter((key, value) => {
-            return (address == value.contents.owner || destination == value.contents.owner) && con_1.key_currency == value.contents.token;
+    // Electronの初期化完了後に実行
+    main.on('ready', () => {
+        // メイン画面の表示。ウィンドウの幅、高さを指定できる
+        //execSync('node ./wallet/server.js');
+        mainWindow = new BrowserWindow({ width: 1000, height: 800, 'node_integration': false });
+        mainWindow.loadURL('file://' + __dirname + '/src/index.html');
+        /*const peer_json = [
+          {ip:"127.0.0.1",port:51753},
+          {ip:"localhost",port:51754}
+        ];
+        fs.writeFileSync("./json/peer.json",JSON.stringify(peer_json));*/
+        const fsw = fs.watch('./wallet/messages.json', {}, () => {
+            /* console.log('changed');
+             const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json","utf-8"));
+             const DagData = new Trie(db,genesis_root_json.dag_root);
+             const filtered = await DagData.filter();
+             const logs:string[] = R.values(filtered).reduce((logs:string[],unit:DagSet.Unit)=>{
+               return logs.concat(unit.log_raw);
+             },[]);
+             //console.log(logs)
+             await db.close();*/
+            const messages = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
+            mainWindow.webContents.send('new_message', messages);
         });
-        const states = R.values(result).reduce((reduced, state) => {
-            if (state.contents.owner === address) {
-                reduced.base.push(state.hash);
-                reduced.from.push(state);
-                return reduced;
-            }
-            else if (state.contents.owner === destination) {
-                reduced.base.push(state.hash);
-                reduced.to.push(state);
-                return reduced;
-            }
-            else
-                return reduced;
-        }, { from: [], to: [], base: [] });
-        const from = states.from[0];
-        const to = states.to[0] || StateSet.CreateState(amount, destination, con_1.key_currency, {}, "", "");
-        const base = states.base;
-        const new_state = ((from, to, amount) => {
-            from.amount = (-1) * amount;
-            to.amount = amount;
-            return [from, to];
-        })(from, to, amount);
-        const tx = await TxSet.CreateRequestTx(password, "", "", pub_key, 0, from.hash, "change", con_1.key_currency, base, [], [], [], new_state, genesis_root_json.stateroot, con_1.db);
-        const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
-        const block = ChainSet.CreateBlock(password, chain, genesis_root_json.stateroot, genesis_root_json.request_root, con_1.fee_by_size, 1, from.hash, pub_key, [], [tx]);
-        console.log(block);
-        await con_1.db.close();
-        const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
-        await forEach(peers, async (peer) => {
-            await util.promisify(request.post)({
-                url: "http://" + peer.ip + ":" + peer.port + "/tx",
-                headers: headers,
-                json: tx
-            });
-            console.log("tx_sended");
-            await util.promisify(request.post)({
-                url: "http://" + peer.ip + ":" + peer.port + "/block",
-                headers: headers,
-                json: block
-            });
-            console.log("block_sended");
+        ipc.on('GetAddress', async (event, arg) => {
+            const result = ((arg) => {
+                const pub_key = CryptoSet.PullMyPublic(arg);
+                if (pub_key == null)
+                    CryptoSet.GenerateKeys(arg);
+                return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
+            })(arg);
+            event.sender.send('R_GetAddress', result);
         });
-        event.sender.send('R_CreateRequestTx', tx);
-    });
-    ipc.on('CreateUnit', async (event, arg) => {
-        await con_1.db.open();
-        const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
-        const password = arg[0];
-        const log = arg[1];
-        const pub_key = CryptoSet.PullMyPublic(password);
-        const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
-        const RequestData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.request_root);
-        const requests = chain.reduce((result, block, index) => {
-            return block.transactions.reduce((r, tx) => {
-                if (tx.kind == "refresh")
+        ipc.on('GetBalance', async (event, address) => {
+            await con_1.db.open();
+            const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
+            const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
+            let sum = 0;
+            const result = await StateData.filter((key, value) => {
+                return address == value.contents.owner && con_1.key_currency == value.contents.token;
+            });
+            for (let key in result) {
+                sum += result[key].amount;
+            }
+            await con_1.db.close();
+            event.sender.send('R_GetBalance', sum);
+        });
+        ipc.on('CreateRequestTx', async (event, arg) => {
+            await con_1.db.open();
+            const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
+            const password = arg[0];
+            const amount = arg[1];
+            const destination = arg[2];
+            const pub_key = CryptoSet.PullMyPublic(password);
+            const address = CryptoSet.AddressFromPublic(pub_key);
+            const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
+            const result = await StateData.filter((key, value) => {
+                return (address == value.contents.owner || destination == value.contents.owner) && con_1.key_currency == value.contents.token;
+            });
+            const states = R.values(result).reduce((reduced, state) => {
+                if (state.contents.owner === address) {
+                    reduced.base.push(state.hash);
+                    reduced.from.push(state);
+                    return reduced;
+                }
+                else if (state.contents.owner === destination) {
+                    reduced.base.push(state.hash);
+                    reduced.to.push(state);
+                    return reduced;
+                }
+                else
+                    return reduced;
+            }, { from: [], to: [], base: [] });
+            const from = states.from[0];
+            const to = states.to[0] || StateSet.CreateState(amount, destination, con_1.key_currency, {}, _.toHash(""), "");
+            const base = states.base;
+            const new_state = ((from, to, amount) => {
+                from.amount = (-1) * amount;
+                to.amount = amount;
+                return [from, to];
+            })(from, to, amount);
+            const tx = await TxSet.CreateRequestTx(password, "", "", pub_key, 0, from.hash, "change", con_1.key_currency, base, [], [], [], new_state, StateData);
+            const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
+            const block = ChainSet.CreateBlock(password, chain, genesis_root_json.stateroot, genesis_root_json.request_root, con_1.fee_by_size, 1, from.hash, pub_key, [], [tx]);
+            await con_1.db.close();
+            const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
+            await forEach(peers, async (peer) => {
+                await util.promisify(request.post)({
+                    url: "http://" + peer.ip + ":" + peer.port + "/tx",
+                    headers: headers,
+                    json: tx
+                });
+                console.log("tx_sended");
+                await util.promisify(request.post)({
+                    url: "http://" + peer.ip + ":" + peer.port + "/block",
+                    headers: headers,
+                    json: block
+                });
+                console.log("block_sended");
+            });
+            event.sender.send('R_CreateRequestTx', tx);
+        });
+        ipc.on('CreateUnit', async (event, arg) => {
+            await con_1.db.open();
+            const genesis_root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
+            const password = arg[0];
+            const log = arg[1];
+            const pub_key = CryptoSet.PullMyPublic(password);
+            const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
+            const RequestData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.request_root);
+            const requests = await reduce(chain, async (result, block, index) => {
+                const reduced = await reduce(block.transactions, async (r, tx) => {
+                    if (tx.kind == "refresh")
+                        return r;
+                    const req = await RequestData.get(tx.meta.hash);
+                    if (Object.keys(req).length != 0)
+                        return r;
+                    r.hash = tx.meta.hash;
+                    r.index = index;
                     return r;
-                r.hash = tx.meta.hash;
-                r.index = index;
-                return r;
-            }, result);
-        });
-        const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
-        const payee = await StateData.filter((key, value) => {
-            return value.contents.owner == CryptoSet.AddressFromPublic(pub_key);
-        });
-        const unit = await DagSet.CreateUnit(password, pub_key, requests.hash, requests.index, R.values(payee)[0], genesis_root_json.dag_root, 1, log, con_1.db);
-        /*await db.close();
-        await db.open();
-        const DagData = new Trie(db);
-        await DagData.put(unit.meta.hash,unit);
-        console.log(await DagData.filter());
-        console.log(DagData.now_root())*/
-        await con_1.db.close();
-        const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
-        await forEach(peers, async (peer) => {
-            await util.promisify(request.post)({
-                url: "http://" + peer.ip + ":" + peer.port + "/unit",
-                headers: headers,
-                json: unit
+                }, result);
+                return reduced;
             });
+            const StateData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.stateroot);
+            const payee = await StateData.filter((key, value) => {
+                return value.contents.owner == CryptoSet.AddressFromPublic(pub_key);
+            });
+            const DagData = new merkle_patricia_1.Trie(con_1.db, genesis_root_json.dag_root);
+            /*await DagData.delete("07adeb4ec8dba3f6c60e2148ad818f78e01e72955d1517b2710826db81e02c6a8e96a059175b6906e1922d5a1679a2ae6637cc7776af1bca98c94de22f54ce31");*/
+            const unit = await DagSet.CreateUnit(password, pub_key, requests.hash, requests.index, R.values(payee)[0].hash, 1, log, DagData);
+            console.log(unit);
+            const refresh = TxSet.CreateRefreshTx(password, unit);
+            const block = ChainSet.CreateBlock(password, chain, genesis_root_json.stateroot, genesis_root_json.request_root, con_1.fee_by_size, 1, R.values(payee)[0].hash, pub_key, [], [refresh]);
+            console.log(block);
+            /*await db.close();
+            await db.open();
+            const DagData = new Trie(db);
+            await DagData.put(unit.meta.hash,unit);
+            console.log(await DagData.filter());
+            console.log(DagData.now_root())*/
+            await con_1.db.close();
+            const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
+            await forEach(peers, async (peer) => {
+                await util.promisify(request.post)({
+                    url: "http://" + peer.ip + ":" + peer.port + "/unit",
+                    headers: headers,
+                    json: unit
+                }).catch(e => { console.log(e); });
+            });
+            console.log("unit sended");
+            await forEach(peers, async (peer) => {
+                await util.promisify(request.post)({
+                    url: "http://" + peer.ip + ":" + peer.port + "/tx",
+                    headers: headers,
+                    json: refresh
+                }).catch(e => { console.log(e); });
+            });
+            console.log("refresh sended");
+            await forEach(peers, async (peer) => {
+                await util.promisify(request.post)({
+                    url: "http://" + peer.ip + ":" + peer.port + "/block",
+                    headers: headers,
+                    json: block
+                }).catch(e => { console.log(e); });
+            });
+            console.log("block sended");
         });
-        event.sender.send('R_GetAddress', unit);
-    });
-    // ウィンドウが閉じられたらアプリも終了
-    mainWindow.on('closed', function () {
-        mainWindow = null;
+        // ウィンドウが閉じられたらアプリも終了
+        mainWindow.on('closed', function () {
+            mainWindow = null;
+        });
+        const app = express();
+        app.use(bodyParser.urlencoded({
+            extended: true
+        }));
+        app.use(bodyParser.json());
+        app.post('/tx', async (req, res) => {
+            await con_1.db.open();
+            const tx = req.body;
+            console.log(tx);
+            const pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8'));
+            const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+            const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+            const stateroot = roots.stateroot;
+            const dag_root = roots.dag_root;
+            const request_root = roots.request_root;
+            const StateData = new merkle_patricia_1.Trie(con_1.db, stateroot);
+            const DagData = new merkle_patricia_1.Trie(con_1.db, dag_root);
+            const RequestData = new merkle_patricia_1.Trie(con_1.db, request_root);
+            const new_pool = await PoolSet.Tx_to_Pool(pool, tx, con_1.tag_limit, con_1.key_currency, con_1.fee_by_size, chain, StateData, DagData, RequestData);
+            console.log("OK");
+            await con_1.db.close();
+            fs.writeFileSync("./json/tx_pool.json", JSON.stringify(new_pool));
+            res.json(new_pool);
+        });
+        app.post('/block', async (req, res) => {
+            await con_1.db.open();
+            const block = req.body;
+            console.log(block);
+            const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+            const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+            const stateroot = roots.stateroot;
+            const dag_root = roots.dag_root;
+            const request_root = roots.request_root;
+            const StateData = new merkle_patricia_1.Trie(con_1.db, stateroot);
+            const DagData = new merkle_patricia_1.Trie(con_1.db, dag_root);
+            const RequestData = new merkle_patricia_1.Trie(con_1.db, request_root);
+            const accepted = await ChainSet.AcceptBlock(block, chain, con_1.tag_limit, con_1.fee_by_size, con_1.key_currency, StateData, DagData, RequestData);
+            fs.writeFileSync("./json/blockchain.json", JSON.stringify(accepted.chain));
+            const new_roots = ((pre, accepted) => {
+                roots.stateroot = accepted.state;
+                roots.request_root = accepted.request;
+                return roots;
+            })(roots, accepted);
+            console.log(new_roots);
+            await con_1.db.close();
+            fs.writeFileSync("./json/root.json", JSON.stringify(new_roots));
+            res.json(accepted);
+        });
+        app.post('/unit', async (req, res) => {
+            await con_1.db.open();
+            const unit = req.body;
+            //console.log(unit);
+            const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
+            const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
+            const dag_root = roots.dag_root;
+            const memory_root = roots.memory_root;
+            const DagData = new merkle_patricia_1.Trie(con_1.db, dag_root);
+            const MemoryData = new merkle_patricia_1.Trie(con_1.db, memory_root);
+            const accepted = await DagSet.AcceptUnit(unit, con_1.log_limit, chain, DagData, MemoryData);
+            const new_roots = ((pre, accepted) => {
+                roots.dag_root = accepted[0].now_root();
+                roots.memory_root = accepted[1].now_root();
+                return roots;
+            })(roots, accepted);
+            await con_1.db.close();
+            fs.writeFileSync('./json/root.json', JSON.stringify(new_roots));
+            const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
+            fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(unit.log_raw[0])));
+            res.json(unit);
+        });
+        const server = app.listen(process.env.Phoenix_PORT, process.env.Phoenix_IP);
     });
 });

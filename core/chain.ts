@@ -127,8 +127,7 @@ function elected(sorted:Candidates[],result:number,now=-1,i=0):string{
   });
 }*/
 
-async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_request_root:string,dag_root:string,fee_by_size:number,key_currency:string,tag_limit:number,db){
-  await db.open();
+async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_currency:string,tag_limit:number,StateData:Trie,DagData:Trie,RequestData:Trie){
   const hash = block.meta.hash;
   const validatorSign = block.meta.validatorSign;
   const index = block.contents.index;
@@ -165,7 +164,6 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     root: now_addressroot
   });*/
 
-  const StateData = new Trie(db,now_stateroot);
 
   /*const UsedTx = new RadixTree({
     db: db,
@@ -192,6 +190,9 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
       return input==null;
     },this_token.stateroot);
   });*/
+  const right_stateroot = StateData.now_root();
+  const right_request_root = RequestData.now_root();
+
   const tx_hash_map = txs.map((tx:TxSet.Tx)=>{
     return tx.meta.hash;
   });
@@ -232,26 +233,36 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     const state:StateSet.T_state = await PnsData.get(Trie.en_key(alias.key));
     if(result[state.contents.tag.])
   },{});*/
-  let changed_roots = [stateroot,request_root];
-
+  console.log(await StateData.filter());
+  /*const check_SD:Trie = StateData.checkpoint();
+  const check_RD:Trie =  RequestData.checkpoint();
+  console.log('checked');
+  console.log(check_SD)
+  const commit_SD:Trie = await StateData.commit();
+  const commit_RD:Trie = await RequestData.commit();
+  console.log("committed");
+  console.log(commit_SD)*/
+  let changed = [StateData,RequestData];
   const valid_txs = await some(txs, async (tx:TxSet.Tx)=>{
-    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,changed_roots[0],tag_limit,key_currency,fee_by_size,db))){
-      const new_roots =  await TxSet.AcceptRequestTx(tx,chain,validator,changed_roots[0],changed_roots[1],key_currency,db);
-      changed_roots[0] = new_roots[0];
-      changed_roots[1] = new_roots[1];
+    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,changed[0]))){
+      const news = await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,changed[0],changed[1]);
+      changed[0] = news[0];
+      changed[1] = news[1];
       return false;
     }
-    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,dag_root,chain,changed_roots[0],changed_roots[1],key_currency,fee_by_size,tag_limit,db))){
-      const new_roots = await TxSet.AcceptRefreshTx(tx,chain,validator,changed_roots[0],changed_roots[1],key_currency,db);
-      changed_roots[0] = new_roots[0];
-      changed_roots[1] = new_roots[1];
+    else if(tx.kind=="refresh"&&(await TxSet.ValidRefreshTx(tx,chain,key_currency,fee_by_size,tag_limit,changed[0],DagData,changed[1]))){
+      const news = await TxSet.AcceptRefreshTx(tx,chain,validator,key_currency,changed[0],changed[1]);
+      changed[0] = news[0];
+      changed[1] = news[1];
       return false;
     }
     else{
       return true;
     }
   });
-
+  /*ori_SD = await StateData.revert();
+  ori_RD = await RequestData.revert();
+  console.log(await ori_SD.filter());*/
   const Sacrifice:{[key:string]:StateSet.State} = await StateData.filter((key:string,value):boolean=>{
     const state:StateSet.State = value;
     return state.contents.token=="sacrifice"&&state.amount>0;
@@ -265,9 +276,9 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     return result;
   },{});
 
+
   const sorted = SortCandidates(R.values(collected));
 
-  await db.close();
   if(hash!=_.toHash(JSON.stringify(block.contents))){
     console.log("invalid hash");
     return false;
@@ -288,7 +299,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     console.log("invalid timestamp");
     return false;
   }
-  else if(stateroot!=now_stateroot){
+  else if(stateroot!=right_stateroot){
     console.log("invalid stateroot");
     return false;
   }
@@ -304,7 +315,7 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
     console.log("invalid used_txroot");
     return false;
   }*/
-  else if(request_root!=now_request_root){
+  else if(request_root!=right_request_root){
     console.log("invalid request_root");
     return false;
   }
@@ -336,26 +347,30 @@ async function ValidBlock(block:Block,chain:Block[],now_stateroot:string,now_req
   }
 }
 
-export async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,request_root:string,fee_by_size:number,key_currency:string,dag_root:string,db){
+export async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,fee_by_size:number,key_currency:string,StateData:Trie,DagData:Trie,RequestData:Trie){
   const stateroot = block.contents.stateroot;
+  const request_root = block.contents.request_root;
   const validator = block.contents.validator;
-  if(!await ValidBlock(block,chain,stateroot,request_root,dag_root,fee_by_size,key_currency,tag_limit,db)) return [chain,stateroot,request_root];
-  const new_roots = await reduce(block.transactions, async (roots,tx:TxSet.Tx)=>{
+  if(!await ValidBlock(block,chain,fee_by_size,key_currency,tag_limit,StateData,DagData,RequestData)) return {chain:chain,state:stateroot,request:request_root};
+  console.log("OK")
+  console.log(await StateData.filter());
+  /*
+  const news:Trie[] = await reduce(block.transactions, async (states,tx:TxSet.Tx)=>{
     if(tx.kind=="request"){
-      return await TxSet.AcceptRequestTx(tx,chain,validator,roots[0],roots[1],key_currency,db);
+      return await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,states[0],states[1]);
     }
     else if(tx.kind=="refresh"){
-      return await TxSet.AcceptRefreshTx(tx,chain,validator,roots[0],roots[1],key_currency,db);
+      return await TxSet.AcceptRefreshTx(tx,chain,validator,key_currency,states[0],states[1]);
     }
     else{
-      return roots
+      return states
     }
-  },[stateroot,request_root]);
+  },[StateData,RequestData]);*/
   const new_chain = chain.concat(block);
   return {
     chain:new_chain,
-    stateroot:new_roots[0],
-    request_root:new_roots[1]
+    state:StateData.now_root(),
+    request:RequestData.now_root()
   }
 }
 

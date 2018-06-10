@@ -146,6 +146,8 @@ const mining = (unit:Unit,difficulty:number)=>{
     nonce ++;
     unit.meta.nonce = nonce.toString();
     hashed = HashForUnit(unit);
+    console.log(nonce);
+    console.log(hashed);
   } while (nonce_count(hashed)<difficulty);
   return {
     nonce:nonce.toString(),
@@ -157,8 +159,7 @@ const HashForUnit = (unit:Unit):string=>{
   return _.toHash(unit.meta.nonce+JSON.stringify(unit.contents));
 };
 
-async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainSet.Block[],db){
-  await db.open();
+async function ValidUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagData:Trie){
   const nonce = unit.meta.nonce;
   const hash = unit.meta.hash;
   const signature = unit.meta.signature;
@@ -181,12 +182,10 @@ async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainS
 
   const token = request_tx.contents.data.token || "";
 
-  const DagData = new Trie(db,dag_root);
   const parent:Unit = await DagData.get(parenthash);
   const log_size = log_raw.reduce((sum:number,log:any)=>{
     return sum + Buffer.from(JSON.stringify(log)).length;
   },0);
-  await db.close();
   if(count<=0||count>difficulty){
     console.log("invalid nonce");
     return false;
@@ -228,43 +227,31 @@ async function ValidUnit(unit:Unit,dag_root:string,log_limit:number,chain:ChainS
   }
 }
 
-async function Unit_to_Dag(unit:Unit,dag_root:string,db){
-  await db.open();
-  const DagData = new Trie(db,dag_root);
+async function Unit_to_Dag(unit:Unit,DagData:Trie){
   await DagData.put(unit.meta.hash,unit);
-  const new_root = DagData.now_root();
-  await db.close();
-  return new_root;
+  return DagData;
 }
 
-async function Unit_to_Memory(unit:Unit,memory_root:string,db){
-  await db.open();
-  const Memory = new Trie(db,memory_root);
-  let target:string[] = await Memory.get(unit.contents.data.request);
+async function Unit_to_Memory(unit:Unit,MemoryData:Trie){
+  let target:string[] = await MemoryData.get(unit.contents.data.request);
   if(Object.keys(target).length==0) target = []
-  await Memory.put(unit.contents.data.request,target.concat(unit.meta.hash));
-  const new_root = Memory.now_root();
-  await db.close()
-  return new_root;
+  await MemoryData.put(unit.contents.data.request,target.concat(unit.meta.hash));
+  return MemoryData;
 }
 
-export async function AcceptUnit(unit:Unit,dag_root:string,memory_root:string,log_limit:number,chain:ChainSet.Block[],db){
-  if(!await ValidUnit(unit,dag_root,log_limit,chain,db)) return [dag_root,memory_root];
-  console.log("OK")
-  const new_dag_root = await Unit_to_Dag(unit,dag_root,db);
-  const new_memory_root = await Unit_to_Memory(unit,memory_root,db);
-  return [new_dag_root,new_memory_root];
+export async function AcceptUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagData:Trie,MemoryData:Trie){
+  if(!await ValidUnit(unit,log_limit,chain,DagData)) return [DagData,MemoryData];
+  const new_dag = await Unit_to_Dag(unit,DagData);
+  const new_memory = await Unit_to_Memory(unit,MemoryData);
+  return [new_dag,new_memory];
 }
 
-async function GetEdgeDag(root:string,db){
-  await db.open();
-  const DagData = new Trie(db,root);
+async function GetEdgeDag(DagData:Trie){
   const filtered:{parents:string[],children:string[]} = R.values(await DagData.filter()).reduce((result:{parents:string[],children:string[]},val:Unit)=>{
     result.parents.push(val.contents.parenthash);
     result.children.push(val.meta.hash);
     return result
   },{parents:[],children:[]});
-  await db.close();
   const parents:string[] = filtered.parents;
   const children:string[] = filtered.children;
   if(parents==[]||children==[]) return [];
@@ -276,7 +263,7 @@ async function GetEdgeDag(root:string,db){
   return edge;
 }
 
-export async function CreateUnit(password:string,pub_key:string,request:string,index:number,payee:string,dag_root:string,difficulty:number,log:any[],db){
+export async function CreateUnit(password:string,pub_key:string,request:string,index:number,payee:string,difficulty:number,log:any[],DagData:Trie){
   const address = CryptoSet.AddressFromPublic(pub_key);
   const date = new Date();
   const timestamp = date.getTime();
@@ -289,7 +276,7 @@ export async function CreateUnit(password:string,pub_key:string,request:string,i
     index:index,
     payee:payee
   };
-  const edges = await GetEdgeDag(dag_root,db);
+  const edges = await GetEdgeDag(DagData);
   const parenthash = edges[Math.floor(Math.random() * edges.length)];
   const pre_1:Unit = {
     meta:{
@@ -318,6 +305,7 @@ export async function CreateUnit(password:string,pub_key:string,request:string,i
   return unit;
 }
 
+/*CreateUnit("phoenix",CryptoSet.PullMyPublic("phoenix"),"52247c160b7aa9565d378b7e1704e4590587f95ce6877163cd8e6d7fefffcea1a023b17e20e033fd188a589b98c866faa37d03ae3b62827c2bc8f16765f398ef",0,"00ca49de7929c881ac8013534b477b986cad41dd34adcfab18c4938f642c4732953507a7d6639f83ebc86217311f64f8b79d04c486121ffe892d7ace48d44929",3,[],)*/
 /*ValidUnit(unit,"",1000,[]).then(check=>{
   console.log(check);
 });*/

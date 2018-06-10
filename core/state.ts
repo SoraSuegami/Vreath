@@ -17,12 +17,12 @@ const {map,reduce,filter,forEach} = require('p-iteration');
 const IPFS = require('ipfs');
 
 // These are for test.
-const password = 'Sora';
+/*const password = 'Sora';
 const my_pub = CryptoSet.PullMyPublic(password);
 const my_address = CryptoSet.AddressFromPublic(my_pub);
 CryptoSet.GenerateKeys("Test");
 const test_pub = CryptoSet.PullMyPublic("Test");
-const test_address = CryptoSet.AddressFromPublic(test_pub);
+const test_address = CryptoSet.AddressFromPublic(test_pub);*/
 // These are for test.
 
 export type StateContent = {

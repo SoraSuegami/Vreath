@@ -87,6 +87,21 @@ export class Trie {
     return this.trie.root.toString("hex");
   }
 
+  checkpoint(){
+    this.trie.checkpoint();
+    return this.trie;
+  }
+
+  async commit(){
+    await util.promisify(this.trie.commit).bind(this.trie)();
+    return this.trie;
+  }
+
+  async revert(){
+    await util.promisify(this.trie.revert).bind(this.trie)();
+    return this.trie;
+  }
+
   async filter(check:(key:string,value:any)=>boolean=(key:string,value)=>{return true}){
     let result:{[key:string]:any;} = {};
     const stream = this.trie.createReadStream();

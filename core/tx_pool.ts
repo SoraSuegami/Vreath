@@ -24,18 +24,18 @@ export type Pool = {
   [key:string]:TxSet.Tx;
 }
 
-async function check_tx(tx:TxSet.Tx,stateroot:string,tag_limit:number,key_currency:string,fee_by_size:number,dag_root:string,chain:ChainSet.Block[],request_root:string,db){
+async function check_tx(tx:TxSet.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:ChainSet.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
   if(tx.kind=="request"){
-    return await TxSet.ValidRequestTx(tx,stateroot,tag_limit,key_currency,fee_by_size,db)
+    return await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,StateData)
   }
   else if(tx.kind=="refresh"){
-    return await TxSet.ValidRefreshTx(tx,dag_root,chain,stateroot,request_root,key_currency,fee_by_size,tag_limit,db);
+    return await TxSet.ValidRefreshTx(tx,chain,key_currency,fee_by_size,tag_limit,StateData,DagData,RequestsAlias);
   }
   else return false;
 }
 
-export async function Tx_to_Pool(pool:Pool,tx:TxSet.Tx,stateroot:string,tag_limit:number,key_currency:string,fee_by_size:number,dag_root:string,chain:ChainSet.Block[],request_root:string,db){
-  if(! await check_tx(tx,stateroot,tag_limit,key_currency,fee_by_size,dag_root,chain,request_root,db)) return pool;
+export async function Tx_to_Pool(pool:Pool,tx:TxSet.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:ChainSet.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
+  if(! await check_tx(tx,tag_limit,key_currency,fee_by_size,chain,StateData,DagData,RequestsAlias)) return pool;
   const new_pool = ((pool:Pool)=>{
     pool[tx.meta.hash] = tx;
     return pool;

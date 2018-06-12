@@ -6,7 +6,7 @@ import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
 import * as DagSet from './dag'
 import * as ChainSet from './chain'
-import * as IpfsSet from './ipfs'
+import * as T from './types'
 
 const CryptoSet = require('./crypto_set.js');
 const {map,reduce,filter,forEach} = require('p-iteration');
@@ -66,7 +66,7 @@ function FunctoStr(func):string{
 }
 
 export function CreateState(amount:number,owner:string,token:string,tag:{[key:string]:any},data:string,product:string){
-  const pre_1:State = {
+  const pre_1:T.State = {
     hash:"",
     amount:amount,
     contents:{

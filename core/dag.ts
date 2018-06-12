@@ -6,7 +6,7 @@ import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
 import * as TxSet from './tx'
 import * as ChainSet from './chain'
-import * as IpfsSet from './ipfs'
+import * as T from './types'
 import * as R from 'ramda'
 
 
@@ -139,7 +139,7 @@ const nonce_count = (hash:string)=>{
   return sum;
 }
 
-const mining = (unit:Unit,difficulty:number)=>{
+const mining = (unit:T.Unit,difficulty:number)=>{
   let nonce = -1;
   let hashed = "";
   do {
@@ -155,11 +155,11 @@ const mining = (unit:Unit,difficulty:number)=>{
   }
 }
 
-const HashForUnit = (unit:Unit):string=>{
+const HashForUnit = (unit:T.Unit):string=>{
   return _.toHash(unit.meta.nonce+JSON.stringify(unit.contents));
 };
 
-async function ValidUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagData:Trie){
+async function ValidUnit(unit:T.Unit,log_limit:number,chain:T.Block[],DagData:Trie){
   const nonce = unit.meta.nonce;
   const hash = unit.meta.hash;
   const signature = unit.meta.signature;
@@ -176,13 +176,13 @@ async function ValidUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagDa
 
   const count = nonce_count(hash);
 
-  const request_tx:TxSet.RequestTx = chain[tx_data.index].transactions.reduce((result:TxSet.RequestTx[],tx:TxSet.Tx)=>{
+  const request_tx:T.RequestTx = chain[tx_data.index].transactions.reduce((result:T.RequestTx[],tx:T.Tx)=>{
     if(tx.kind=="request"&&tx.meta.hash==tx_data.request) return result.concat(tx);
   },[])[0];
 
   const token = request_tx.contents.data.token || "";
 
-  const parent:Unit = await DagData.get(parenthash);
+  const parent:T.Unit = await DagData.get(parenthash);
   const log_size = log_raw.reduce((sum:number,log:any)=>{
     return sum + Buffer.from(JSON.stringify(log)).length;
   },0);
@@ -227,27 +227,27 @@ async function ValidUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagDa
   }
 }
 
-async function Unit_to_Dag(unit:Unit,DagData:Trie){
+async function Unit_to_Dag(unit:T.Unit,DagData:Trie){
   await DagData.put(unit.meta.hash,unit);
   return DagData;
 }
 
-async function Unit_to_Memory(unit:Unit,MemoryData:Trie){
+async function Unit_to_Memory(unit:T.Unit,MemoryData:Trie){
   let target:string[] = await MemoryData.get(unit.contents.data.request);
   if(Object.keys(target).length==0) target = []
   await MemoryData.put(unit.contents.data.request,target.concat(unit.meta.hash));
   return MemoryData;
 }
 
-export async function AcceptUnit(unit:Unit,log_limit:number,chain:ChainSet.Block[],DagData:Trie,MemoryData:Trie){
+export async function AcceptUnit(unit:T.Unit,log_limit:number,chain:T.Block[],DagData:Trie,MemoryData:Trie){
   if(!await ValidUnit(unit,log_limit,chain,DagData)) return [DagData,MemoryData];
   const new_dag = await Unit_to_Dag(unit,DagData);
   const new_memory = await Unit_to_Memory(unit,MemoryData);
   return [new_dag,new_memory];
 }
 
-async function GetEdgeDag(DagData:Trie){
-  const filtered:{parents:string[],children:string[]} = R.values(await DagData.filter()).reduce((result:{parents:string[],children:string[]},val:Unit)=>{
+async function GetEdgeDag(DagData:T.Trie){
+  const filtered:{parents:string[],children:string[]} = R.values(await DagData.filter()).reduce((result:{parents:string[],children:string[]},val:T.Unit)=>{
     result.parents.push(val.contents.parenthash);
     result.children.push(val.meta.hash);
     return result
@@ -268,7 +268,7 @@ export async function CreateUnit(password:string,pub_key:string,request:string,i
   const date = new Date();
   const timestamp = date.getTime();
   const log_hash = _.toHash(JSON.stringify(log));
-  const data:TxSet.RefreshContents = {
+  const data:T.RefreshContents = {
     address:address,
     pub_key:pub_key,
     timestamp:timestamp,
@@ -278,7 +278,7 @@ export async function CreateUnit(password:string,pub_key:string,request:string,i
   };
   const edges = await GetEdgeDag(DagData);
   const parenthash = edges[Math.floor(Math.random() * edges.length)];
-  const pre_1:Unit = {
+  const pre_1:T.Unit = {
     meta:{
       nonce:"0",
       hash:"",
@@ -296,7 +296,7 @@ export async function CreateUnit(password:string,pub_key:string,request:string,i
   const nonce = mined.nonce;
   const hash = mined.hash;
   const signature = CryptoSet.SignData(hash,password);
-  const unit:Unit = ((pre_1,nonce,hash,signature)=>{
+  const unit:T.Unit = ((pre_1,nonce,hash,signature)=>{
     pre_1.meta.nonce = nonce;
     pre_1.meta.hash = hash;
     pre_1.meta.signature = signature;

@@ -292,12 +292,12 @@ main.on('ready', ()=>{
     });
     const states:{from:StateSet.State[],to:StateSet.State[],base:string[]} = R.values(result).reduce((reduced:{from:StateSet.State[],to:StateSet.State[],base:string[]},state:StateSet.State)=>{
       if(state.contents.owner===address){
-        reduced.base.push(state.hash);
+        reduced.base[0] = state.hash;
         reduced.from.push(state);
         return reduced;
       }
       else if(state.contents.owner===destination){
-        reduced.base.push(state.hash);
+        reduced.base[1] = state.hash;
         reduced.to.push(state);
         return reduced;
       }
@@ -398,6 +398,8 @@ main.on('ready', ()=>{
    });
 // ウィンドウが閉じられたらアプリも終了
  mainWindow.on('closed', function() {
+ fs.writeFileSync("./json/root.json",JSON.stringify(JSON.parse(fs.readFileSync("./json/genesis_root.json","utf-8"))));
+ fs.writeFileSync("./json/blockchain.json",JSON.stringify(JSON.parse(fs.readFileSync("./json/genesis_block.json","utf-8"))));
  mainWindow = null;
  });
 

@@ -7,7 +7,7 @@ import * as StateSet from './state'
 import * as DagSet from './dag'
 import * as TxSet from './tx'
 import * as PoolSet from './tx_pool'
-import * as IpfsSet from './ipfs'
+import * as T from './types'
 import * as R from 'ramda'
 
 const {map,reduce,filter,forEach,some} = require('p-iteration');
@@ -106,13 +106,13 @@ function HextoNum(str:string):number{
   return parseInt(str, 16);
 }
 
-function SortCandidates(candidates:Candidates[]){
-  return candidates.sort((a:Candidates,b:Candidates)=>{
+function SortCandidates(candidates:T.Candidates[]){
+  return candidates.sort((a:T.Candidates,b:T.Candidates)=>{
     return HextoNum(a.address) - HextoNum(b.address);
   });
 }
 
-function elected(sorted:Candidates[],result:number,now=-1,i=0):string{
+function elected(sorted:T.Candidates[],result:number,now=-1,i=0):string{
   if(result>sorted.length-1) return "";
   const new_now = now + sorted[i].amount;
   if(new_now<result) return elected(sorted,result,new_now,i+1);
@@ -127,7 +127,7 @@ function elected(sorted:Candidates[],result:number,now=-1,i=0):string{
   });
 }*/
 
-async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_currency:string,tag_limit:number,StateData:Trie,DagData:Trie,RequestData:Trie){
+async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_currency:string,tag_limit:number,StateData:Trie,DagData:Trie,RequestData:Trie){
   const hash = block.meta.hash;
   const validatorSign = block.meta.validatorSign;
   const index = block.contents.index;
@@ -193,7 +193,7 @@ async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_curre
   const right_stateroot = StateData.now_root();
   const right_request_root = RequestData.now_root();
 
-  const tx_hash_map = txs.map((tx:TxSet.Tx)=>{
+  const tx_hash_map = txs.map((tx:T.Tx)=>{
     return tx.meta.hash;
   });
 
@@ -219,13 +219,13 @@ async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_curre
   const fee_sum = request_map.filter(t=>t!="").reduce((sum:number,tx:TxSet.RequestTx)=>{
     return sum + tx.contents.data.fee;
   });*/
-  const size_sum = txs.reduce((sum:number,tx:TxSet.Tx):number=>{
+  const size_sum = txs.reduce((sum:number,tx:T.Tx):number=>{
     return sum + Buffer.from(JSON.stringify(tx)).length;
   },0);
 
   const right_validator = elected(SortCandidates(last.contents.candidates),_.get_unicode(block.meta.hash));
 
-  const validator_state:StateSet.State = await StateData.get(validator);
+  const validator_state:T.State = await StateData.get(validator);
   const address = validator_state.contents.owner;
   /*const PnsData = await World.get(Trie.en_key('pns'));
   const pns:AddressAlias[] = await AddressState.get(Trie.en_key('pns'));
@@ -243,7 +243,7 @@ async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_curre
   console.log("committed");
   console.log(commit_SD)*/
   let changed = [StateData,RequestData];
-  const valid_txs = await some(txs, async (tx:TxSet.Tx)=>{
+  const valid_txs = await some(txs, async (tx:T.Tx)=>{
     if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,changed[0]))){
       const news = await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,changed[0],changed[1]);
       changed[0] = news[0];
@@ -263,12 +263,12 @@ async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_curre
   /*ori_SD = await StateData.revert();
   ori_RD = await RequestData.revert();
   console.log(await ori_SD.filter());*/
-  const Sacrifice:{[key:string]:StateSet.State} = await StateData.filter((key:string,value):boolean=>{
-    const state:StateSet.State = value;
+  const Sacrifice:{[key:string]:T.State} = await StateData.filter((key:string,value):boolean=>{
+    const state:T.State = value;
     return state.contents.token=="sacrifice"&&state.amount>0;
   });
 
-  const collected:{[key:string]:Candidates;} = R.values(Sacrifice).reduce((result:{[key:string]:Candidates;},state:StateSet.State)=>{
+  const collected:{[key:string]:T.Candidates;} = R.values(Sacrifice).reduce((result:{[key:string]:T.Candidates;},state:T.State)=>{
     const address = state.contents.owner;
     const amount = state.amount;
     if(result[address]==null) result[address] = {address:address,amount:0};
@@ -347,7 +347,7 @@ async function ValidBlock(block:Block,chain:Block[],fee_by_size:number,key_curre
   }
 }
 
-export async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,fee_by_size:number,key_currency:string,StateData:Trie,DagData:Trie,RequestData:Trie){
+export async function AcceptBlock(block:T.Block,chain:T.Block[],tag_limit:number,fee_by_size:number,key_currency:string,StateData:Trie,DagData:Trie,RequestData:Trie){
   const stateroot = block.contents.stateroot;
   const request_root = block.contents.request_root;
   const validator = block.contents.validator;
@@ -374,20 +374,20 @@ export async function AcceptBlock(block:Block,chain:Block[],tag_limit:number,fee
   }
 }
 
-export function CreateBlock(password:string,chain:Block[],stateroot:string,request_root:string,fee_by_size:number,difficulty:number,validator:string,validatorPub:string,candidates:Candidates[],txs:TxSet.Tx[]){
-  const last:Block = chain[chain.length-1];
+export function CreateBlock(password:string,chain:T.Block[],stateroot:string,request_root:string,fee_by_size:number,difficulty:number,validator:string,validatorPub:string,candidates:T.Candidates[],txs:T.Tx[]){
+  const last:T.Block = chain[chain.length-1];
   const index = chain.length;
   const parenthash = last.meta.hash;
   const date = new Date();
   const timestamp = date.getTime();
-  const tx_hash_map = txs.map((tx:TxSet.Tx)=>{
+  const tx_hash_map = txs.map((tx:T.Tx)=>{
     return tx.meta.hash;
   });
   const tx_root = GetTreeroot(tx_hash_map)[0];
-  const fee = txs.reduce((sum:number,tx:TxSet.Tx)=>{
+  const fee = txs.reduce((sum:number,tx:T.Tx)=>{
     return (sum + fee_by_size * Buffer.from(JSON.stringify(tx)).length);
   },0);
-  const pre_1:Block = {
+  const pre_1:T.Block = {
     meta:{
       hash:"",
       validatorSign:""
@@ -409,7 +409,7 @@ export function CreateBlock(password:string,chain:Block[],stateroot:string,reque
   };
   const hash = _.toHash(JSON.stringify(pre_1.contents));
   const signature:string = CryptoSet.SignData(hash,password);
-  const block:Block = ((pre_1,hash,signature)=>{
+  const block:T.Block = ((pre_1,hash,signature)=>{
     pre_1.meta.hash = hash;
     pre_1.meta.validatorSign = signature;
     return pre_1;

@@ -18,7 +18,7 @@ const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
 async function check_tx(tx, tag_limit, key_currency, fee_by_size, chain, StateData, DagData, RequestsAlias) {
     if (tx.kind == "request") {
-        return await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateData);
+        return await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateData, RequestsAlias);
     }
     else if (tx.kind == "refresh") {
         return await TxSet.ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, StateData, DagData, RequestsAlias);

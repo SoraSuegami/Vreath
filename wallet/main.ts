@@ -3,6 +3,7 @@ declare function require(x: string): any;
 import * as crypto from 'crypto'
 import * as fs from 'fs'
 import {execSync} from 'child_process'
+import * as T from '../core/types'
 import * as _ from '../core/basic'
 import {Trie} from '../core/merkle_patricia'
 import * as StateSet from '../core/state'
@@ -17,7 +18,6 @@ import * as util from 'util'
 
 const CryptoSet = require('../core/crypto_set.js');
 const {map,reduce,filter,forEach,find} = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
 const rlp = require('rlp');
 const request = require('request');
 /*const express = require('express');
@@ -207,6 +207,7 @@ const sacrifice_state:StateSet.State = {
 
 
 
+
 const electron = require("electron");
 
 
@@ -261,6 +262,36 @@ main.on('ready', ()=>{
       return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
     })(arg);
     event.sender.send('R_GetAddress',result);
+    /*
+    const alias:T.RequestsAlias = {
+      req:{
+        state:'yet',
+        index:0,
+        hash:_.toHash("")
+      },
+      ref:{
+        state:'yet',
+        index:0,
+        hash:_.toHash("")
+      }
+    };
+    await db.open();
+    const RequestData = new Trie(db);
+    await RequestData.put("00ca49de7929c881ac8013534b477b986cad41dd34adcfab18c4938f642c4732953507a7d6639f83ebc86217311f64f8b79d04c486121ffe892d7ace48d44929",alias);
+    console.log(await RequestData.filter());
+    const root = RequestData.now_root();
+    console.log(root);
+    let first_block:T.Block = JSON.parse(fs.readFileSync('./json/blockchain.json','utf-8'))[0];
+    console.log(first_block)
+    first_block.contents.parenthash = _.toHash("");
+    first_block.contents.request_root = root;
+    first_block.contents.tx_root = ChainSet.GetTreeroot([])[0];
+    const hash = _.toHash(JSON.stringify(first_block.contents));
+    first_block.meta.hash = hash;
+    console.log(first_block);
+    fs.writeFileSync("./json/genesis_block.json",JSON.stringify([first_block]));
+    await db.close();*/
+
   });
 
   ipc.on('GetBalance',async (event,address:string)=>{
@@ -421,6 +452,7 @@ main.on('ready', ()=>{
    const StateData = new Trie(db,stateroot);
    const DagData = new Trie(db,dag_root);
    const RequestData = new Trie(db,request_root);
+   console.log(await RequestData.filter())
    const new_pool:PoolSet.Pool = await PoolSet.Tx_to_Pool(pool,tx,tag_limit,key_currency,fee_by_size,chain,StateData,DagData,RequestData);
    console.log("OK")
    await db.close();

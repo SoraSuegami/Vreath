@@ -15,7 +15,7 @@ const {map,reduce,filter,forEach,some} = require('p-iteration');
 //const levelup = require('levelup');
 //const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
+
 const rlp = require('rlp');
 
 const CryptoSet = require('./crypto_set.js');
@@ -65,7 +65,7 @@ export type Block = {
   transactions: TxSet.Tx[];
 }
 
-function GetTreeroot(pre:string[]):string[]{
+export function GetTreeroot(pre:string[]):string[]{
   if(pre.length==0) return [_.toHash("")];
   else if(pre.length==1) return pre;
   else{
@@ -244,7 +244,8 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
   console.log(commit_SD)*/
   let changed = [StateData,RequestData];
   const valid_txs = await some(txs, async (tx:T.Tx)=>{
-    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,changed[0]))){
+    try{
+    if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,changed[0],changed[1]))){
       const news = await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,changed[0],changed[1]);
       changed[0] = news[0];
       changed[1] = news[1];
@@ -259,6 +260,8 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
     else{
       return true;
     }
+    }
+    catch(e){console.log(e)}
   });
   /*ori_SD = await StateData.revert();
   ori_RD = await RequestData.revert();

@@ -1,6 +1,29 @@
 declare function require(x: string): any;
+
+import * as crypto from 'crypto'
+import * as _ from './basic'
+import {Trie} from './merkle_patricia'
+import * as StateSet from './state'
+import * as DagSet from './dag'
+import * as TxSet from './tx'
+import * as PoolSet from './tx_pool'
+import * as T from './types'
+import * as R from 'ramda'
+
+const VM = require('ethereumjs-vm');
+
+const vm = new VM();
+const code = '7f4e616d65526567000000000000000000000000000000000000000000000000003055307f4e616d6552656700000000000000000000000000000000000000000000000000557f436f6e666967000000000000000000000000000000000000000000000000000073661005d2720d855f1d9976f88bb10c1a3398c77f5573661005d2720d855f1d9976f88bb10c1a3398c77f7f436f6e6669670000000000000000000000000000000000000000000000000000553360455560df806100c56000396000f3007f726567697374657200000000000000000000000000000000000000000000000060003514156053576020355415603257005b335415603e5760003354555b6020353360006000a233602035556020353355005b60007f756e72656769737465720000000000000000000000000000000000000000000060003514156082575033545b1560995733335460006000a2600033545560003355005b60007f6b696c6c00000000000000000000000000000000000000000000000000000000600035141560cb575060455433145b1560d25733ff5b6000355460005260206000f3'
+
+vm.runCode({
+  code: Buffer.from(code, 'hex'), // code needs to be a Buffer
+  gasLimit: Buffer.from('55555555', 'hex')
+}, function(err, results){
+  if(err) console.log(err);
+  console.log('returned: ' + results.return.toString('hex'));
+})
 //const {promisify} = require("util");
-import * as fs from 'fs'
+/*import * as fs from 'fs'
 import * as exec from 'exec'
 //const readFile = promisify(fs.readFile);
 const sexpression = require('sexpression');
@@ -74,7 +97,7 @@ const opecode = fs.readFile("./adder.wat",(err,data)=>{
   //console.log(result);
 
 
-  const add_func = choose_func(result,'add');
+  //const add_func = choose_func(result,'add');
   /*const edited = add_func.reduce((result,val,i:number,array)=>{
     if(val.name!=null&&array[i+1]!=null&&val.name=='param'){
       if(array[i+1].match(/^\$/)){
@@ -92,10 +115,10 @@ const opecode = fs.readFile("./adder.wat",(err,data)=>{
 
   });*/
 
-  console.log(add_func);
+  /*console.log(add_func);
   return result;
   //console.dir(sexpression.parse(data.toString())[1][5][1]);
-});
+});*/
 
 /*
 readFile("./adder.wasm").

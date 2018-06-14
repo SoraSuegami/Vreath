@@ -6,17 +6,9 @@ export type StateContent = {
   product: string;
 };
 
-export type ReqTxInfo = {
-  state:'yet' | 'already';
-  index:number;
-  hash:string;
-}
-
 export type State = {
   hash: string;
   amount: number;
-  valid:boolean;
-  request: ReqTxInfo;
   contents: StateContent;
 };
 
@@ -142,10 +134,15 @@ export type Unit = {
   log_raw:any[];
 }
 
-
-export type RequestsAlias = {
+export type ReleationInfo = {
+  state:'yet' | 'already';
   index:number;
   hash:string;
+}
+
+export type RequestsAlias = {
+  req:ReleationInfo;
+  ref:ReleationInfo;
 }
 
 export type Candidates = {

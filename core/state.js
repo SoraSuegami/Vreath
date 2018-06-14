@@ -1,20 +1,13 @@
 "use strict";
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const _ = __importStar(require("./basic"));
-const CryptoSet = require('./crypto_set.js');
-const { map, reduce, filter, forEach } = require('p-iteration');
+exports.__esModule = true;
+var _ = require("./basic");
+var CryptoSet = require('./crypto_set.js');
+var _a = require('p-iteration'), map = _a.map, reduce = _a.reduce, filter = _a.filter, forEach = _a.forEach;
 //const RadixTree = require('dfinity-radix-tree');
 //const levelup = require('levelup');
 //const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
+var IPFS = require('ipfs');
 /*export type Token = {
   token: string;
   issued: number;
@@ -29,7 +22,7 @@ function FunctoStr(func) {
     return func.toString().replace(/^\(\)\s=>\s{/, "").replace(/}$/, "");
 }
 function CreateState(amount, owner, token, tag, data, product) {
-    const pre_1 = {
+    var pre_1 = {
         hash: "",
         amount: amount,
         contents: {
@@ -40,8 +33,8 @@ function CreateState(amount, owner, token, tag, data, product) {
             product: product
         }
     };
-    const hash = _.toHash(JSON.stringify(pre_1.contents));
-    const state = ((pre_1, hash) => {
+    var hash = _.toHash(JSON.stringify(pre_1.contents));
+    var state = (function (pre_1, hash) {
         pre_1.hash = hash;
         return pre_1;
     })(pre_1, hash);

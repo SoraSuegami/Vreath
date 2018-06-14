@@ -20,7 +20,6 @@ const R = __importStar(require("ramda"));
 const util = __importStar(require("util"));
 const CryptoSet = require('../core/crypto_set.js');
 const { map, reduce, filter, forEach, find } = require('p-iteration');
-const RadixTree = require('dfinity-radix-tree');
 const rlp = require('rlp');
 const request = require('request');
 /*const express = require('express');
@@ -247,6 +246,35 @@ con_1.db.close().then(() => {
                 return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
             })(arg);
             event.sender.send('R_GetAddress', result);
+            /*
+            const alias:T.RequestsAlias = {
+              req:{
+                state:'yet',
+                index:0,
+                hash:_.toHash("")
+              },
+              ref:{
+                state:'yet',
+                index:0,
+                hash:_.toHash("")
+              }
+            };
+            await db.open();
+            const RequestData = new Trie(db);
+            await RequestData.put("00ca49de7929c881ac8013534b477b986cad41dd34adcfab18c4938f642c4732953507a7d6639f83ebc86217311f64f8b79d04c486121ffe892d7ace48d44929",alias);
+            console.log(await RequestData.filter());
+            const root = RequestData.now_root();
+            console.log(root);
+            let first_block:T.Block = JSON.parse(fs.readFileSync('./json/blockchain.json','utf-8'))[0];
+            console.log(first_block)
+            first_block.contents.parenthash = _.toHash("");
+            first_block.contents.request_root = root;
+            first_block.contents.tx_root = ChainSet.GetTreeroot([])[0];
+            const hash = _.toHash(JSON.stringify(first_block.contents));
+            first_block.meta.hash = hash;
+            console.log(first_block);
+            fs.writeFileSync("./json/genesis_block.json",JSON.stringify([first_block]));
+            await db.close();*/
         });
         ipc.on('GetBalance', async (event, address) => {
             await con_1.db.open();
@@ -406,6 +434,7 @@ con_1.db.close().then(() => {
             const StateData = new merkle_patricia_1.Trie(con_1.db, stateroot);
             const DagData = new merkle_patricia_1.Trie(con_1.db, dag_root);
             const RequestData = new merkle_patricia_1.Trie(con_1.db, request_root);
+            console.log(await RequestData.filter());
             const new_pool = await PoolSet.Tx_to_Pool(pool, tx, con_1.tag_limit, con_1.key_currency, con_1.fee_by_size, chain, StateData, DagData, RequestData);
             console.log("OK");
             await con_1.db.close();

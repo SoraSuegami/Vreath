@@ -15,7 +15,6 @@ const { map, reduce, filter, forEach, some } = require('p-iteration');
 //const levelup = require('levelup');
 //const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
 const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
 exports.fee_by_size = 10;
@@ -41,6 +40,7 @@ function GetTreeroot(pre) {
         return GetTreeroot(union);
     }
 }
+exports.GetTreeroot = GetTreeroot;
 /*async function ChildHashs(parent:string,parents_dag){
   const hashs:string[] = await parents_dag.get(Trie.en_key(parent));
   return hashs;
@@ -186,20 +186,25 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
     console.log(commit_SD)*/
     let changed = [StateData, RequestData];
     const valid_txs = await some(txs, async (tx) => {
-        if (tx.kind == "request" && (await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, changed[0]))) {
-            const news = await TxSet.AcceptRequestTx(tx, chain, validator, key_currency, changed[0], changed[1]);
-            changed[0] = news[0];
-            changed[1] = news[1];
-            return false;
+        try {
+            if (tx.kind == "request" && (await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, changed[0], changed[1]))) {
+                const news = await TxSet.AcceptRequestTx(tx, chain, validator, key_currency, changed[0], changed[1]);
+                changed[0] = news[0];
+                changed[1] = news[1];
+                return false;
+            }
+            else if (tx.kind == "refresh" && (await TxSet.ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, changed[0], DagData, changed[1]))) {
+                const news = await TxSet.AcceptRefreshTx(tx, chain, validator, key_currency, changed[0], changed[1]);
+                changed[0] = news[0];
+                changed[1] = news[1];
+                return false;
+            }
+            else {
+                return true;
+            }
         }
-        else if (tx.kind == "refresh" && (await TxSet.ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, changed[0], DagData, changed[1]))) {
-            const news = await TxSet.AcceptRefreshTx(tx, chain, validator, key_currency, changed[0], changed[1]);
-            changed[0] = news[0];
-            changed[1] = news[1];
-            return false;
-        }
-        else {
-            return true;
+        catch (e) {
+            console.log(e);
         }
     });
     /*ori_SD = await StateData.revert();

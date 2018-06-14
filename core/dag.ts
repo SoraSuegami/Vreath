@@ -14,7 +14,7 @@ const {map,reduce,filter,forEach,some} = require('p-iteration');
 //const RadixTree = require('dfinity-radix-tree');
 ////const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
+
 const {NodeVM, VMScript} = require('vm2');
 const rlp = require('rlp');
 
@@ -246,7 +246,7 @@ export async function AcceptUnit(unit:T.Unit,log_limit:number,chain:T.Block[],Da
   return [new_dag,new_memory];
 }
 
-async function GetEdgeDag(DagData:T.Trie){
+async function GetEdgeDag(DagData:Trie){
   const filtered:{parents:string[],children:string[]} = R.values(await DagData.filter()).reduce((result:{parents:string[],children:string[]},val:T.Unit)=>{
     result.parents.push(val.contents.parenthash);
     result.children.push(val.meta.hash);

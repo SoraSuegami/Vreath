@@ -13,7 +13,6 @@ const { map, reduce, filter, forEach, some } = require('p-iteration');
 //const RadixTree = require('dfinity-radix-tree');
 ////const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
 const { NodeVM, VMScript } = require('vm2');
 const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');

@@ -26,7 +26,7 @@ export type Pool = {
 
 async function check_tx(tx:T.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:T.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
   if(tx.kind=="request"){
-    return await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,StateData)
+    return await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,StateData,RequestsAlias);
   }
   else if(tx.kind=="refresh"){
     return await TxSet.ValidRefreshTx(tx,chain,key_currency,fee_by_size,tag_limit,StateData,DagData,RequestsAlias);

@@ -126,6 +126,8 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
 
   const stateroot = StateData.now_root();
   const solvency_state:T.State = await StateData.get(solvency);
+  console.log(base)
+  console.log(await StateData.filter())
   const base_state:T.State[] = await reduce(base,async (array:T.State[],id:string)=>{
     const geted:T.State = await StateData.get(id);
     if(Object.keys(geted).length!=0) return array.concat(geted);
@@ -205,7 +207,6 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
   }
   else if(type=='change'&&amount_result!=0){
     console.log("invalid type change");
-    console.log(amount_result)
     return false;
   }
   else if(type=='scrap'&&amount_result>=0){
@@ -368,6 +369,7 @@ function TxIsuue(tx:T.RequestTx,bases:T.State[]):T.State[]{
 function TxChange(tx:T.RequestTx,bases:T.State[]):T.State[]{
   if(tx.contents.data.type!="change") return bases;
   const outputs = tx.contents.data.output;
+  console.log(bases)
   console.log(outputs)
   const refreshed = bases.map((state:T.State,i:number)=>{
     const target = outputs[i];

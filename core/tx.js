@@ -38,6 +38,8 @@ async function ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateDat
     const date = new Date();
     const stateroot = StateData.now_root();
     const solvency_state = await StateData.get(solvency);
+    console.log(base);
+    console.log(await StateData.filter());
     const base_state = await reduce(base, async (array, id) => {
         const geted = await StateData.get(id);
         if (Object.keys(geted).length != 0)
@@ -119,7 +121,6 @@ async function ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateDat
     }
     else if (type == 'change' && amount_result != 0) {
         console.log("invalid type change");
-        console.log(amount_result);
         return false;
     }
     else if (type == 'scrap' && amount_result >= 0) {
@@ -273,6 +274,7 @@ function TxChange(tx, bases) {
     if (tx.contents.data.type != "change")
         return bases;
     const outputs = tx.contents.data.output;
+    console.log(bases);
     console.log(outputs);
     const refreshed = bases.map((state, i) => {
         const target = outputs[i];

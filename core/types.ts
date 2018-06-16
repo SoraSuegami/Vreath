@@ -168,9 +168,10 @@ export type BlockContents = {
   tx_root: string;
   fee:number;
   difficulty:number;
+  stake_diff:number;
   validator: string;
   validatorPub: string;
-  candidates: Candidates[];
+  candidates: string;
 }
 
 export type Block = {

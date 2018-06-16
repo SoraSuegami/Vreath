@@ -6,3 +6,5 @@ export const tag_limit = 10000;
 export const key_currency = "nix";
 export const fee_by_size = 0.0001;
 export const log_limit = 10000000;
+export const unit_token = "unit"
+export const group_size = 1000;

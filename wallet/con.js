@@ -8,3 +8,5 @@ exports.tag_limit = 10000;
 exports.key_currency = "nix";
 exports.fee_by_size = 0.0001;
 exports.log_limit = 10000000;
+exports.unit_token = "unit";
+exports.group_size = 1000;

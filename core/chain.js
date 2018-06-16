@@ -60,19 +60,11 @@ exports.GetTreeroot = GetTreeroot;
 function HextoNum(str) {
     return parseInt(str, 16);
 }
+exports.HextoNum = HextoNum;
 function SortCandidates(candidates) {
     return candidates.sort((a, b) => {
         return HextoNum(a.address) - HextoNum(b.address);
     });
-}
-function elected(sorted, result, now = -1, i = 0) {
-    if (result > sorted.length - 1)
-        return "";
-    const new_now = now + sorted[i].amount;
-    if (new_now < result)
-        return elected(sorted, result, new_now, i + 1);
-    else
-        return sorted[i].address;
 }
 /*async function TxCheckintoChain(txs:TxSet.Tx[],parents_dag,used_tx){
   return await some(txs, async (tx:TxSet.Tx)=>{
@@ -81,7 +73,117 @@ function elected(sorted, result, now = -1, i = 0) {
     return not_confirmed_check==true || used_tx_check==true;
   });
 }*/
-async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, StateData, DagData, RequestData) {
+function SplitArray(scaled, group_size) {
+    let result = [{}];
+    let i = 0;
+    let sum = 0;
+    while (i < scaled.length) {
+        let can = scaled[i];
+        let added = can.amount + sum;
+        if (added > group_size) {
+            result[result.length - 1][can.address] = can.amount - added + group_size;
+            result.push({});
+            sum = 0;
+            //console.log(sum);
+            //scaled.shift();
+            scaled.push({ address: can.address, amount: added - group_size });
+        }
+        else {
+            result[result.length - 1][can.address] = can.amount;
+            sum += can.amount;
+            //scaled.shift();
+            //console.log(sum);
+        }
+        /*console.log("result:");
+        console.log(result);
+        console.log("scaled:");
+        console.log(scaled);*/
+        //console.log(scaled);
+        i++;
+    }
+    return result;
+    /*return scaled.reduce((result:{[key:string]:number;}[],can)=>{
+      const added:number = can.amount + result[result.length-1].reduce((sum:number,c:T.Candidates)=>{return sum+c.amount});
+      if(added>group_size){
+        result[result.length-1][can.address] = can.amount - added + group_size;
+  
+        result.push({[can.address]:added-group_size});
+        return result;
+      }
+      else{
+        result[result.length-1][can.address] = can.amount;
+        return result;
+      }
+    });*/
+}
+function elected(sorted, standard) {
+    return sorted.reduce((result, can, index) => {
+        const pre_sum = sorted.slice(0, index).reduce((sum, c) => {
+            return sum + c.amount;
+        });
+        if (can.amount + pre_sum >= standard) {
+            return { address: can.address, amount: standard - pre_sum };
+        }
+        else {
+            return {};
+        }
+    });
+}
+function RightCandidates(Sacrifice, group_size, parenthash) {
+    const collected = R.values(Sacrifice).reduce((result, state) => {
+        const address = state.contents.owner;
+        const amount = state.amount;
+        if (result[address] == null)
+            result[address] = { address: address, amount: 0 };
+        result[address]["amount"] += amount;
+        return result;
+    }, {});
+    const sorted = SortCandidates(R.values(collected));
+    const sacrifice_sum = sorted.reduce((sum, can) => {
+        return sum + can.amount;
+    }, 0);
+    const scaled = sorted.map((can) => {
+        can.amount *= group_size;
+        return can;
+    });
+    const splited = SplitArray(scaled, sacrifice_sum);
+    const right_candidates = splited.map((can) => {
+        const this_sum = R.values(can).reduce((sum, amount) => {
+            return sum + amount;
+        });
+        const candidates = Object.entries(can).map((c) => {
+            return { address: c[0], amount: c[1] };
+        });
+        return elected(candidates, HextoNum(parenthash) % this_sum);
+    });
+    const formated = right_candidates.reduce((result, can) => {
+        if (!(can.address in result)) {
+            result[can.address] = 0;
+        }
+        result[can.address] += can.amount / group_size;
+        return result;
+    }, {});
+    return Object.entries(formated).reduce((result, can) => {
+        return result.concat({ address: can[0], amount: can[1] });
+    }, []);
+}
+exports.RightCandidates = RightCandidates;
+function PoS_mining(parenthash, address, balance, difficulty) {
+    let date;
+    let timestamp;
+    do {
+        date = new Date();
+        timestamp = date.getTime();
+        console.log(timestamp.toString());
+        console.log("hash");
+        console.log(HextoNum(_.toHash(parenthash + address + timestamp.toString())));
+        console.log("standard");
+        console.log(Math.pow(2, 256) * balance / difficulty);
+    } while (HextoNum(_.toHash(parenthash + address + timestamp.toString())) > Math.pow(2, 256) * balance / difficulty);
+    return timestamp;
+}
+exports.PoS_mining = PoS_mining;
+async function ValidBlock(block, chain, fee_by_size, key_currency, unit_token, tag_limit, group_size, last_candidates, StateData, DagData, RequestData) {
     const hash = block.meta.hash;
     const validatorSign = block.meta.validatorSign;
     const index = block.contents.index;
@@ -95,6 +197,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
     const tx_root = block.contents.tx_root;
     const fee = block.contents.fee;
     const difficulty = block.contents.difficulty;
+    const stake_diff = block.contents.stake_diff;
     const validator = block.contents.validator;
     const validatorPub = block.contents.validatorPub;
     const candidates = block.contents.candidates;
@@ -166,9 +269,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
     const size_sum = txs.reduce((sum, tx) => {
         return sum + Buffer.from(JSON.stringify(tx)).length;
     }, 0);
-    const right_validator = elected(SortCandidates(last.contents.candidates), _.get_unicode(block.meta.hash));
-    const validator_state = await StateData.get(validator);
-    const address = validator_state.contents.owner;
+    //const right_validator = elected(SortCandidates(last.contents.candidates),_.get_unicode(block.meta.hash));
     /*const PnsData = await World.get(Trie.en_key('pns'));
     const pns:AddressAlias[] = await AddressState.get(Trie.en_key('pns'));
     const sacrifice_holders = await reduce(pns,async (result,alias:AddressAlias)=>{
@@ -212,17 +313,17 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
     console.log(await ori_SD.filter());*/
     const Sacrifice = await StateData.filter((key, value) => {
         const state = value;
-        return state.contents.token == "sacrifice" && state.amount > 0;
+        return state.contents.token == unit_token && state.amount > 0;
     });
-    const collected = R.values(Sacrifice).reduce((result, state) => {
-        const address = state.contents.owner;
-        const amount = state.amount;
-        if (result[address] == null)
-            result[address] = { address: address, amount: 0 };
-        result[address]["amount"] += amount;
-        return result;
-    }, {});
-    const sorted = SortCandidates(R.values(collected));
+    const right_candidates = RightCandidates(Sacrifice, group_size, parenthash);
+    const validator_state = await StateData.get(validator);
+    const address = validator_state.contents.owner;
+    const sacrifice_amount = last_candidates.reduce((amount, can) => {
+        if (can.address == address)
+            return can.amount;
+        else
+            return 0;
+    });
     if (hash != _.toHash(JSON.stringify(block.contents))) {
         console.log("invalid hash");
         return false;
@@ -239,7 +340,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
         console.log("invalid parenthash");
         return false;
     }
-    else if (timestamp > date.getTime()) {
+    else if (timestamp > date.getTime() || (HextoNum(_.toHash(parenthash + address + timestamp.toString())) > Math.pow(2, 256) * sacrifice_amount / stake_diff)) {
         console.log("invalid timestamp");
         return false;
     }
@@ -274,7 +375,11 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
     else if (fee != fee_by_size * size_sum) {
         console.log("invalid fee");
     }
-    else if (validator_state.contents.token != key_currency /*||address!=right_validator*/) {
+    else if (candidates != _.toHash(JSON.stringify(right_candidates))) {
+        console.log("invalid candidates");
+        return false;
+    }
+    else if (validator_state.contents.token != key_currency || sacrifice_amount <= 0 /*||address!=right_validator*/) {
         console.log("invalid validator");
         return false;
     }
@@ -290,14 +395,20 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, St
         return true;
     }
 }
-async function AcceptBlock(block, chain, tag_limit, fee_by_size, key_currency, StateData, DagData, RequestData) {
+async function AcceptBlock(block, chain, tag_limit, fee_by_size, key_currency, unit_token, group_size, last_candidates, StateData, DagData, RequestData) {
     const stateroot = block.contents.stateroot;
     const request_root = block.contents.request_root;
     const validator = block.contents.validator;
-    if (!await ValidBlock(block, chain, fee_by_size, key_currency, tag_limit, StateData, DagData, RequestData))
-        return { chain: chain, state: stateroot, request: request_root };
+    if (!await ValidBlock(block, chain, fee_by_size, key_currency, unit_token, tag_limit, group_size, last_candidates, StateData, DagData, RequestData))
+        return { chain: chain, state: stateroot, request: request_root, candidates: last_candidates };
     console.log("OK");
     console.log(await StateData.filter());
+    const Sacrifice = await StateData.filter((key, value) => {
+        const state = value;
+        return state.contents.token == unit_token && state.amount > 0;
+    });
+    const new_candidates = RightCandidates(Sacrifice, group_size, block.contents.parenthash);
+    console.log(new_candidates);
     /*
     const news:Trie[] = await reduce(block.transactions, async (states,tx:TxSet.Tx)=>{
       if(tx.kind=="request"){
@@ -314,16 +425,15 @@ async function AcceptBlock(block, chain, tag_limit, fee_by_size, key_currency, S
     return {
         chain: new_chain,
         state: StateData.now_root(),
-        request: RequestData.now_root()
+        request: RequestData.now_root(),
+        candidates: new_candidates
     };
 }
 exports.AcceptBlock = AcceptBlock;
-function CreateBlock(password, chain, stateroot, request_root, fee_by_size, difficulty, validator, validatorPub, candidates, txs) {
+async function CreateBlock(password, chain, stateroot, request_root, fee_by_size, difficulty, stake_diff, validator, validatorPub, unit_token, group_size, last_candidates, txs, StateData) {
     const last = chain[chain.length - 1];
     const index = chain.length;
     const parenthash = last.meta.hash;
-    const date = new Date();
-    const timestamp = date.getTime();
     const tx_hash_map = txs.map((tx) => {
         return tx.meta.hash;
     });
@@ -331,6 +441,20 @@ function CreateBlock(password, chain, stateroot, request_root, fee_by_size, diff
     const fee = txs.reduce((sum, tx) => {
         return (sum + fee_by_size * Buffer.from(JSON.stringify(tx)).length);
     }, 0);
+    const Sacrifice = await StateData.filter((key, value) => {
+        const state = value;
+        return state.contents.token == unit_token && state.amount > 0;
+    });
+    const candidates = _.toHash(JSON.stringify(RightCandidates(Sacrifice, group_size, parenthash)));
+    const validator_state = await StateData.get(validator);
+    const address = validator_state.contents.owner;
+    const sacrifice_amount = last_candidates.reduce((amount, can) => {
+        if (can.address == address)
+            return can.amount;
+        else
+            return 0;
+    });
+    const timestamp = PoS_mining(parenthash, validator, sacrifice_amount, stake_diff);
     const pre_1 = {
         meta: {
             hash: "",
@@ -345,6 +469,7 @@ function CreateBlock(password, chain, stateroot, request_root, fee_by_size, diff
             tx_root: tx_root,
             fee: fee,
             difficulty: difficulty,
+            stake_diff: stake_diff,
             validator: validator,
             validatorPub: validatorPub,
             candidates: candidates

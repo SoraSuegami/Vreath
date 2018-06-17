@@ -554,7 +554,7 @@ main.on('ready', async () => {
     }).catch(e => { console.log(e); });
     app.post('/unit', async (req, res) => {
         const unit = req.body;
-        //console.log(unit);
+        //console.log(unit)
         const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
         const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
         const dag_root = roots.dag_root;

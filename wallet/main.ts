@@ -591,7 +591,7 @@ main.on('ready', async ()=>{
  app.post('/unit',async (req,res)=>{
 
    const unit:DagSet.Unit = req.body;
-   //console.log(unit);
+   //console.log(unit)
    const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8'));
    const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8'));
    const dag_root:string = roots.dag_root;

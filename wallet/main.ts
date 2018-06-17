@@ -555,7 +555,7 @@ main.on('ready', async ()=>{
    }
    res.json(new_pool);
 
- }).catch(e=>{console.log(e)});
+ });
 
  app.post('/block',async (req,res)=>{
 
@@ -586,7 +586,7 @@ main.on('ready', async ()=>{
    });
    fs.writeFileSync("./json/tx_pool.json",JSON.stringify(pool));
    res.json(accepted)
- }).catch(e=>{console.log(e)});
+ });
 
  app.post('/unit',async (req,res)=>{
 
@@ -610,7 +610,7 @@ main.on('ready', async ()=>{
    fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(unit.log_raw[0])));
    console.log("unit accepted");
    res.json(unit);
- }).catch(e=>{console.log(e)});
+ });
 
  const server = app.listen(process.env.Phoenix_PORT, process.env.Phoenix_IP);
 

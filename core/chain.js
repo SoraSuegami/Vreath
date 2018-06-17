@@ -297,7 +297,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, unit_token, t
                 return false;
             }
             else if (tx.kind == "refresh" && (await TxSet.ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, changed[0], DagData, changed[1]))) {
-                const news = await TxSet.AcceptRefreshTx(tx, chain, validator, key_currency, changed[0], changed[1]);
+                const news = await TxSet.AcceptRefreshTx(tx, chain, validator, key_currency, fee_by_size, changed[0], changed[1]);
                 changed[0] = news[0];
                 changed[1] = news[1];
                 return false;

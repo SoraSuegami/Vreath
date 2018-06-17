@@ -493,18 +493,16 @@ async function RefreshRequestRoot(request:T.RequestTx,refresh:T.RefreshTx,index:
   return new_root;
 }*/
 async function Fee_to_Verifier(solvency:T.State,payee:T.State,fee:number,key_currency:string){
-  if(solvency.contents.token!=key_currency||payee.contents.token!=key_currency) return [solvency,payee];
+  if(solvency.contents.token!=key_currency||payee.contents.token!=key_currency||solvency.hash==payee.hash) return [solvency,payee];
   solvency.amount -= fee;
-  if(solvency.hash==payee.hash) payee.amount = solvency.amount;
   payee.amount += fee;
   return [solvency,payee];
 }
 
 
 async function Fee_to_Validator(pay_state:T.State,validator_state:T.State,fee:number,key_currency:string){
-  if(pay_state.contents.token!=key_currency||validator_state.contents.token!=key_currency) return [pay_state,validator_state];
+  if(pay_state.contents.token!=key_currency||validator_state.contents.token!=key_currency||pay_state.hash==validator_state.hash) return [pay_state,validator_state];
   pay_state.amount -= fee;
-  if(pay_state.hash==validator_state.hash) validator_state.amount = pay_state.amount
   validator_state.amount += fee;
   return [pay_state,validator_state];
 }
@@ -544,7 +542,7 @@ export async function AcceptRequestTx(tx:T.RequestTx,chain:T.Block[],validator:s
   return [StateData,new_RequestData];
 }
 
-export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:string,key_currency:string,StateData:Trie,RequestData:Trie){
+export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:string,key_currency:string,fee_by_size:number,StateData:Trie,RequestData:Trie){
   const index = tx.contents.index;
   const request_tx:T.RequestTx = chain[index].transactions.reduce((result:T.RequestTx[],t:T.Tx)=>{
     if(t.kind=="request"&&t.meta.hash==tx.contents.request) return result.concat(t);
@@ -553,11 +551,12 @@ export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:s
   const for_fee = [request_tx.contents.data.solvency,tx.contents.payee,validator]
   const for_fee_state = await map(for_fee, async (key:string)=>{
     const state:T.State = await StateData.get(key);
-    await StateData.delete(key);
     return state;
   });
+  console.log("for_fee_state:")
+  console.log(for_fee_state)
   const verifier_fee_payed = await Fee_to_Verifier(for_fee_state[0],for_fee_state[1],request_tx.contents.data.fee,key_currency);
-  const validator_fee_payed = await Fee_to_Validator(verifier_fee_payed[1],for_fee_state[2],Buffer.from(JSON.stringify(tx)).length,key_currency);
+  const validator_fee_payed = await Fee_to_Validator(verifier_fee_payed[1],for_fee_state[2],fee_by_size*Buffer.from(JSON.stringify(tx)).length,key_currency);
   const states_for_fee:T.State[] = [verifier_fee_payed[0],validator_fee_payed[0],validator_fee_payed[1]];
   const hash_for_fee = states_for_fee.map((state:T.State)=>{
     return _.toHash(JSON.stringify(state.contents));
@@ -571,7 +570,12 @@ export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:s
     if(already!=-1) return states_for_fee[already];
     else return state;
   });
+
   const new_state = NewState(request_tx,bases);
+
+  await forEach(request_tx.contents.data.base, async (key:string)=>{
+    await StateData.delete(key);
+  });
 
   await forEach(new_state, async (state:T.State)=>{
     await StateData.put(state.hash,state);

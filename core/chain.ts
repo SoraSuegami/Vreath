@@ -74,11 +74,12 @@ export function GetTreeroot(pre:string[]):string[]{
     if(i%2==0){
       const left = val;
       const right = ((left:string,i:number,array:string[])=>{
-        if(array[i+1]==null) return "";
+        if(array[i+1]==null) return _.toHash("");
         else return array[i+1];
       })(left,i,array);
       return result.concat(_.toHash(left+right));
     }
+    else return result;
   },[]);
   return GetTreeroot(union);
   }
@@ -352,7 +353,7 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
   const valid_txs = await some(txs, async (tx:T.Tx)=>{
     try{
     if(tx.kind=="request"&&(await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,changed[0],changed[1]))){
-      const news = await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,changed[0],changed[1]);
+      const news = await TxSet.AcceptRequestTx(tx,chain,validator,key_currency,fee_by_size,changed[0],changed[1]);
       changed[0] = news[0];
       changed[1] = news[1];
       return false;
@@ -386,6 +387,9 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
     else return 0;
   });
 
+  const this_candidates = last_candidates.map((can:T.Candidates)=>{
+    return can.address;
+  });
 
   if(hash!=_.toHash(JSON.stringify(block.contents))){
     console.log("invalid hash");
@@ -442,7 +446,7 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
     console.log("invalid candidates");
     return false;
   }
-  else if(validator_state.contents.token!=key_currency||sacrifice_amount<=0/*||address!=right_validator*/){
+  else if(validator_state.contents.token!=key_currency||sacrifice_amount<=0||this_candidates.indexOf(address)==-1){
     console.log("invalid validator");
     return false;
   }

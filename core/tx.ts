@@ -126,8 +126,6 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
 
   const stateroot = StateData.now_root();
   const solvency_state:T.State = await StateData.get(solvency);
-  console.log(base)
-  console.log(await StateData.filter())
   const base_state:T.State[] = await reduce(base,async (array:T.State[],id:string)=>{
     const geted:T.State = await StateData.get(id);
     if(Object.keys(geted).length!=0) return array.concat(geted);
@@ -150,6 +148,9 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
     return Object.keys(pre_state).length!=0&&base.indexOf(state.hash)==-1;
   });
 
+  /*await forEach(base, async (key:string)=>{
+    await StateData.delete(key);
+  })*/
 
   const requested_check = await some(base, async (key:string)=>{
     const requested:T.RequestsAlias = await RequestsAlias.get(key);
@@ -252,6 +253,7 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
   console.log(unit)
   const request_tx:T.RequestTx = chain[index].transactions.reduce((result:T.RequestTx[],tx:T.Tx)=>{
     if(tx.kind=="request"&&tx.meta.hash==request) return result.concat(tx);
+    else return result;
   },[])[0];
 
   const token = request_tx.contents.data.token;
@@ -264,7 +266,7 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
 
   const payee_state:T.State = await StateData.get(tx.contents.payee);
 
-  //console.log(payee_state);
+  //console.log(payee_state)
 
   const solvency_state:T.State = await StateData.get(request_tx.contents.data.solvency);
 
@@ -287,11 +289,12 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
   const refreshed_check = await some(new_request_state, async (state:T.State)=>{
     const key = state.hash;
     const aliase:T.RequestsAlias = await RequestsAlias.get(key);
-    console.log(aliase);
     return Object.keys(aliase).length!=0 && aliase.ref.state=="already";
   });
-  console.log(await RequestsAlias.filter());
 
+  /*await forEach(base, async (key:string)=>{
+    await StateData.delete(key);
+  })*/
   const state_check = new_request_state.some((state:T.State)=>{
     if(state.hash==solvency_state.hash){
       state.amount -= (fee+fee_by_size*Buffer.from(JSON.stringify(tx)).length);
@@ -324,6 +327,7 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
     return false;
   }
   else if(_.toHash(JSON.stringify(unit.contents.data))!=_.toHash(JSON.stringify(tx.contents))){
+    console.log(unit)
     console.log("invalid evidence");
     return false;
   }
@@ -369,13 +373,13 @@ function TxIsuue(tx:T.RequestTx,bases:T.State[]):T.State[]{
 function TxChange(tx:T.RequestTx,bases:T.State[]):T.State[]{
   if(tx.contents.data.type!="change") return bases;
   const outputs = tx.contents.data.output;
-  console.log(bases)
-  console.log(outputs)
+  //console.log(bases)
+  //console.log(outputs)
   const refreshed = bases.map((state:T.State,i:number)=>{
     const target = outputs[i];
     return ChangeState(Number(state.amount)+Number(target.amount),target.contents);
   });
-  console.log(refreshed);
+  //console.log(refreshed);
   return refreshed.concat(outputs.slice(bases.length,outputs.length));
   /*return bases.map((state:StateSet.State,i:number)=>{
     const output = tx.contents.data.output[i];
@@ -430,7 +434,6 @@ async function  RequestRequestRoot(request:T.RequestTx,index:number,Aliases:Trie
     req:req,
     ref:ref
   };
-  console.log(request.contents.data.output.length);
   await forEach(request.contents.data.base, async (key:string)=>{
     await Aliases.delete(key);
     await Aliases.put(key,obj);
@@ -453,7 +456,6 @@ async function RefreshRequestRoot(request:T.RequestTx,refresh:T.RefreshTx,index:
     req:req,
     ref:ref
   };
-  console.log(request.contents.data.output.length);
   await forEach(request.contents.data.output, async (state:T.State)=>{
     await Aliases.delete(state.hash);
     await Aliases.put(state.hash,obj);
@@ -530,12 +532,12 @@ async function Fee_to_Validator(pay_state:T.State,validator_state:T.State,fee:nu
   return new_root;
 }*/
 
-export async function AcceptRequestTx(tx:T.RequestTx,chain:T.Block[],validator:string,key_currency:string,StateData:Trie,RequestData:Trie){
+export async function AcceptRequestTx(tx:T.RequestTx,chain:T.Block[],validator:string,key_currency:string,fee_by_size:number,StateData:Trie,RequestData:Trie){
   const for_fee_state:T.State[] = await map([tx.contents.data.solvency,validator], async (key:string)=>{
     const state:T.State = await StateData.get(key);
     return state;
   });
-  const validator_fee_payed = await Fee_to_Validator(for_fee_state[0],for_fee_state[1],Buffer.from(JSON.stringify(tx)).length,key_currency);
+  const validator_fee_payed = await Fee_to_Validator(for_fee_state[0],for_fee_state[1],fee_by_size*Buffer.from(JSON.stringify(tx)).length,key_currency);
   await StateData.put(_.toHash(JSON.stringify(validator_fee_payed[0].contents)),validator_fee_payed[0]);
   await StateData.put(_.toHash(JSON.stringify(validator_fee_payed[1].contents)),validator_fee_payed[1]);
   const new_RequestData:Trie = await RequestRequestRoot(tx,chain.length,RequestData);
@@ -546,10 +548,12 @@ export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:s
   const index = tx.contents.index;
   const request_tx:T.RequestTx = chain[index].transactions.reduce((result:T.RequestTx[],t:T.Tx)=>{
     if(t.kind=="request"&&t.meta.hash==tx.contents.request) return result.concat(t);
+    else return result;
   },[])[0];
   const for_fee = [request_tx.contents.data.solvency,tx.contents.payee,validator]
   const for_fee_state = await map(for_fee, async (key:string)=>{
-    const state = await StateData.get(key);
+    const state:T.State = await StateData.get(key);
+    await StateData.delete(key);
     return state;
   });
   const verifier_fee_payed = await Fee_to_Verifier(for_fee_state[0],for_fee_state[1],request_tx.contents.data.fee,key_currency);

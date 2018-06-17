@@ -178,6 +178,7 @@ async function ValidUnit(unit:T.Unit,log_limit:number,chain:T.Block[],DagData:Tr
 
   const request_tx:T.RequestTx = chain[tx_data.index].transactions.reduce((result:T.RequestTx[],tx:T.Tx)=>{
     if(tx.kind=="request"&&tx.meta.hash==tx_data.request) return result.concat(tx);
+    else return result;
   },[])[0];
 
   const token = request_tx.contents.data.token || "";

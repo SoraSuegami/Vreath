@@ -30,12 +30,14 @@ function GetTreeroot(pre) {
                 const left = val;
                 const right = ((left, i, array) => {
                     if (array[i + 1] == null)
-                        return "";
+                        return _.toHash("");
                     else
                         return array[i + 1];
                 })(left, i, array);
                 return result.concat(_.toHash(left + right));
             }
+            else
+                return result;
         }, []);
         return GetTreeroot(union);
     }
@@ -289,7 +291,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, unit_token, t
     const valid_txs = await some(txs, async (tx) => {
         try {
             if (tx.kind == "request" && (await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, changed[0], changed[1]))) {
-                const news = await TxSet.AcceptRequestTx(tx, chain, validator, key_currency, changed[0], changed[1]);
+                const news = await TxSet.AcceptRequestTx(tx, chain, validator, key_currency, fee_by_size, changed[0], changed[1]);
                 changed[0] = news[0];
                 changed[1] = news[1];
                 return false;
@@ -323,6 +325,9 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, unit_token, t
             return can.amount;
         else
             return 0;
+    });
+    const this_candidates = last_candidates.map((can) => {
+        return can.address;
     });
     if (hash != _.toHash(JSON.stringify(block.contents))) {
         console.log("invalid hash");
@@ -379,7 +384,7 @@ async function ValidBlock(block, chain, fee_by_size, key_currency, unit_token, t
         console.log("invalid candidates");
         return false;
     }
-    else if (validator_state.contents.token != key_currency || sacrifice_amount <= 0 /*||address!=right_validator*/) {
+    else if (validator_state.contents.token != key_currency || sacrifice_amount <= 0 || this_candidates.indexOf(address) == -1) {
         console.log("invalid validator");
         return false;
     }

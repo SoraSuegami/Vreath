@@ -16,6 +16,7 @@ const TxSet = __importStar(require("../core/tx"));
 const ChainSet = __importStar(require("../core/chain"));
 const PoolSet = __importStar(require("../core/tx_pool"));
 const con_1 = require("./con");
+const access_block_1 = require("./access_block");
 const R = __importStar(require("ramda"));
 const util = __importStar(require("util"));
 const CryptoSet = require('../core/crypto_set.js');
@@ -243,10 +244,14 @@ main.on('ready', async () => {
     });
     ipc.on('GetAddress', async (event, arg) => {
         const result = ((arg) => {
-            const pub_key = CryptoSet.PullMyPublic(arg);
-            if (pub_key == null)
+            try {
+                const pub_key = CryptoSet.PullMyPublic(arg);
+                return CryptoSet.AddressFromPublic(pub_key);
+            }
+            catch (e) {
                 CryptoSet.GenerateKeys(arg);
-            return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
+                return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
+            }
         })(arg);
         /*const obj:T.Block = {
           meta:{
@@ -408,8 +413,9 @@ main.on('ready', async () => {
     ipc.on('CreateUnit', async (event, arg) => {
         const root_json = JSON.parse(fs.readFileSync("./json/root.json", "utf-8"));
         const password = arg[0];
-        const log = arg[1];
         const pub_key = CryptoSet.PullMyPublic(password);
+        const destination = arg[2];
+        const log = [CryptoSet.EncryptData(arg[1][0], password, pub_key)];
         const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
         const RequestData = new merkle_patricia_1.Trie(con_1.db, root_json.request_root);
         const requests = await reduce(chain, async (result, block, index) => {
@@ -443,6 +449,8 @@ main.on('ready', async () => {
         await DagData.put(unit.meta.hash,unit);
         console.log(await DagData.filter());
         console.log(DagData.now_root())*/
+        const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
+        fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(arg[1])));
         const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
         await forEach(peers, async (peer) => {
             await util.promisify(request.post)({
@@ -483,6 +491,14 @@ main.on('ready', async () => {
         extended: true
     }));
     app.use(bodyParser.json());
+    app.use((req, res, next) => {
+        if (access_block_1.AccessBlock(req.headers.host)) {
+            res.send(400);
+        }
+        else {
+            next();
+        }
+    });
     app.post('/tx', async (req, res) => {
         const tx = req.body;
         console.log(tx);
@@ -568,8 +584,12 @@ main.on('ready', async () => {
             return roots;
         })(roots, accepted);
         fs.writeFileSync('./json/root.json', JSON.stringify(new_roots));
-        const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
-        fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(unit.log_raw[0])));
+        const decrypted = CryptoSet.DecryptData(unit.log_raw[0], my_pass, my_pub);
+        console.log(decrypted);
+        if (decrypted != null) {
+            const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
+            fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(decrypted)));
+        }
         console.log("unit accepted");
         res.json(unit);
     });

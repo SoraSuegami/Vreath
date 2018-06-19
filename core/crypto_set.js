@@ -70,6 +70,7 @@ function EncryptData(data,mypass,Public){
 
 function DecryptData(data,mypass,Public){
   if(data==null)return false;
+  try{
   var Private = Buffer.from(PullMyPrivate(mypass),'hex');
   var ecdh = crypto.createECDH('secp256k1');
   var secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
@@ -77,8 +78,10 @@ function DecryptData(data,mypass,Public){
   var dec = decipher.update(data, 'hex', 'utf-8');
   dec += decipher.final('utf-8');
   return dec;
+  }
+  catch(e){return null;}
 }
-
+//console.log(DecryptData(EncryptData("Hello","phoenix",PullMyPublic("test")),"test",PullMyPublic("phoenix")));
 
 function SignData(data,password){
   if(data==null)return false;

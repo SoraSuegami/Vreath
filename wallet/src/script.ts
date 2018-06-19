@@ -30,7 +30,7 @@ let app = new Vue({
       ipcRenderer.send('GetAddress', app.password);
     },
     send:()=>{
-      ipcRenderer.send('CreateUnit', [app.password,[app.message]]);
+      ipcRenderer.send('CreateUnit', [app.password,[app.message],app.destination]);
       app.message="";
     },
     remit:()=>{

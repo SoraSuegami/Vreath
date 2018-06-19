@@ -13,6 +13,7 @@ import * as ChainSet from '../core/chain'
 import * as PoolSet from '../core/tx_pool'
 import * as IpfsSet from '../core/ipfs'
 import {db,tag_limit,key_currency,fee_by_size,log_limit,unit_token,group_size} from './con'
+import {AccessBlock} from './access_block'
 import * as R from 'ramda'
 import * as util from 'util'
 
@@ -262,9 +263,14 @@ main.on('ready', async ()=>{
 
  ipc.on('GetAddress', async (event, arg)=>{
     const result = ((arg)=>{
-      const pub_key = CryptoSet.PullMyPublic(arg);
-      if(pub_key==null) CryptoSet.GenerateKeys(arg);
-      return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
+      try{
+        const pub_key = CryptoSet.PullMyPublic(arg);
+        return CryptoSet.AddressFromPublic(pub_key);
+      }
+      catch(e){
+        CryptoSet.GenerateKeys(arg);
+        return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
+      }
     })(arg);
     /*const obj:T.Block = {
       meta:{
@@ -435,8 +441,9 @@ main.on('ready', async ()=>{
 
     const root_json = JSON.parse(fs.readFileSync("./json/root.json","utf-8"));
     const password = arg[0];
-    const log = arg[1];
     const pub_key = CryptoSet.PullMyPublic(password);
+    const destination = arg[2];
+    const log = [CryptoSet.EncryptData(arg[1][0],password,pub_key)];
     const chain:ChainSet.Block[] = JSON.parse(fs.readFileSync("./json/blockchain.json","utf-8"));
     const RequestData = new Trie(db,root_json.request_root);
     const requests:{hash:string,index:number} = await reduce(chain,async (result:{hash:string,index:number},block:ChainSet.Block,index:number)=>{
@@ -468,7 +475,8 @@ main.on('ready', async ()=>{
     await DagData.put(unit.meta.hash,unit);
     console.log(await DagData.filter());
     console.log(DagData.now_root())*/
-
+    const old_msgs:string[] = JSON.parse(fs.readFileSync('./wallet/messages.json','utf-8'));
+    fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(arg[1])));
     const peers:{ip:string,port:number}[] = JSON.parse(fs.readFileSync("./json/peer.json","utf-8"));
     await forEach(peers, async (peer:{ip:string,port:number})=>{
       await util.promisify(request.post)({
@@ -510,6 +518,16 @@ main.on('ready', async ()=>{
      extended: true
  }));
  app.use(bodyParser.json());
+
+ app.use((req, res, next)=>{
+   if(AccessBlock(req.headers.host)){
+     res.send(400);
+   }
+   else{
+     next();
+   }
+ });
+
  app.post('/tx', async (req,res)=>{
    const tx:TxSet.Tx = req.body;
    console.log(tx);
@@ -606,8 +624,12 @@ main.on('ready', async ()=>{
    })(roots,accepted);
 
    fs.writeFileSync('./json/root.json',JSON.stringify(new_roots));
-   const old_msgs:string[] = JSON.parse(fs.readFileSync('./wallet/messages.json','utf-8'));
-   fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(unit.log_raw[0])));
+   const decrypted = CryptoSet.DecryptData(unit.log_raw[0],my_pass,my_pub);
+   console.log(decrypted)
+   if(decrypted!=null){
+     const old_msgs:string[] = JSON.parse(fs.readFileSync('./wallet/messages.json','utf-8'));
+     fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(decrypted)));
+   }
    console.log("unit accepted");
    res.json(unit);
  });

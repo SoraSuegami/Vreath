@@ -15,6 +15,35 @@ const { map, reduce, filter, forEach } = require('p-iteration');
 //const leveldown = require('leveldown');
 //const db = levelup(leveldown('./db/state'));
 const IPFS = require('ipfs');
+// These are for test.
+/*const password = 'Sora';
+const my_pub = CryptoSet.PullMyPublic(password);
+const my_address = CryptoSet.AddressFromPublic(my_pub);
+CryptoSet.GenerateKeys("Test");
+const test_pub = CryptoSet.PullMyPublic("Test");
+const test_address = CryptoSet.AddressFromPublic(test_pub);*/
+// These are for test.
+/*export type StateContent = {
+  owner: string;
+  token: string;
+  tag: {[key:string]: any;};
+  data: string;
+  product: string;
+};
+
+export type State = {
+  hash: string;
+  amount: number;
+  contents: StateContent;
+};
+
+/*export type Code = (input:DagSet.Input,raw:string[],states:{dag:any;world:any;t_state:Token,tokens:any},library:{crypto:any,map:any,reduce:any,filter:any,forEach:any,some:any})=>DagSet.Output;*/
+/*export type Token = {
+  token: string;
+  issued: number;
+  codehash:string;
+  developer: string;
+};*/
 /*export type Token = {
   token: string;
   issued: number;

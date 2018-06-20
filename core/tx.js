@@ -16,6 +16,83 @@ const { map, reduce, filter, forEach, find, some } = require('p-iteration');
 //const db = levelup(leveldown('./db/state'));
 const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
+/*type TxMeta = {
+  hash:string;
+  signature:string;
+  evidence:string;
+}*/
+/*type TxMeta = {
+  hash:string;
+  signature:string;
+}
+
+type TxContents = {
+  address:string;
+  pub_key:string;
+  timestamp:number;
+  type:TxTypes;
+  token:string;
+  input:string[];
+  output:StateSet.State[];
+  new_token:StateSet.Token[];
+  pre:string;
+}
+
+export type TxData = {
+  purehash:string;
+  contents:TxContents;
+}
+
+/*export type Tx = {
+  meta:TxMeta;
+  data:TxData;
+}*/
+/*export type RequestData = {
+  address:string;
+  pub_key:string;
+  timestamp:number;
+  fee:number;
+  solvency:string;
+  type:TxTypes;
+  token:string;
+  base:string[];
+  input_hash:string;
+  output:StateSet.State[];
+  new_token:StateSet.Token[];
+}
+
+type RequestContents = {
+  purehash:string;
+  pre:string;
+  next:string;
+  data:RequestData;
+}
+
+export type RequestTx = {
+  kind:"request";
+  meta:TxMeta;
+  contents:RequestContents;
+  input_raw:any[];
+  code:string[];
+}
+
+export type RefreshContents = {
+  address:string;
+  pub_key:string;
+  timestamp:number;
+  request:string;
+  index:number;
+  payee:string;
+}
+
+export type RefreshTx = {
+  kind:"refresh";
+  meta:TxMeta;
+  contents:RefreshContents;
+  evidence:string;
+}
+
+export type Tx = RequestTx | RefreshTx;*/
 async function ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateData, RequestsAlias) {
     const hash = tx.meta.hash;
     const signature = tx.meta.signature;

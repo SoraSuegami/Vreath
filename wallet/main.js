@@ -202,6 +202,26 @@ return ""
 var port = server.address().port;
 console.log('Example app listening at http://%s:%s', host, port);*/
 /*});*/
+function AddZero(host) {
+    const splited = host.split(".");
+    return splited.map((part) => {
+        const figure = part.length;
+        return "0".repeat(3 - figure) + "part";
+    });
+}
+function IP_to_Number_Str(host) {
+    const add_zero = AddZero(host.split(":")[0]);
+    return add_zero.join("");
+}
+function AccessBlock(host) {
+    //const hostname = req.headers.host;
+    if (host.match("localhost"))
+        return false;
+    const target = IP_to_Number_Str(host);
+    return access_block_1.block_ips.some((ips, index) => {
+        return Number(target) >= Number(IP_to_Number_Str(ips[0])) && Number(target) <= Number(IP_to_Number_Str(ips[1]));
+    });
+}
 const electron = require("electron");
 // アプリケーションをコントロールするモジュール
 const main = electron.app;
@@ -415,7 +435,8 @@ main.on('ready', async () => {
         const password = arg[0];
         const pub_key = CryptoSet.PullMyPublic(password);
         const destination = arg[2];
-        const log = [CryptoSet.EncryptData(arg[1][0], password, pub_key)];
+        //const log = [CryptoSet.EncryptData(arg[1][0],password,pub_key)];
+        const log = arg[1];
         const chain = JSON.parse(fs.readFileSync("./json/blockchain.json", "utf-8"));
         const RequestData = new merkle_patricia_1.Trie(con_1.db, root_json.request_root);
         const requests = await reduce(chain, async (result, block, index) => {
@@ -450,7 +471,7 @@ main.on('ready', async () => {
         console.log(await DagData.filter());
         console.log(DagData.now_root())*/
         const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
-        fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(arg[1])));
+        //fs.writeFileSync('./wallet/messages.json',JSON.stringify(old_msgs.concat(arg[1])));
         const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
         await forEach(peers, async (peer) => {
             await util.promisify(request.post)({
@@ -492,7 +513,7 @@ main.on('ready', async () => {
     }));
     app.use(bodyParser.json());
     app.use((req, res, next) => {
-        if (access_block_1.AccessBlock(req.headers.host)) {
+        if (AccessBlock(req.headers.host)) {
             res.send(400);
         }
         else {
@@ -585,10 +606,10 @@ main.on('ready', async () => {
         })(roots, accepted);
         fs.writeFileSync('./json/root.json', JSON.stringify(new_roots));
         const decrypted = CryptoSet.DecryptData(unit.log_raw[0], my_pass, my_pub);
-        console.log(decrypted);
-        if (decrypted != null) {
+        //console.log(decrypted)
+        if (1) {
             const old_msgs = JSON.parse(fs.readFileSync('./wallet/messages.json', 'utf-8'));
-            fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat(decrypted)));
+            fs.writeFileSync('./wallet/messages.json', JSON.stringify(old_msgs.concat((unit.log_raw[0]))));
         }
         console.log("unit accepted");
         res.json(unit);

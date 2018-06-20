@@ -16,6 +16,9 @@ const { map, reduce, filter, forEach, some } = require('p-iteration');
 const IPFS = require('ipfs');
 const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
+/*export type Pool = {
+  [key:string]:TxSet.Tx;
+}*/
 async function check_tx(tx, tag_limit, key_currency, fee_by_size, chain, StateData, DagData, RequestsAlias) {
     if (tx.kind == "request") {
         return await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateData, RequestsAlias);

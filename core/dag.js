@@ -18,6 +18,105 @@ const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
 //const node = new IPFS();
 const log_limit = 10000000;
+/*
+export type DataHash = {
+  selfhash: string;
+  ipfshash: string;
+}
+
+export type Input = {
+  token_id: string[];
+  others: string[];
+  options: DataHash[];
+}
+
+export type Output = {
+  states: StateSet.T_state[];
+  app_rate: number;
+  new_token: StateSet.Token[];
+  log: any;
+}
+
+type Codetype = 'issue_code' | 'change_code' | 'scrap_code' | 'create_code';
+
+type RawData = {
+  input: string[];
+  output: string[];
+}
+
+type UnitMeta = {
+  nonce: string;
+  hash: string;
+  parenthash: string;
+  signature: string;
+}
+
+type UnitContent = {
+  address: string;
+  token: string;
+  timestamp: number;
+  pub_key: string;
+  codetype: Codetype;
+  input: Input;
+  output: Output;
+}
+
+export type Unit = {
+  meta: UnitMeta;
+  contents: UnitContent;
+}
+*/
+/*export type DataHash = {
+  selfhash: string;
+  ipfshash: string;
+}
+
+export type Input = {
+  token_id: string[];
+  options: any[];
+}
+
+export type Output = {
+  tx: string[];
+  app_rate: number;
+  log: any;
+}
+
+type Codetype = 'issue_code' | 'change_code' | 'scrap_code' | 'create_code';
+
+type RawData = {
+  input: string[];
+  output: string[];
+}
+
+type UnitMeta = {
+  nonce: string;
+  hash: string;
+  signature: string;
+}
+
+/*type UnitContents = {
+  address: string;
+  token: string;
+  timestamp: number;
+  last: {index:number,hash:string};
+  fee: number;
+  pub_key: string;
+  input: Input;
+  output: Output;
+}*/
+/*type UnitContents = {
+  data:TxSet.RefreshContents;
+  parenthash: string;
+  difficulty:number;
+  log_hash:string;
+}
+
+export type Unit = {
+  meta: UnitMeta;
+  contents: UnitContents;
+  log_raw:any[];
+}*/
 const nonce_count = (hash) => {
     let check = true;
     const sum = hash.split("").reduce((result, val) => {

@@ -28,7 +28,7 @@ export type TxTypes = 'issue' | 'change' | 'scrap' | 'create';
   evidence:string;
 }*/
 
-type TxMeta = {
+/*type TxMeta = {
   hash:string;
   signature:string;
 }
@@ -55,7 +55,7 @@ export type TxData = {
   data:TxData;
 }*/
 
-export type RequestData = {
+/*export type RequestData = {
   address:string;
   pub_key:string;
   timestamp:number;
@@ -100,7 +100,7 @@ export type RefreshTx = {
   evidence:string;
 }
 
-export type Tx = RequestTx | RefreshTx;
+export type Tx = RequestTx | RefreshTx;*/
 
 export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currency:string,fee_by_size:number,StateData:Trie,RequestsAlias:Trie){
   const hash = tx.meta.hash;

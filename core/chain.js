@@ -18,6 +18,48 @@ const { map, reduce, filter, forEach, some } = require('p-iteration');
 const rlp = require('rlp');
 const CryptoSet = require('./crypto_set.js');
 exports.fee_by_size = 10;
+/*export type AddressAlias = {
+  kind:string;
+  key:string;
+}*/
+/*export type RequestsAlias = {
+  index:number;
+  hash:string;
+}
+
+type Candidates = {
+  address: string;
+  amount: number;
+}
+
+type BlockMeta = {
+  hash: string;
+  validatorSign: string;
+}
+
+type BlockContents = {
+  index:number;
+  parenthash:string;
+  timestamp: number;
+  stateroot: string;
+  request_root: string;
+  //addressroot: string;
+  //used_dagroot: string;
+  //used_txroot: string;
+  //evidences: string[];
+  tx_root: string;
+  fee:number;
+  difficulty:number;
+  validator: string;
+  validatorPub: string;
+  candidates: Candidates[];
+}
+
+export type Block = {
+  meta:BlockMeta;
+  contents:BlockContents;
+  transactions: TxSet.Tx[];
+}*/
 function GetTreeroot(pre) {
     if (pre.length == 0)
         return [_.toHash("")];

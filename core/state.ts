@@ -25,7 +25,7 @@ const test_pub = CryptoSet.PullMyPublic("Test");
 const test_address = CryptoSet.AddressFromPublic(test_pub);*/
 // These are for test.
 
-export type StateContent = {
+/*export type StateContent = {
   owner: string;
   token: string;
   tag: {[key:string]: any;};
@@ -41,12 +41,12 @@ export type State = {
 
 /*export type Code = (input:DagSet.Input,raw:string[],states:{dag:any;world:any;t_state:Token,tokens:any},library:{crypto:any,map:any,reduce:any,filter:any,forEach:any,some:any})=>DagSet.Output;*/
 
-export type Token = {
+/*export type Token = {
   token: string;
   issued: number;
   codehash:string;
   developer: string;
-};
+};*/
 
 
 

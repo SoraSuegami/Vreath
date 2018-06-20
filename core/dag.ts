@@ -71,7 +71,7 @@ export type Unit = {
   contents: UnitContent;
 }
 */
-export type DataHash = {
+/*export type DataHash = {
   selfhash: string;
   ipfshash: string;
 }
@@ -111,7 +111,7 @@ type UnitMeta = {
   output: Output;
 }*/
 
-type UnitContents = {
+/*type UnitContents = {
   data:TxSet.RefreshContents;
   parenthash: string;
   difficulty:number;
@@ -122,7 +122,7 @@ export type Unit = {
   meta: UnitMeta;
   contents: UnitContents;
   log_raw:any[];
-}
+}*/
 
 const nonce_count = (hash:string)=>{
   let check = true

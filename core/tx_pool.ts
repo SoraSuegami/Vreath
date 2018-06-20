@@ -20,9 +20,9 @@ const rlp = require('rlp');
 
 const CryptoSet = require('./crypto_set.js');
 
-export type Pool = {
+/*export type Pool = {
   [key:string]:TxSet.Tx;
-}
+}*/
 
 async function check_tx(tx:T.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:T.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
   if(tx.kind=="request"){

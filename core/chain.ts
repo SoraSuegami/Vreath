@@ -26,7 +26,7 @@ export const fee_by_size = 10;
   key:string;
 }*/
 
-export type RequestsAlias = {
+/*export type RequestsAlias = {
   index:number;
   hash:string;
 }
@@ -63,7 +63,7 @@ export type Block = {
   meta:BlockMeta;
   contents:BlockContents;
   transactions: TxSet.Tx[];
-}
+}*/
 
 export function GetTreeroot(pre:string[]):string[]{
   if(pre.length==0) return [_.toHash("")];

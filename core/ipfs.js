@@ -1,7 +1,7 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const IPFS = require('ipfs');
-const multihash = require("multi-hash");
+exports.__esModule = true;
+var IPFS = require('ipfs');
+var multihash = require("multi-hash");
 exports.node = new IPFS();
 /*node.on('ready', () => {
   const files = [
@@ -15,11 +15,11 @@ exports.node = new IPFS();
     //console.log(multihash.encode(Buffer.from('Helo')))
   })
 })*/
-exports.node_ready = (node, cb) => {
+exports.node_ready = function (node, cb) {
     node.on('ready', cb);
 };
-exports.ipfs_hash = (str) => {
-    const buffered = Buffer.from(str);
+exports.ipfs_hash = function (str) {
+    var buffered = Buffer.from(str);
     if (buffered.length != 32)
         return "";
     else {

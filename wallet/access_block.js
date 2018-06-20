@@ -1,6 +1,6 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const range_check = require('range_check');
+exports.__esModule = true;
+var range_check = require('range_check');
 exports.block_ips = [
     [
         "133.0.0.0",

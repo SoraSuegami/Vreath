@@ -17,10 +17,11 @@ const {map,reduce,filter,forEach,some} = require('p-iteration');
 //const db = levelup(leveldown('./db/state'));
 
 const rlp = require('rlp');
+const dgw = require('../dark-gravity-wave-js/index');
 
 const CryptoSet = require('./crypto_set.js');
 
-export const fee_by_size = 10;
+
 /*export type AddressAlias = {
   kind:string;
   key:string;
@@ -107,6 +108,60 @@ export function HextoNum(str:string):number{
   return parseInt(str, 16);
 }
 
+/*export function NumtoHex(num:number) {
+    return parseInt('0x' + (('0000' + num.toString(16).toUpperCase()).substr(-4)),16);
+}*/
+
+
+async function Pow_diff(chain:T.Block[],time:number,DagData:Trie){
+  const getted:{timestamp:number,target:number}[] = await map(chain,async (block:T.Block)=>{
+    return await reduce(block.transactions,async (r:{timestamp:number,target:number},tx:T.Tx,index:number)=>{
+      if(tx.kind!="refresh") return r;
+      const unit:T.Unit = await DagData.get(tx.evidence);
+      if(Object.keys(unit).length==0) return r;
+      console.log(tx.kind)
+      const new_timestamp = (r.timestamp*index+unit.contents.data.timestamp)/(index+1);
+      const new_target = (r.target*index+unit.contents.difficulty)/(index+1);
+      r.timestamp = new_timestamp;
+      r.target = new_target;
+      return r;
+    },{timestamp:0,target:0});
+  });
+
+  let sum = 0;
+  const edited = getted.reverse().map((obj:{timestamp:number,target:number})=>{
+    if(_.toHash(JSON.stringify(obj))==_.toHash(JSON.stringify({timestamp:0,target:0}))){
+      sum += time*1000
+      return obj;
+    }
+    obj.timestamp += sum;
+    return obj;
+  });
+  const removed = edited.reverse().filter((obj:{timestamp:number,target:number})=>{
+    return _.toHash(JSON.stringify(obj))!=_.toHash(JSON.stringify({timestamp:0,target:0}))
+  });
+  /*const hexed = removed.map((obj:{timestamp:number,target:number})=>{
+    obj.target = NumtoHex(obj.target)
+    return obj
+  });*/
+
+  console.log(removed)
+  console.log(time)
+  console.log(removed.length<24)
+  if(removed.length<24) return chain[chain.length-1].contents.difficulty;
+  else return dgw.getTarget(removed,time);
+}
+
+function State_diff(chain:T.Block[],time:number):number{
+  const getted = chain.map((block)=>{
+    return {timestamp:block.contents.timestamp,target:block.contents.stake_diff}
+  });
+  console.log(getted.length<24)
+  console.log(getted)
+  if(getted.length<24) return chain[chain.length-1].contents.stake_diff;
+  else return dgw.getTarget(getted,time);
+}
+
 function SortCandidates(candidates:T.Candidates[]){
   return candidates.sort((a:T.Candidates,b:T.Candidates)=>{
     return HextoNum(a.address) - HextoNum(b.address);
@@ -120,6 +175,7 @@ function SortCandidates(candidates:T.Candidates[]){
     return not_confirmed_check==true || used_tx_check==true;
   });
 }*/
+
 
 function SplitArray(scaled:T.Candidates[],group_size:number):{[key:string]:number;}[]{
   let result = [{}];
@@ -223,19 +279,18 @@ export function RightCandidates(Sacrifice:{[key:string]:T.State},group_size:numb
 export function PoS_mining(parenthash:string,address:string,balance:number,difficulty:number){
   let date;
   let timestamp
+  console.log(difficulty)
   do {
     date = new Date();
     timestamp = date.getTime();
-    console.log(timestamp.toString());
-    console.log("hash");
-    console.log(HextoNum(_.toHash(parenthash+address+timestamp.toString())));
-    console.log("standard");
-    console.log(Math.pow(2,256)*balance/difficulty);
-  } while (HextoNum(_.toHash(parenthash+address+timestamp.toString()))>Math.pow(2,256)*balance/difficulty);
+  } while (HextoNum(_.toHash(parenthash+address+timestamp.toString()))>Math.pow(2,256)*Math.exp(166)*balance/difficulty);
+  console.log(HextoNum(_.toHash(parenthash+address+timestamp.toString())))
+  console.log(Math.pow(2,256)*Math.exp(166)*balance/difficulty);
   return timestamp;
 }
+console.log(Math.log(100000000))
 
-async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_currency:string,unit_token:string,tag_limit:number,group_size:number,last_candidates:T.Candidates[],StateData:Trie,DagData:Trie,RequestData:Trie){
+async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,pow_time:number,block_time:number,key_currency:string,unit_token:string,tag_limit:number,group_size:number,last_candidates:T.Candidates[],StateData:Trie,DagData:Trie,RequestData:Trie){
   const hash = block.meta.hash;
   const validatorSign = block.meta.validatorSign;
   const index = block.contents.index;
@@ -257,7 +312,6 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
 
   const last = chain[chain.length-1];
   const date = new Date();
-
   /*const DagData = new RadixTree({
     db: db,
     root: dag_root
@@ -332,6 +386,9 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
     return sum + Buffer.from(JSON.stringify(tx)).length;
   },0);
 
+
+  const right_pow_diff:number = await Pow_diff(chain,pow_time,DagData);
+  const right_stake_diff:number = State_diff(chain,block_time);
   //const right_validator = elected(SortCandidates(last.contents.candidates),_.get_unicode(block.meta.hash));
 
   /*const PnsData = await World.get(Trie.en_key('pns'));
@@ -340,7 +397,6 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
     const state:StateSet.T_state = await PnsData.get(Trie.en_key(alias.key));
     if(result[state.contents.tag.])
   },{});*/
-  console.log(await StateData.filter());
   /*const check_SD:Trie = StateData.checkpoint();
   const check_RD:Trie =  RequestData.checkpoint();
   console.log('checked');
@@ -441,6 +497,15 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
   }*/
   else if(fee!=fee_by_size*size_sum){
     console.log("invalid fee");
+    return false;
+  }
+  else if(difficulty!=right_pow_diff){
+    console.log("invalid difficulty");
+    return false;
+  }
+  else if(stake_diff!=right_stake_diff){
+    console.log("invalid stake_diff");
+    return false;
   }
   else if(candidates!=_.toHash(JSON.stringify(right_candidates))){
     console.log("invalid candidates");
@@ -463,11 +528,11 @@ async function ValidBlock(block:T.Block,chain:T.Block[],fee_by_size:number,key_c
   }
 }
 
-export async function AcceptBlock(block:T.Block,chain:T.Block[],tag_limit:number,fee_by_size:number,key_currency:string,unit_token:string,group_size:number,last_candidates:T.Candidates[],StateData:Trie,DagData:Trie,RequestData:Trie){
+export async function AcceptBlock(block:T.Block,chain:T.Block[],tag_limit:number,fee_by_size:number,pow_time:number,block_time:number,key_currency:string,unit_token:string,group_size:number,last_candidates:T.Candidates[],StateData:Trie,DagData:Trie,RequestData:Trie){
   const stateroot = block.contents.stateroot;
   const request_root = block.contents.request_root;
   const validator = block.contents.validator;
-  if(!await ValidBlock(block,chain,fee_by_size,key_currency,unit_token,tag_limit,group_size,last_candidates,StateData,DagData,RequestData)) return {chain:chain,state:stateroot,request:request_root,candidates:last_candidates};
+  if(!await ValidBlock(block,chain,fee_by_size,pow_time,block_time,key_currency,unit_token,tag_limit,group_size,last_candidates,StateData,DagData,RequestData)) return {chain:chain,state:stateroot,request:request_root,candidates:last_candidates};
   console.log("OK")
   console.log(await StateData.filter());
 
@@ -499,7 +564,7 @@ export async function AcceptBlock(block:T.Block,chain:T.Block[],tag_limit:number
   }
 }
 
-export async function CreateBlock(password:string,chain:T.Block[],stateroot:string,request_root:string,fee_by_size:number,difficulty:number,stake_diff:number,validator:string,validatorPub:string,unit_token:string,group_size:number,last_candidates:T.Candidates[],txs:T.Tx[],StateData:Trie){
+export async function CreateBlock(password:string,chain:T.Block[],stateroot:string,request_root:string,fee_by_size:number,pow_time:number,block_time:number,validator:string,validatorPub:string,unit_token:string,group_size:number,last_candidates:T.Candidates[],txs:T.Tx[],StateData:Trie,DagData:Trie){
   const last:T.Block = chain[chain.length-1];
   const index = chain.length;
   const parenthash = last.meta.hash;
@@ -510,6 +575,8 @@ export async function CreateBlock(password:string,chain:T.Block[],stateroot:stri
   const fee = txs.reduce((sum:number,tx:T.Tx)=>{
     return (sum + fee_by_size * Buffer.from(JSON.stringify(tx)).length);
   },0);
+  const difficulty:number = await Pow_diff(chain,pow_time,DagData);
+  const stake_diff:number = State_diff(chain,block_time);
   const Sacrifice:{[key:string]:T.State} = await StateData.filter((key:string,value):boolean=>{
     const state:T.State = value;
     return state.contents.token==unit_token&&state.amount>0;
@@ -517,10 +584,11 @@ export async function CreateBlock(password:string,chain:T.Block[],stateroot:stri
   const candidates = _.toHash(JSON.stringify(RightCandidates(Sacrifice,group_size,parenthash)));
   const validator_state:T.State = await StateData.get(validator);
   const address = validator_state.contents.owner;
+  console.log(last_candidates)
   const sacrifice_amount:number = last_candidates.reduce((amount:number,can:T.Candidates)=>{
     if(can.address==address) return can.amount;
     else return 0;
-  });
+  },0);
   const timestamp = PoS_mining(parenthash,validator,sacrifice_amount,stake_diff);
   const pre_1:T.Block = {
     meta:{

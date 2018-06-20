@@ -326,8 +326,7 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
     console.log("invalid timestamp");
     return false;
   }
-  else if(_.toHash(JSON.stringify(unit.contents.data))!=_.toHash(JSON.stringify(tx.contents))){
-    console.log(unit)
+  else if(Object.keys(unit).length==0||_.toHash(JSON.stringify(unit.contents.data))!=_.toHash(JSON.stringify(tx.contents))){
     console.log("invalid evidence");
     return false;
   }

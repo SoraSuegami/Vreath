@@ -308,8 +308,7 @@ async function ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, S
         console.log("invalid timestamp");
         return false;
     }
-    else if (_.toHash(JSON.stringify(unit.contents.data)) != _.toHash(JSON.stringify(tx.contents))) {
-        console.log(unit);
+    else if (Object.keys(unit).length == 0 || _.toHash(JSON.stringify(unit.contents.data)) != _.toHash(JSON.stringify(tx.contents))) {
         console.log("invalid evidence");
         return false;
     }

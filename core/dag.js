@@ -138,8 +138,6 @@ const mining = (unit, difficulty) => {
         nonce++;
         unit.meta.nonce = nonce.toString();
         hashed = HashForUnit(unit);
-        console.log(nonce);
-        console.log(hashed);
     } while (nonce_count(hashed) < difficulty);
     return {
         nonce: nonce.toString(),
@@ -174,7 +172,7 @@ async function ValidUnit(unit, log_limit, chain, DagData) {
     const log_size = log_raw.reduce((sum, log) => {
         return sum + Buffer.from(JSON.stringify(log)).length;
     }, 0);
-    if (count <= 0 || count > difficulty) {
+    if (count < 0 || count > difficulty) {
         console.log("invalid nonce");
         return false;
     }
@@ -200,6 +198,10 @@ async function ValidUnit(unit, log_limit, chain, DagData) {
     }
     else if (parenthash != parent.meta.hash) {
         console.log("invalid parenthash");
+        return false;
+    }
+    else if (difficulty != chain[tx_data.index].contents.difficulty) {
+        console.log("invalid difficulty");
         return false;
     }
     else if (log_hash != _.toHash(JSON.stringify(log_raw))) {
@@ -252,11 +254,12 @@ async function GetEdgeDag(DagData) {
     }, []);
     return edge;
 }
-async function CreateUnit(password, pub_key, request, index, payee, difficulty, log, DagData) {
+async function CreateUnit(password, pub_key, request, index, payee, log, chain, DagData) {
     const address = CryptoSet.AddressFromPublic(pub_key);
     const date = new Date();
     const timestamp = date.getTime();
     const log_hash = _.toHash(JSON.stringify(log));
+    const difficulty = chain[index].contents.difficulty;
     const data = {
         address: address,
         pub_key: pub_key,

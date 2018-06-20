@@ -10,3 +10,5 @@ exports.fee_by_size = 0.0001;
 exports.log_limit = 10000000;
 exports.unit_token = "unit";
 exports.group_size = 1000;
+exports.pow_time = 10;
+exports.block_time = 10;

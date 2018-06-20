@@ -273,7 +273,8 @@ main.on('ready', async () => {
                 return CryptoSet.AddressFromPublic(CryptoSet.PullMyPublic(arg));
             }
         })(arg);
-        /*const obj:T.Block = {
+        /*const timestamp = ChainSet.PoS_mining('2f6c5d2f6d5a5011f9f498476cf424b57b6ad5f90cf225c03525de77b78ed45ec57f6d9ebddaa20a130f555cb871f00bbefd5d3fea501b24ca5d5578122acfd2',result,1000,100000000)
+        const obj:T.Block = {
           meta:{
             hash:'df85d50bb06ec1b3769a8278955755d665fe40a6242c2de1b0afed3f9f676a4b3095c246cf96cdd4bd0d90513ef13b794a9f509f68057cb184e0b667127a0ee4',
             validatorSign: 'c64e39cc57b817a4038c908166c30ac58c5560c7ff6cd13b981244053f4c8bfa185a4a151b99cf671f23a064427e93fdff8b2032da412eff3544829daa1f7a88'
@@ -281,13 +282,13 @@ main.on('ready', async () => {
           contents:{
             index: 0,
             parenthash: '2f6c5d2f6d5a5011f9f498476cf424b57b6ad5f90cf225c03525de77b78ed45ec57f6d9ebddaa20a130f555cb871f00bbefd5d3fea501b24ca5d5578122acfd2',
-            timestamp: 1529163286335,
+            timestamp: timestamp,
             stateroot: 'de7cb42a9bfe40ef221773487dd80ba81968f3ee767378c55b73c0255d466c08',
             request_root: 'f820892fd5424e56cb52261fd307310d58f5111f45dfa6fa28579c7a6d64c69f',
             tx_root: '2f6c5d2f6d5a5011f9f498476cf424b57b6ad5f90cf225c03525de77b78ed45ec57f6d9ebddaa20a130f555cb871f00bbefd5d3fea501b24ca5d5578122acfd2',
             fee: 0,
             difficulty: 1,
-            stake_diff: 9.999999999999998e-101,
+            stake_diff: 100000000,
             validator: '00ca49de7929c881ac8013534b477b986cad41dd34adcfab18c4938f642c4732953507a7d6639f83ebc86217311f64f8b79d04c486121ffe892d7ace48d44929',
             validatorPub: '03f01fe2646308acd463c15da8ac33f5ac09da2eccb440915cd26c7a9d13f5d14c',
             candidates: '25b8f2e7f0bdc1b366d7daa6f34af46fc2094b87863b096a0fa972c266f9a50f1a511dce0eb1f57c23d759dd668de8a2ec497616e547d685c751a440882ebd59'
@@ -458,7 +459,7 @@ main.on('ready', async () => {
         });
         const DagData = new merkle_patricia_1.Trie(con_1.db, root_json.dag_root);
         /*await DagData.delete("07adeb4ec8dba3f6c60e2148ad818f78e01e72955d1517b2710826db81e02c6a8e96a059175b6906e1922d5a1679a2ae6637cc7776af1bca98c94de22f54ce31");*/
-        const unit = await DagSet.CreateUnit(password, pub_key, requests.hash, requests.index, R.values(payee)[0].hash, 1, log, DagData);
+        const unit = await DagSet.CreateUnit(password, pub_key, requests.hash, requests.index, R.values(payee)[0].hash, log, chain, DagData);
         console.log(unit);
         const refresh = TxSet.CreateRefreshTx(password, unit);
         /*const candidates:T.Candidates[] = JSON.parse(fs.readFileSync("./json/candidates.json","utf-8"));
@@ -537,7 +538,6 @@ main.on('ready', async () => {
         fs.writeFileSync("./json/tx_pool.json", JSON.stringify(new_pool));
         if (pre_pool_hash != _.toHash(JSON.stringify(new_pool))) {
             console.log("let's block");
-            console.log(await StateData.filter());
             const last_candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8'));
             if (last_candidates.some((can) => { return can.address == my_address; })) {
                 const validator_state = await StateData.filter((key, val) => {
@@ -546,7 +546,7 @@ main.on('ready', async () => {
                 const most = R.values(validator_state).sort((a, b) => {
                     return b.amount - a.amount;
                 })[0];
-                const block = await ChainSet.CreateBlock(my_pass, chain, stateroot, request_root, con_1.fee_by_size, 1, 9.999999999999998e-101, most.hash, my_pub, con_1.unit_token, con_1.group_size, last_candidates, R.values(new_pool), StateData);
+                const block = await ChainSet.CreateBlock(my_pass, chain, stateroot, request_root, con_1.fee_by_size, con_1.pow_time, con_1.block_time, most.hash, my_pub, con_1.unit_token, con_1.group_size, last_candidates, R.values(new_pool), StateData, DagData);
                 const peers = JSON.parse(fs.readFileSync("./json/peer.json", "utf-8"));
                 await forEach(peers, async (peer) => {
                     await util.promisify(request.post)({
@@ -572,7 +572,7 @@ main.on('ready', async () => {
         const StateData = new merkle_patricia_1.Trie(con_1.db, stateroot);
         const DagData = new merkle_patricia_1.Trie(con_1.db, dag_root);
         const RequestData = new merkle_patricia_1.Trie(con_1.db, request_root);
-        const accepted = await ChainSet.AcceptBlock(block, chain, con_1.tag_limit, con_1.fee_by_size, con_1.key_currency, con_1.unit_token, con_1.group_size, candidates, StateData, DagData, RequestData);
+        const accepted = await ChainSet.AcceptBlock(block, chain, con_1.tag_limit, con_1.fee_by_size, con_1.pow_time, con_1.block_time, con_1.key_currency, con_1.unit_token, con_1.group_size, candidates, StateData, DagData, RequestData);
         fs.writeFileSync("./json/blockchain.json", JSON.stringify(accepted.chain));
         const new_roots = ((pre, accepted) => {
             roots.stateroot = accepted.state;

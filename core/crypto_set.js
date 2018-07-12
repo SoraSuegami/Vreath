@@ -1,140 +1,93 @@
-var crypto = require("crypto");
-var fs = require("fs");
-var secp256k1 = require('secp256k1');
-
-function HashFromPass(password){
-  var sha256 = crypto.createHash('sha256');
-  sha256.update(password);
-  var pre_hash = sha256.digest('hex');
-  var sha512 = crypto.createHash('sha512');
-  sha512.update(pre_hash);
-  var hash = sha512.digest('hex');
-  return hash;
-}
-
-
-function GenerateKeys(password){
-  let Private
-  do {
-    Private = crypto.randomBytes(32)
-  } while (!secp256k1.privateKeyVerify(Private));
-  var Public = secp256k1.publicKeyCreate(Private);
-  var cipher = crypto.createCipher('aes-256-cbc', password);
-  var crypted = cipher.update(Private.toString('hex'), 'hex', 'hex');
-  crypted += cipher.final('hex');
-  var hash = HashFromPass(password);
-  var private_filename = "./keys/private/"+hash+".txt";
-  var public_filename = "./keys/public/"+hash+".txt";
-  fs.writeFileSync(private_filename,crypted,'hex');
-  fs.writeFileSync(public_filename,Public.toString('hex'),'hex');
-  return{
-    private:Private,
-    public:Public
-  }
-}
-
-function PullMyPrivate(password){
-  var hash = HashFromPass(password);
-  var filename = "./keys/private/"+hash+".txt";
-  var private_file = fs.readFileSync(filename,'hex');
-  var decipher = crypto.createDecipher('aes-256-cbc', password);
-  var dec = decipher.update(private_file, 'hex', 'hex');
-  dec += decipher.final('hex');
-  return dec
-  //return Buffer.from(dec,'hex');
-}
-
-function PullMyPublic(password){
-  var hash = HashFromPass(password);
-  var filename = "./keys/public/"+hash+".txt";
-  var public_file = fs.readFileSync(filename,'hex');
-  return public_file;
-  //return Buffer.from(public_file,'hex');
-}
-
-function PublicFromPrivate(Private){
-  var Public = secp256k1.publicKeyCreate(Buffer.from(Private,'hex'));
-  return Public.toString('hex');
-}
-
-function EncryptData(data,mypass,Public){
-  if(data==null)return false;
-  var Private = Buffer.from(PullMyPrivate(mypass),'hex');
-  var ecdh = crypto.createECDH('secp256k1');
-  var secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
-  var cipher = crypto.createCipher('aes-256-cbc', secret);
-  var crypted = cipher.update(data, 'utf-8', 'hex');
-  crypted += cipher.final('hex');
-  return crypted;
-}
-
-function DecryptData(data,mypass,Public){
-  if(data==null)return false;
-  try{
-  var Private = Buffer.from(PullMyPrivate(mypass),'hex');
-  var ecdh = crypto.createECDH('secp256k1');
-  var secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
-  var decipher = crypto.createDecipher('aes-256-cbc', secret);
-  var dec = decipher.update(data, 'hex', 'utf-8');
-  dec += decipher.final('utf-8');
-  return dec;
-  }
-  catch(e){return null;}
-}
-//console.log(DecryptData(EncryptData("Hello","phoenix",PullMyPublic("test")),"test",PullMyPublic("phoenix")));
-
-function SignData(data,password){
-  if(data==null)return false;
-  var Private = Buffer.from(PullMyPrivate(password),'hex');
-  data = crypto.createHash("sha256").update(data).digest();
-  var sign = secp256k1.sign(data,Private);
-  return sign.signature.toString('hex');
-}
-
-
-function verifyData(data,sign,Public){
-  if(data==null||sign==null)return false;
-  data = crypto.createHash("sha256").update(data).digest();
-  var verify = secp256k1.verify(data,Buffer.from(sign,'hex'),Buffer.from(Public,'hex'));
-  return verify
-}
-
-function AddressFromPublic(Public) {
-  var hashed = HashFromPass(Public).substr(0,60);
-  hashed = HashFromPass(hashed).substr(0,30);
-  var address = "PH"+hashed;
-  return address;
-}
-
-function AppAddress(name){
-  var add;
-  if(Buffer.byteLength(name,'utf-8')>30){
-    name.substr(0,30);
-    add=28;
-  }
-  else if(Buffer.byteLength(name,'utf-8')>=0){
-    add=58-Buffer.byteLength(name,'utf-8');
-  }
-  else{
-    return false;
-  }
-  var hashed = HashFromPass(name).substr(0,add);
-  var address = 'PA' + name + hashed;
-  return address;
-}
-
-
-
-module.exports ={
-  HashFromPass:HashFromPass,
-  GenerateKeys:GenerateKeys,
-  PullMyPrivate:PullMyPrivate,
-  PullMyPublic:PullMyPublic,
-  PublicFromPrivate:PublicFromPrivate,
-  EncryptData:EncryptData,
-  DecryptData:DecryptData,
-  SignData:SignData,
-  verifyData:verifyData,
-  AddressFromPublic:AddressFromPublic,
-  AppAddress:AppAddress
+"use strict";
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const crypto = __importStar(require("crypto"));
+const fs = __importStar(require("fs"));
+const secp256k1 = __importStar(require("secp256k1"));
+exports.HashFromPass = (password) => {
+    let sha256 = crypto.createHash('sha256');
+    sha256.update(password);
+    sha256.update(sha256.digest('hex'));
+    const hash = sha256.digest('hex');
+    return hash;
+};
+exports.GenerateKeys = (password) => {
+    let Private;
+    do {
+        Private = crypto.randomBytes(32);
+    } while (!secp256k1.privateKeyVerify(Private));
+    const Public = secp256k1.publicKeyCreate(Private);
+    const cipher = crypto.createCipher('aes-256-cbc', password);
+    let crypted = cipher.update(Private.toString('hex'), 'hex', 'hex');
+    crypted += cipher.final('hex');
+    const hash = exports.HashFromPass(password);
+    const private_filename = "./keys/private/" + hash + ".txt";
+    const public_filename = "./keys/public/" + hash + ".txt";
+    fs.writeFileSync(private_filename, crypted, 'hex');
+    fs.writeFileSync(public_filename, Public.toString('hex'), 'hex');
+    return {
+        private: Private,
+        public: Public
+    };
+};
+exports.PullMyPrivate = (password) => {
+    const hash = exports.HashFromPass(password);
+    const filename = "./keys/private/" + hash + ".txt";
+    const private_file = fs.readFileSync(filename, 'hex');
+    const decipher = crypto.createDecipher('aes-256-cbc', password);
+    let dec = decipher.update(private_file, 'hex', 'hex');
+    dec += decipher.final('hex');
+    return dec;
+};
+exports.PullMyPublic = (password) => {
+    const hash = exports.HashFromPass(password);
+    const filename = "./keys/public/" + hash + ".txt";
+    const public_file = fs.readFileSync(filename, 'hex');
+    return public_file;
+};
+exports.PublicFromPrivate = (Private) => {
+    return secp256k1.publicKeyCreate(Buffer.from(Private, 'hex')).toString('hex');
+};
+exports.EncryptData = (data, mypass, Public) => {
+    const Private = Buffer.from(exports.PullMyPrivate(mypass), 'hex');
+    const ecdh = crypto.createECDH('secp256k1');
+    const secret = secp256k1.ecdh(Buffer.from(Public, 'hex'), Private);
+    const cipher = crypto.createCipher('aes-256-cbc', secret);
+    let crypted = cipher.update(data, 'utf-8', 'hex');
+    crypted += cipher.final('hex');
+    return crypted;
+};
+exports.DecryptData = (data, mypass, Public) => {
+    try {
+        const Private = Buffer.from(exports.PullMyPrivate(mypass), 'hex');
+        const ecdh = crypto.createECDH('secp256k1');
+        const secret = secp256k1.ecdh(Buffer.from(Public, 'hex'), Private);
+        const decipher = crypto.createDecipher('aes-256-cbc', secret);
+        let dec = decipher.update(data, 'hex', 'utf-8');
+        dec += decipher.final('utf-8');
+        return dec;
+    }
+    catch (e) {
+        throw new Error(e);
+    }
+};
+exports.SignData = (data, password) => {
+    const Private = Buffer.from(exports.PullMyPrivate(password), 'hex');
+    const hash = crypto.createHash("sha256").update(data).digest();
+    const sign = secp256k1.sign(hash, Private);
+    return sign.signature.toString('hex');
+};
+exports.verifyData = (data, sign, Public) => {
+    const hash = crypto.createHash("sha256").update(data).digest();
+    const verify = secp256k1.verify(hash, Buffer.from(sign, 'hex'), Buffer.from(Public, 'hex'));
+    return verify;
+};
+exports.GenereateAddress = (id, Public) => {
+    return "Vr:" + id + ":" + exports.HashFromPass(Public);
 };

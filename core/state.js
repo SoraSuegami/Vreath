@@ -8,7 +8,6 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const _ = __importStar(require("./basic"));
-const { map, reduce, filter, forEach } = require('p-iteration');
 // These are for test.
 /*const password = 'Sora';
 const my_pub = CryptoSet.PullMyPublic(password);

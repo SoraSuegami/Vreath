@@ -1,15 +1,8 @@
 declare function require(x: string): any;
 
-import * as crypto from 'crypto'
 import * as _ from './basic'
-import * as CryptoSet from './crypto_set'
-import {Trie} from './merkle_patricia'
-import * as StateSet from './state'
-import * as DagSet from './dag'
-import * as ChainSet from './chain'
 import * as T from './types'
 
-const {map,reduce,filter,forEach} = require('p-iteration');
 
 // These are for test.
 /*const password = 'Sora';

@@ -1,188 +1,168 @@
 declare function require(x: string): any;
 
-import * as crypto from 'crypto'
 import * as _ from './basic'
+import * as CryptoSet from './crypto_set'
+import * as T from './types'
 import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
-import * as DagSet from './dag'
-import * as ChainSet from './chain'
-import * as T from './types'
 
-const {map,reduce,filter,forEach,find,some} = require('p-iteration');
-//const RadixTree = require('dfinity-radix-tree');
-//const levelup = require('levelup');
-//const leveldown = require('leveldown');
-//const db = levelup(leveldown('./db/state'));
+const {reduce,some} = require('p-iteration');
 
-const rlp = require('rlp');
-
-const CryptoSet = require('./crypto_set.js');
-
-
-export type TxKind = 'request' | 'refresh';
-export type TxTypes = 'issue' | 'change' | 'scrap' | 'create';
-
-/*type TxMeta = {
-  hash:string;
-  signature:string;
-  evidence:string;
-}*/
-
-/*type TxMeta = {
-  hash:string;
-  signature:string;
+const tx_fee = (tx:T.Tx)=>{
+  const price = tx.meta.feeprice;
+  delete tx.meta.feeprice;
+  delete tx.raw.signature;
+  const target = JSON.stringify(tx.meta)+JSON.stringify(tx.raw);
+  return price * Buffer.from(target).length;
 }
 
-type TxContents = {
-  address:string;
-  pub_key:string;
-  timestamp:number;
-  type:TxTypes;
-  token:string;
-  input:string[];
-  output:StateSet.State[];
-  new_token:StateSet.Token[];
-  pre:string;
+const requested_check = async (base:string[],LocationData:Trie):Promise<boolean>=>{
+  return await some(base, async(key:string)=>{
+    const getted:T.Location =  await LocationData.get(key);
+    if(getted==null) return false;
+    else if(getted.req.state=="yet") return false;
+    else return true;
+  });
 }
 
-export type TxData = {
-  purehash:string;
-  contents:TxContents;
+const commited_check = async (token:string,commit:string[],StateData:Trie)=>{
+  const token_state:T.Token = await StateData.get(CryptoSet.GenereateAddress(token,_.toHash('')));
+  if(token_state==null) return true;
+  const committed = token_state.committed;
+  return commit.some((c:string)=>{
+    return committed.indexOf(c)!=-1
+  });
 }
 
-/*export type Tx = {
-  meta:TxMeta;
-  data:TxData;
-}*/
-
-/*export type RequestData = {
-  address:string;
-  pub_key:string;
-  timestamp:number;
-  fee:number;
-  solvency:string;
-  type:TxTypes;
-  token:string;
-  base:string[];
-  input_hash:string;
-  output:StateSet.State[];
-  new_token:StateSet.Token[];
+const hashed_pub_check = (state:T.State,pubs:string[])=>{
+  return state.contents.owner.some((address,index)=>{
+    return _.toHash(pubs[index]) != address.split(':')[2];
+  });
 }
 
-type RequestContents = {
-  purehash:string;
-  pre:string;
-  next:string;
-  data:RequestData;
+const refreshed_check = async (base:string[],index:number,tx_hash:string,LocationData:Trie):Promise<boolean>=>{
+  return await some(base, async(key:string)=>{
+    const getted:T.Location =  await LocationData.get(key);
+    if(getted==null) return true;
+    else if(getted.ref.state=="yet"&&getted.req.state=="already"&&getted.req.index==index&&getted.req.hash==tx_hash) return false;
+    else return true;
+  });
+}
+const state_check = (state:T.State,token_name_maxsize:number)=>{
+  const hash_size = Buffer.from(_.toHash("")).length;
+  return _.object_hash_check(state.hash,state.contents) ||
+  state.contents.owner.some(ow=>_.address_form_check(ow,token_name_maxsize)) ||
+  state.contents.amount<0 ||
+  Object.entries(state.contents.data).some((obj:string[])=>{return Buffer.from(obj[0]).length>hash_size||Buffer.from(obj[1]).length>hash_size}) ||
+  state.contents.product.some(pro=>Buffer.from(pro).length>token_name_maxsize);
 }
 
-export type RequestTx = {
-  kind:"request";
-  meta:TxMeta;
-  contents:RequestContents;
-  input_raw:any[];
-  code:string[];
+const base_declaration_check = async (target:T.State,base_hashes:string[],StateData:Trie)=>{
+  const getted = await StateData.get(target.hash);
+  return getted!=null && base_hashes.indexOf(target.hash)===-1;
 }
 
-export type RefreshContents = {
-  address:string;
-  pub_key:string;
-  timestamp:number;
-  request:string;
-  index:number;
-  payee:string;
+const output_check = async (type:T.TxTypes,base_states:T.State[],output_raw:string[],token_name_maxsize:number,StateData:Trie)=>{
+  if(type==="create"){
+    const token_state:T.Token = JSON.parse(output_raw[0]);
+    const key = CryptoSet.GenereateAddress(token_state.token,_.toHash(''));
+    const getted:T.Token[] = await StateData.get(key);
+    const dev_check = token_state.developer.some((dev)=>{
+      return dev===key || _.address_form_check(dev,token_name_maxsize)
+    });
+    if(getted!=null||token_state.issued<0||dev_check) return true;
+    else return false;
+  }
+  else{
+    const new_states:T.State[] = output_raw.map((o)=>{
+      return JSON.parse(o);
+    });
+    const base_hashes = base_states.map(s=>s.hash);
+    if(await some(new_states,async (s:T.State)=>{state_check(s,token_name_maxsize)||await base_declaration_check(s,base_hashes,StateData)})) return true;
+    const pre_amount = base_states.reduce((sum,s)=>{return sum+s.contents.amount},0);
+    const new_amount = new_states.reduce((sum,s)=>{return sum+s.contents.amount},0);
+    return (type==="issue"&&pre_amount>=new_amount) || (type==="change"&&pre_amount!=new_amount) || (type==="scrap"&&pre_amount<=new_amount);
+  }
 }
 
-export type RefreshTx = {
-  kind:"refresh";
-  meta:TxMeta;
-  contents:RefreshContents;
-  evidence:string;
+const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller_hash:string)=>{
+  return chain.reverse().reduce((result:T.TxPure[],block)=>{
+    return result.concat(block.txs.filter((tx)=>{
+      return tx.kind==="request"&&tx.purehash===hash&&tx[order].flag===true&&tx[order].hash===caller_hash;
+    }));
+  },[]);
 }
 
-export type Tx = RequestTx | RefreshTx;*/
+const list_up_related = (chain:T.Block[],tx:T.RequestMeta,order:'pre'|'next',result:T.RequestMeta[]=[]):T.RequestMeta[]=>{
+  if(tx.pre.flag===false) return result;
+  const ori_order = order;
+  if(order=='pre') order = 'next';
+  else order = 'pre';
+  const searched = search_related_tx(chain,tx.pre.hash,order,tx.purehash)[0];
+  if(searched===null||searched.kind!="request") return [];
+  const new_pres = result.concat(searched);
+  return list_up_related(chain,searched,ori_order,new_pres);
+}
 
-export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currency:string,fee_by_size:number,StateData:Trie,RequestsAlias:Trie){
-  const hash = tx.meta.hash;
-  const signature = tx.meta.signature;
-  const input_raw = tx.input_raw;
-  const code = tx.code;
-  const purehash = tx.contents.purehash;
-  const pre = tx.contents.pre;
-  const next = tx.contents.next;
-  const address = tx.contents.data.address;
-  const pub_key = tx.contents.data.pub_key;
-  const timestamp = tx.contents.data.timestamp;
-  const fee = tx.contents.data.fee;
-  const solvency = tx.contents.data.solvency;
-  const type = tx.contents.data.type;
-  const token = tx.contents.data.token;
-  const base = tx.contents.data.base;
-  const input_hash = tx.contents.data.input_hash;
-  const output = tx.contents.data.output;
-  const new_token = tx.contents.data.new_token;
+const mining = (meta:T.RefreshMeta,target:number)=>{
+  let hash:string;
+  let num:number;
+  do{
+    hash = _.toHash(JSON.stringify(meta));
+    num = _.Hex_to_Num(hash);
+    meta.nonce ++;
+  }while(num>target);
+  return {
+    nonce:meta.nonce,
+    hash:hash
+  }
+}
+
+
+export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateData:Trie,LocationData:Trie)=>{
+  const hash = tx.hash;
+  const tx_meta = tx.meta;
+  const purehash = tx_meta.purehash;
+  const pre = tx_meta.pre;
+  const next = tx_meta.next;
+  const tx_data = tx_meta.data;
+  const address = tx_data.address;
+  const pub_key = tx_data.pub_key;
+  const timestamp = tx_data.timestamp;
+  const gas = tx_data.gas;
+  const solvency = tx_data.solvency;
+  const token = tx_data.token;
+  const base = tx_data.base;
+  const commit = tx_data.commit;
+  const input = tx_data.input;
+  const log_hash = tx_data.log_hash;
+  const raw = tx.raw;
+  const sign = raw.signature;
+  const input_raw = raw.raw;
+  const log_raw = raw.log;
 
   const date = new Date();
 
-  const stateroot = StateData.now_root();
-  const solvency_state:T.State = await StateData.get(solvency);
-  const base_state:T.State[] = await reduce(base,async (array:T.State[],id:string)=>{
-    const geted:T.State = await StateData.get(id);
-    if(Object.keys(geted).length!=0) return array.concat(geted);
-    else return array;
-  },[]);
+  const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,key_currency,{},[]);
+  const solvency_hashed_pubs = solvency_state.contents.owner.map(o=>o.split(':')[2])
 
-  const amount_result = output.reduce((sum:number,state:T.State)=>{
-    return Number(sum) + Number(state.amount);
-  },0);
-
-  const new_state = ((tx:T.RequestTx,bases:T.State[]):T.State[]=>{
-    if(type=="issue") return TxIsuue(tx,bases);
-    else if(type=="change") return TxChange(tx,bases);
-    else if(type=="scrap") return TxScrap(tx,bases);
-    else return bases;
-  })(tx,base_state);
-
-  const base_check = await some(output,async (state:T.State)=>{
-    const pre_state:T.State = await StateData.get(state.hash);
-    return Object.keys(pre_state).length!=0&&base.indexOf(state.hash)==-1;
-  });
-
-  /*await forEach(base, async (key:string)=>{
-    await StateData.delete(key);
-  })*/
-
-  const requested_check = await some(base, async (key:string)=>{
-    const requested:T.RequestsAlias = await RequestsAlias.get(key);
-    if(Object.keys(requested).length==0) return false;
-    else if(requested.req.state=="yet") return false;
-    else return true;
-  });
-
-  const state_check = new_state.some((state:T.State,index:number)=>{
-    if(state.hash==solvency_state.hash){
-      state.amount -= (fee+fee_by_size*Buffer.from(JSON.stringify(tx)).length);
-    }
-    return state.amount<0 || (base_state[index]!=null&&base_state[index].contents.owner!=state.contents.owner) || Buffer.from(JSON.stringify(state.contents.tag)).length>tag_limit || ![0,128].includes(Buffer.from(state.contents.data).length);
-  });
-
-  if(hash!=_.toHash(JSON.stringify(tx.contents))){
+  if(_.object_hash_check(hash,tx.meta)){
     console.log("invalid hash");
     return false;
   }
-  else if(address!=token&&CryptoSet.verifyData(hash,signature,pub_key)==false){
-    console.log("invalid signature");
-    return false;
-  }
-  else if(purehash!=_.toHash(JSON.stringify(tx.contents.data))){
+  else if(_.object_hash_check(purehash,tx_data)){
     console.log("invalid purehash");
     return false;
   }
-  else if(address!=token&&!address.match(/^PH/)){
+  else if(_.hash_size_check(hash)||_.hash_size_check(purehash)||_.hash_size_check(pre)||_.hash_size_check(next)){
+    console.log("invalid hash size");
+    return false;
+  }
+  else if(address.some((ad,i)=>{return _.address_check(ad,pub_key[i],token)})){
     console.log("invalid address");
     return false;
   }
-  else if(address!=token&&address!=CryptoSet.AddressFromPublic(pub_key)){
+  else if(pub_key.some((pub)=>{return pub!=_.toHash('')})){
     console.log("invalid pub_key");
     return false;
   }
@@ -190,36 +170,28 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
     console.log("invalid timestamp");
     return false;
   }
-  else if(solvency_state.contents.token!=key_currency||solvency_state.amount<fee+fee_by_size*Buffer.from(JSON.stringify(tx)).length){
+  else if(solvency_state.contents.amount<tx_fee(tx)+gas||hashed_pub_check(solvency_state,pub_key)||solvency_state.contents.token!=key_currency||await requested_check([solvency],LocationData)){
     console.log("invalid solvency");
     return false;
   }
-  else if(base.length!=base_state.length||base_check){
-    console.log("invalid base");
+  else if(await requested_check(base,LocationData)){
+    console.log("base states are already requested");
     return false;
   }
-  else if(input_hash!=_.toHash(JSON.stringify(input_raw))){
-    console.log("invalid input");
+  else if(await commited_check(token,commit,StateData)){
+    console.log("commits are already committed");
     return false;
   }
-  else if(type=='issue'&&amount_result<=0){
-    console.log("invalid type issue");
+  else if(address.some((ad,i)=>{return _.sign_check(ad,token,hash,sign[i],pub_key[i])})){
+    console.log("invalid signature");
     return false;
   }
-  else if(type=='change'&&amount_result!=0){
-    console.log("invalid type change");
+  else if(input.some((inp,i)=>{return _.object_hash_check(inp,input_raw[i])})){
+    console.log("invalid input hash");
     return false;
   }
-  else if(type=='scrap'&&amount_result>=0){
-    console.log("invalid type scrap");
-    return false;
-  }
-  else if(requested_check){
-    console.log("some states are already requested");
-    return false;
-  }
-  else if(state_check){
-    console.log("invalid result");
+  else if(log_hash.some((l,i)=>{return _.object_hash_check(l,log_raw[i])})){
+    console.log("invalid log hash");
     return false;
   }
   else{
@@ -227,98 +199,61 @@ export async function ValidRequestTx(tx:T.RequestTx,tag_limit:number,key_currenc
   }
 }
 
-/*function isRequest(tx:Tx):tx is RequestTx{
-  tx.contents.data
-}*/
-//const isRequest = (tx:Tx):tx is RequestTx => tx.kind === "request";
 
-export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency:string,fee_by_size:number,tag_limit:number,StateData:Trie,DagData:Trie,RequestsAlias:Trie){
-  //console.log("validrefresh")
-  const hash = tx.meta.hash;
-  const signature = tx.meta.signature;
-  const evidence = tx.evidence;
-  const address = tx.contents.address;
-  const pub_key = tx.contents.pub_key;
-  const timestamp = tx.contents.timestamp;
-  const request = tx.contents.request;
-  const index = tx.contents.index;
-  const payee = tx.contents.payee;
+export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+  const hash = tx.hash;
+  const tx_meta = tx.meta;
+  const address = tx_meta.address;
+  const pub_key = tx_meta.pub_key;
+  const timestamp = tx_meta.timestamp;
+  const request = tx_meta.request;
+  const index = tx_meta.index;
+  const payee = tx_meta.payee;
+  const output = tx_meta.output;
+  const log_hash = tx_meta.log_hash;
+  const raw = tx.raw;
+  const output_raw = raw.raw;
+  const log_raw = raw.log;
+
+  const req_tx:T.RequestMeta = chain[index].txs.filter((tx:T.TxPure)=>{
+    return tx.kind==="request"&&_.toHash(JSON.stringify(tx))===request;
+  })[0];
+
+  const token = req_tx.data.token;
 
   const date = new Date();
 
+  const payee_state:T.State = await StateData.get(payee) || StateSet.CreateState(0,address,key_currency,{},[]);
 
-  //await db.close();
-  //await db.open();
-  const unit:T.Unit = await DagData.get(evidence);
-  console.log(unit)
-  const request_tx:T.RequestTx = chain[index].transactions.reduce((result:T.RequestTx[],tx:T.Tx)=>{
-    if(tx.kind=="request"&&tx.meta.hash==request) return result.concat(tx);
-    else return result;
-  },[])[0];
-
-  const token = request_tx.contents.data.token;
-
-
-  //await db.close();
-  //await db.open();
-
-  //console.log(await StateData.get(tx.contents.payee))
-
-  const payee_state:T.State = await StateData.get(tx.contents.payee);
-
-  //console.log(payee_state)
-
-  const solvency_state:T.State = await StateData.get(request_tx.contents.data.solvency);
-
-  const base_state = await reduce(request_tx.contents.data.base,async (array:T.State[],id:string)=>{
-    const geted:T.State = await StateData.get(id);
-    if(geted!=null) return array.concat(geted);
-    else return array;
+  const base_states:T.State[] = await reduce(req_tx.data.base,async (result:T.State[],key:string)=>{
+    const getted:T.State = await StateData.get(key);
+    if(getted) return result.concat(getted);
   },[]);
 
-  const new_request_state = ((tx:T.RequestTx,bases:T.State[]):T.State[]=>{
-    const type = tx.contents.data.type;
-    if(type=="issue") return TxIsuue(tx,bases);
-    else if(type=="change") return TxChange(tx,bases);
-    else if(type=="scrap") return TxScrap(tx,bases);
-    else return bases;
-  })(request_tx,base_state);
+  const pres = list_up_related(chain,req_tx,"pre",[]);
+  const nexts = list_up_related(chain,req_tx,"next",[]);
 
-  const fee = request_tx.contents.data.fee;
-
-  const refreshed_check = await some(new_request_state, async (state:T.State)=>{
-    const key = state.hash;
-    const aliase:T.RequestsAlias = await RequestsAlias.get(key);
-    return Object.keys(aliase).length!=0 && aliase.ref.state=="already";
-  });
-
-  /*await forEach(base, async (key:string)=>{
-    await StateData.delete(key);
-  })*/
-  const state_check = new_request_state.some((state:T.State)=>{
-    if(state.hash==solvency_state.hash){
-      state.amount -= (fee+fee_by_size*Buffer.from(JSON.stringify(tx)).length);
-    }
-    else if(state.hash==payee_state.hash){
-      state.amount -= ((-1)*fee+fee_by_size*Buffer.from(JSON.stringify(tx)).length);
-    }
-    return state.amount<0 || Buffer.from(JSON.stringify(state.contents.tag)).length>tag_limit || ![0,128].includes(Buffer.from(state.contents.data).length);
-  });
-  //const get_request = await RequestsAlias.get(request_tx.meta.hash);
-
-  if(hash!=_.toHash(JSON.stringify(tx.contents))){
+  if(_.object_hash_check(hash,tx_meta)){
     console.log("invalid hash");
     return false;
   }
-  else if(address!=token&&CryptoSet.verifyData(hash,signature,pub_key)==false){
-    console.log("invalid signature");
+  else if(_.Hex_to_Num(hash)>pow_target){
+    console.log("invalid nonce");
     return false;
   }
-  else if(address!=token&&!address.match(/^PH/)){
+  else if(index<0||index>chain.length-1){
+    console.log("invalid request index");
+    return false;
+  }
+  else if(req_tx==null){
+    console.log("invalid request hash");
+    return false;
+  }
+  else if(address.some((ad,i)=>{return _.address_check(ad,pub_key[i],token)})){
     console.log("invalid address");
     return false;
   }
-  else if(address!=token&&address!=CryptoSet.AddressFromPublic(pub_key)){
+  else if(pub_key.some((pub)=>{return pub!=_.toHash('')})){
     console.log("invalid pub_key");
     return false;
   }
@@ -326,28 +261,36 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
     console.log("invalid timestamp");
     return false;
   }
-  else if(Object.keys(unit).length==0||_.toHash(JSON.stringify(unit.contents.data))!=_.toHash(JSON.stringify(tx.contents))){
-    console.log("invalid evidence");
+  else if(await refreshed_check(req_tx.data.base,index,request,LocationData)){
+    console.log("base states are already refreshed");
     return false;
   }
-  else if(payee_state.contents.token!=key_currency||payee_state.amount<fee_by_size*Buffer.from(JSON.stringify(tx)).length){
+  else if(await refreshed_check([req_tx.data.solvency],index,request,LocationData)){
+    console.log("invalid solvency");
+    return false;
+  }
+  else if(payee_state.contents.amount+req_tx.data.gas<tx_fee(tx)||hashed_pub_check(payee_state,pub_key)||payee_state.contents.token!=key_currency){
     console.log("invalid payee");
     return false;
   }
-  else if(solvency_state.contents.token!=key_currency||solvency_state.amount<request_tx.contents.data.fee){
-    console.log("invalid fee");
+  else if(output.some((o,i)=>{return _.object_hash_check(o,output_raw[i])})){
+    console.log("invalid output check");
     return false;
   }
-  else if(request_tx.contents.data.base.length!=base_state.length){
-    console.log("invalid base");
+  else if(log_hash.some((l,i)=>{return _.object_hash_check(l,log_raw[i])})){
+    console.log("invalid log hash");
     return false;
   }
-  else if(refreshed_check){
-    console.log("This request is already refreshed");
+  else if(await output_check(req_tx.data.type,base_states,output_raw,token_name_maxsize,StateData)){
+    console.log("invalid output");
     return false;
   }
-  else if(state_check){
-    console.log("invalid result");
+  else if(req_tx.pre.flag===true&&pres.length===0){
+    console.log("invalid pre txs");
+    return false;
+  }
+  else if(req_tx.next.flag===true&&nexts.length===0){
+    console.log("invalid next txs");
     return false;
   }
   else{
@@ -355,303 +298,100 @@ export async function ValidRefreshTx(tx:T.RefreshTx,chain:T.Block[],key_currency
   }
 }
 
-export function ChangeState(amount:number,contents:T.StateContent){
-  return StateSet.CreateState(amount,contents.owner,contents.token,contents.tag,contents.data,contents.product)
-}
-
-function TxIsuue(tx:T.RequestTx,bases:T.State[]):T.State[]{
-  if(tx.contents.data.type!="issue") return bases;
-  const outputs = tx.contents.data.output;
-  const refreshed = bases.map((state:T.State,i:number)=>{
-    const target = outputs[i];
-    return ChangeState(state.amount+target.amount,target.contents);
-  });
-  return refreshed.concat(outputs.slice(bases.length,outputs.length));
-}
-
-function TxChange(tx:T.RequestTx,bases:T.State[]):T.State[]{
-  if(tx.contents.data.type!="change") return bases;
-  const outputs = tx.contents.data.output;
-  //console.log(bases)
-  //console.log(outputs)
-  const refreshed = bases.map((state:T.State,i:number)=>{
-    const target = outputs[i];
-    return ChangeState(Number(state.amount)+Number(target.amount),target.contents);
-  });
-  //console.log(refreshed);
-  return refreshed.concat(outputs.slice(bases.length,outputs.length));
-  /*return bases.map((state:StateSet.State,i:number)=>{
-    const output = tx.contents.data.output[i];
-    state.amount += output.amount;
-    state.contents = output.contents;
-    return state;
-  });*/
-}
-
-function TxScrap(tx:T.RequestTx,bases:T.State[]):T.State[]{
-  if(tx.contents.data.type!="scrap") return bases;
-  return bases.map((state:T.State,i:number)=>{
-    const output = tx.contents.data.output[i];
-    state.amount += output.amount;
-    state.contents = output.contents;
-    return ChangeState(state.amount+output.amount,output.contents);;
-  });
-}
-
-/*function TxCreate(tx:RequestTx,bases:StateSet.State[]):StateSet.State[]{
-  if(tx.contents.data.type!="create") return bases;
-  const outputs = tx.contents.data.output;
-  return outputs;
-}*/
-
-
-function NewState(tx:T.RequestTx,bases:T.State[]):T.State[]{
-  switch(tx.contents.data.type){
-    case "issue":
-      return TxIsuue(tx,bases);
-    case "change":
-      return TxChange(tx,bases);
-    case "scrap":
-      return TxScrap(tx,bases);
-    default:
-      return bases;
-  }
-}
-
-async function  RequestRequestRoot(request:T.RequestTx,index:number,Aliases:Trie){
-  const req:T.ReleationInfo = {
-    state:"already",
-    index:index,
-    hash:request.meta.hash
-  };
-  const ref:T.ReleationInfo = {
-    state:"yet",
-    index:index,
-    hash:request.meta.hash
-  };
-  const obj:T.RequestsAlias = {
-    req:req,
-    ref:ref
-  };
-  await forEach(request.contents.data.base, async (key:string)=>{
-    await Aliases.delete(key);
-    await Aliases.put(key,obj);
-  });
-  return Aliases;
-}
-
-async function RefreshRequestRoot(request:T.RequestTx,refresh:T.RefreshTx,index:number,Aliases:Trie){
-  const req:T.ReleationInfo = {
-    state:"yet",
-    index:index,
-    hash:refresh.meta.hash
-  };
-  const ref:T.ReleationInfo = {
-    state:"already",
-    index:index,
-    hash:refresh.meta.hash
-  };
-  const obj:T.RequestsAlias = {
-    req:req,
-    ref:ref
-  };
-  await forEach(request.contents.data.output, async (state:T.State)=>{
-    await Aliases.delete(state.hash);
-    await Aliases.put(state.hash,obj);
-  });
-  return Aliases;
-}
-/*
-async function RefreshRequestRoot(request:T.RequestTx,refresh:T.RefreshTx,index:number,Aliases:Trie){
-  console.log(Aliases.now_root())
-  if(request.meta.hash!=refresh.contents.request) return Aliases;
-  const new_Aliases =
-  const alias:T.RequestsAlias = {
-    index: index,
-    hash: refresh.meta.hash
-  };
-  await Aliases.put(request.meta.hash,alias);
-  console.log(await Aliases.filter());
-  return Aliases;
-}*/
-
-/*async function Fee_to_Verifier(request:RequestTx,refresh:RefreshTx,stateroot:string,key_currency:string){
-  if(request.meta.hash!=refresh.contents.request) return stateroot;
-  const StateData = new RadixTree({
-    db: db,
-    root: stateroot
-  });
-  let solvency:StateSet.State = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(request.contents.data.solvency))));
-  let payee:StateSet.State = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(refresh.contents.payee))));
-  if(solvency.contents.token!=key_currency||payee.contents.token!=key_currency) return stateroot;
-  solvency.amount -= request.contents.data.fee;
-  payee.amount += request.contents.data.fee;
-  await StateData.set(Trie.en_key(solvency.hash),rlp.encode(JSON.stringify(solvency)));
-  await StateData.set(Trie.en_key(payee.hash),rlp.encode(JSON.stringify(payee)));
-  const new_root = await StateData.flush();
-  return new_root;
-}*/
-async function Fee_to_Verifier(solvency:T.State,payee:T.State,fee:number,key_currency:string){
-  if(solvency.contents.token!=key_currency||payee.contents.token!=key_currency||solvency.hash==payee.hash) return [solvency,payee];
-  solvency.amount -= fee;
-  payee.amount += fee;
-  return [solvency,payee];
-}
-
-
-async function Fee_to_Validator(pay_state:T.State,validator_state:T.State,fee:number,key_currency:string){
-  if(pay_state.contents.token!=key_currency||validator_state.contents.token!=key_currency||pay_state.hash==validator_state.hash) return [pay_state,validator_state];
-  pay_state.amount -= fee;
-  validator_state.amount += fee;
-  return [pay_state,validator_state];
-}
-
-/*async function Fee_to_Validator(tx:Tx,validator:string,stateroot:string,key_currency:string){
-  const fee_pay = ((tx)=>{
-    if(tx.kind=="request") return tx.contents.data.solvency;
-    else if(tx.kind=="refresh") return tx.contents.payee;
-    else return "";
-  })(tx);
-  if(fee_pay=="") return stateroot;
-  const StateData = new RadixTree({
-    db: db,
-    root: stateroot
-  });
-  const fee = Buffer.from(JSON.stringify(tx)).length;
-  let pay_state:StateSet.State = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(fee_pay))));
-  let validator_state:StateSet.State = JSON.parse(rlp.decode(await StateData.get(Trie.en_key(validator))));
-  if(pay_state.contents.token!=key_currency||validator_state.contents.token!=key_currency) return stateroot;
-  pay_state.amount -= fee;
-  validator_state.amount += fee;
-  await StateData.set(Trie.en_key(pay_state.hash),rlp.encode(JSON.stringify(pay_state)));
-  await StateData.set(Trie.en_key(validator_state.hash),rlp.encode(JSON.stringify(validator_state)));
-  const new_root = await StateData.flush();
-  return new_root;
-}*/
-
-export async function AcceptRequestTx(tx:T.RequestTx,chain:T.Block[],validator:string,key_currency:string,fee_by_size:number,StateData:Trie,RequestData:Trie){
-  const for_fee_state:T.State[] = await map([tx.contents.data.solvency,validator], async (key:string)=>{
-    const state:T.State = await StateData.get(key);
-    return state;
-  });
-  const validator_fee_payed = await Fee_to_Validator(for_fee_state[0],for_fee_state[1],fee_by_size*Buffer.from(JSON.stringify(tx)).length,key_currency);
-  await StateData.put(_.toHash(JSON.stringify(validator_fee_payed[0].contents)),validator_fee_payed[0]);
-  await StateData.put(_.toHash(JSON.stringify(validator_fee_payed[1].contents)),validator_fee_payed[1]);
-  const new_RequestData:Trie = await RequestRequestRoot(tx,chain.length,RequestData);
-  return [StateData,new_RequestData];
-}
-
-export async function AcceptRefreshTx(tx:T.RefreshTx,chain:T.Block[],validator:string,key_currency:string,fee_by_size:number,StateData:Trie,RequestData:Trie){
-  const index = tx.contents.index;
-  const request_tx:T.RequestTx = chain[index].transactions.reduce((result:T.RequestTx[],t:T.Tx)=>{
-    if(t.kind=="request"&&t.meta.hash==tx.contents.request) return result.concat(t);
-    else return result;
-  },[])[0];
-  const for_fee = [request_tx.contents.data.solvency,tx.contents.payee,validator]
-  const for_fee_state = await map(for_fee, async (key:string)=>{
-    const state:T.State = await StateData.get(key);
-    return state;
-  });
-  console.log("for_fee_state:")
-  console.log(for_fee_state)
-  const verifier_fee_payed = await Fee_to_Verifier(for_fee_state[0],for_fee_state[1],request_tx.contents.data.fee,key_currency);
-  const validator_fee_payed = await Fee_to_Validator(verifier_fee_payed[1],for_fee_state[2],fee_by_size*Buffer.from(JSON.stringify(tx)).length,key_currency);
-  const states_for_fee:T.State[] = [verifier_fee_payed[0],validator_fee_payed[0],validator_fee_payed[1]];
-  const hash_for_fee = states_for_fee.map((state:T.State)=>{
-    return _.toHash(JSON.stringify(state.contents));
-  });
-  await StateData.put(hash_for_fee[0],states_for_fee[0]);
-  await StateData.put(hash_for_fee[1],states_for_fee[1]);
-  await StateData.put(hash_for_fee[2],states_for_fee[2]);
-  const bases:T.State[] = await map(request_tx.contents.data.base, async (key:string)=>{
-    const state:T.State = await StateData.get(key);
-    const already = hash_for_fee.indexOf(state.hash)
-    if(already!=-1) return states_for_fee[already];
-    else return state;
-  });
-
-  const new_state = NewState(request_tx,bases);
-
-  await forEach(request_tx.contents.data.base, async (key:string)=>{
-    await StateData.delete(key);
-  });
-
-  await forEach(new_state, async (state:T.State)=>{
-    await StateData.put(state.hash,state);
-  });
-  const new_RequestData:Trie = await RefreshRequestRoot(request_tx,tx,chain.length,RequestData);
-  return [StateData,new_RequestData];
-}
-
-export async function CreateRequestTx(password:string,pre:string,next:string,pub_key:string,fee:number,solvency:string,type:T.TxTypes,token:string,base:string[],input:any[],new_token:T.Token[]=[],code:string[]=[],result:T.State[],StateData:Trie){
-  const address = CryptoSet.AddressFromPublic(pub_key);
+export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type:T.TxTypes,token:string,base:string[],commit:string[],input_raw:string[],log:string[],pre:T.Relation,next:T.Relation,feeprice:number)=>{
+  const address = pub_key.map(p=>CryptoSet.GenereateAddress(token,p));
   const date = new Date();
   const timestamp = date.getTime();
-  const input_hash = _.toHash(JSON.stringify(input));
-  const pre_1:T.RequestTx = {
-    kind:"request",
-    meta:{
-      hash:"",
-      signature:""
-    },
-    contents:{
-      purehash:"",
-      pre:pre,
-      next:next,
-      data:{
-        address:address,
-        pub_key:pub_key,
-        timestamp:timestamp,
-        fee:fee,
-        solvency:solvency,
-        type:type,
-        token:token,
-        base:base,
-        input_hash:input_hash,
-        output:result,
-        new_token:new_token
-      }
-    },
-    input_raw:input,
-    code:code
+  const input = input_raw.map(i=>_.toHash(i));
+  const log_hash = log.map(l=>_.toHash(l));
+
+  const data:T.RequestData = {
+    address:address,
+    pub_key:pub_key,
+    timestamp:timestamp,
+    gas:gas,
+    solvency:solvency,
+    type:type,
+    token:token,
+    base:base,
+    commit:commit,
+    input:input,
+    log_hash:log_hash
   }
-  const base_state = await map(base, async (key:string)=>{
-    const state = await StateData.get(key);
-    return state;
-  });
-  //const output = NewState(pre_1,base_state);
-  /*const pre_2 = ((pre_1,output)=>{
-    pre_1.contents.data.output = output;
-    return pre_1
-  })(pre_1,output);*/
-  const purehash = _.toHash(JSON.stringify(pre_1.contents.data));
-  const pre_2 = ((pre_1,purehash)=>{
-    pre_1.contents.purehash = purehash;
-    return pre_1;
-  })(pre_1,purehash);
-  const hash = _.toHash(JSON.stringify(pre_2.contents));
-  const signature = CryptoSet.SignData(hash,password);
-  const tx = ((pre_2,hash,signature)=>{
-    pre_2.meta.hash = hash;
-    pre_2.meta.signature = signature;
-    return pre_2;
-  })(pre_2,hash,signature);
+
+  const purehash = _.toHash(JSON.stringify(data));
+
+  const meta:T.RequestMeta = {
+    kind:"request",
+    purehash:purehash,
+    pre:pre,
+    next:next,
+    feeprice:feeprice,
+    data:data
+  }
+
+  const hash = _.toHash(JSON.stringify(meta));
+
+  const tx:T.RequestTx = {
+    hash:hash,
+    meta:meta,
+    raw:{
+      signature:[],
+      raw:input_raw,
+      log:log
+    }
+  }
   return tx;
 }
 
-export function CreateRefreshTx(password:string,unit:T.Unit){
-  const contents:T.RefreshContents = unit.contents.data;
-  const hash = _.toHash(JSON.stringify(contents));
-  const signature = CryptoSet.SignData(hash,password);
-  const evidence = unit.meta.hash;
-  const tx:T.RefreshTx = {
+export const CreateRefreshTx = (pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],log_raw:string[],chain:T.Block[])=>{
+  const req_tx:T.RequestMeta = chain[index].txs.filter((tx:T.TxPure)=>{
+    return tx.kind==="request"&&_.toHash(JSON.stringify(tx))===request;
+  })[0];
+  const address = pub_key.map(p=>CryptoSet.GenereateAddress(req_tx.data.token,p));
+  const date = new Date();
+  const timestamp = date.getTime();
+  const output = output_raw.map(o=>_.toHash(o));
+  const log_hash = log_raw.map(l=>_.toHash(l));
+  let meta:T.RefreshMeta = {
     kind:"refresh",
-    meta:{
-      hash:hash,
-      signature:signature
-    },
-    contents:contents,
-    evidence:evidence
-  };
+    address:address,
+    pub_key:pub_key,
+    nonce:0,
+    feeprice:feeprice,
+    timestamp:timestamp,
+    request:request,
+    index:index,
+    payee:payee,
+    output:output,
+    log_hash:log_hash
+  }
+  const mined = mining(meta,target);
+  meta.nonce = mined.nonce;
+  const hash = mined.hash;
+  const raw:T.TxRaw = {
+    signature:[],
+    raw:output_raw,
+    log:log_raw
+  }
+  const tx:T.RefreshTx = {
+    hash:hash,
+    meta:meta,
+    raw:raw
+  }
+  return tx;
+}
+
+export const SignTx = (tx:T.Tx,my_pass:string,my_address:string)=>{
+  let addresses;
+  if(tx.meta.kind==="request"){
+    addresses = tx.meta.data.address;
+  }
+  else{
+    addresses = tx.meta.address;
+  }
+  const index = addresses.indexOf(my_address);
+  const sign = CryptoSet.SignData(tx.hash,my_pass);
+  tx.raw.signature[index] = sign;
   return tx;
 }

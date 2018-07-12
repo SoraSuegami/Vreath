@@ -1,40 +1,46 @@
 import * as crypto from 'crypto'
-const CryptoSet = require('./crypto_set.js');
+import * as CryptoSet from './crypto_set'
 
 export const toHash = (str:string)=>{
-  var sha256 = crypto.createHash('sha256');
-  sha256.update(str);
-  const pre_hash = sha256.digest('hex');
-  var sha512 = crypto.createHash('sha512');
-  sha512.update(pre_hash);
-  const hash = sha512.digest('hex');
-  return hash;
+  return CryptoSet.HashFromPass(str);
 }
 
-export const get_unicode = (str:string):number=>{
-  const result = str.split("").reduce((num,val)=>{
-    return num + val.charCodeAt(0);
-  },0);
-  return result;
+export const Hex_to_Num = (str:string):number=>{
+  return parseInt(str,16);
+}
+
+export const get_unicode = (str:string):number[]=>{
+  return str.split("").map((val)=>{
+    return val.charCodeAt(0);
+  });
+}
+
+export const get_string = (uni:number[]):string=>{
+  return String.fromCharCode.apply({},uni);
 }
 
 export const object_hash_check = (hash:string,obj)=>{
   return hash!=toHash(JSON.stringify(obj));
 }
 
+export const hash_size_check = (hash:string)=>{
+  return Buffer.from(hash).length!=128;
+}
+
 export const sign_check = (address:string,token:string,hash:string,signature:string,pub_key:string)=>{
   return address!=token&&CryptoSet.verifyData(hash,signature,pub_key)==false
 }
 
-export const address_check = (address:string,token:string)=>{
-  return address!=token&&!address.match(/^PH/)
-}
-
-export const pub_key_check = (address:string,token:string,pub_key:string)=>{
-  return address!=token&&address!=CryptoSet.AddressFromPublic(pub_key);
+export const address_check = (address:string,Public:string,token:string)=>{
+  return address!=CryptoSet.GenereateAddress(token,Public);
 }
 
 export const time_check = (timestamp:number)=>{
   const date = new Date();
   return timestamp>date.getTime();
+}
+
+export const address_form_check = (address:string,token_name_maxsize:number)=>{
+  const splitted = address.split(":");
+  return splitted.length!=3 || splitted[0]!="Vr" || Buffer.from(splitted[1]).length>token_name_maxsize || splitted[2]===toHash('');
 }

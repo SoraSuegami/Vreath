@@ -7,38 +7,36 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const CryptoSet = __importStar(require("./crypto_set"));
+const crypto = __importStar(require("crypto"));
+const CryptoSet = require('./crypto_set.js');
 exports.toHash = (str) => {
-    return CryptoSet.HashFromPass(str);
-};
-exports.Hex_to_Num = (str) => {
-    return parseInt(str, 16);
+    var sha256 = crypto.createHash('sha256');
+    sha256.update(str);
+    const pre_hash = sha256.digest('hex');
+    var sha512 = crypto.createHash('sha512');
+    sha512.update(pre_hash);
+    const hash = sha512.digest('hex');
+    return hash;
 };
 exports.get_unicode = (str) => {
-    return str.split("").map((val) => {
-        return val.charCodeAt(0);
-    });
-};
-exports.get_string = (uni) => {
-    return String.fromCharCode.apply({}, uni);
+    const result = str.split("").reduce((num, val) => {
+        return num + val.charCodeAt(0);
+    }, 0);
+    return result;
 };
 exports.object_hash_check = (hash, obj) => {
     return hash != exports.toHash(JSON.stringify(obj));
 };
-exports.hash_size_check = (hash) => {
-    return Buffer.from(hash).length != 128;
-};
 exports.sign_check = (address, token, hash, signature, pub_key) => {
     return address != token && CryptoSet.verifyData(hash, signature, pub_key) == false;
 };
-exports.address_check = (address, Public, token) => {
-    return address != CryptoSet.GenereateAddress(token, Public);
+exports.address_check = (address, token) => {
+    return address != token && !address.match(/^PH/);
+};
+exports.pub_key_check = (address, token, pub_key) => {
+    return address != token && address != CryptoSet.AddressFromPublic(pub_key);
 };
 exports.time_check = (timestamp) => {
     const date = new Date();
     return timestamp > date.getTime();
-};
-exports.address_form_check = (address, token_name_maxsize) => {
-    const splitted = address.split(":");
-    return splitted.length != 3 || splitted[0] != "Vr" || Buffer.from(splitted[1]).length > token_name_maxsize || splitted[2] === exports.toHash('');
 };

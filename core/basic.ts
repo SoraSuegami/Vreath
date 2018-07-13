@@ -1,4 +1,3 @@
-import * as crypto from 'crypto'
 import * as CryptoSet from './crypto_set'
 
 export const toHash = (str:string)=>{

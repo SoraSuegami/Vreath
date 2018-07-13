@@ -1,12 +1,10 @@
-declare function require(x: string): any;
-
 import * as _ from './basic'
 import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
+import {reduce,some,ForEach} from 'p-iteration'
 
-const {reduce,some} = require('p-iteration');
 
 const tx_fee = (tx:T.Tx)=>{
   const price = tx.meta.feeprice;
@@ -20,7 +18,7 @@ const requested_check = async (base:string[],LocationData:Trie):Promise<boolean>
   return await some(base, async(key:string)=>{
     const getted:T.Location =  await LocationData.get(key);
     if(getted==null) return false;
-    else if(getted.req.state=="yet") return false;
+    else if(getted.state=="yet") return false;
     else return true;
   });
 }
@@ -44,7 +42,7 @@ const refreshed_check = async (base:string[],index:number,tx_hash:string,Locatio
   return await some(base, async(key:string)=>{
     const getted:T.Location =  await LocationData.get(key);
     if(getted==null) return true;
-    else if(getted.ref.state=="yet"&&getted.req.state=="already"&&getted.req.index==index&&getted.req.hash==tx_hash) return false;
+    else if(getted.state=="already"&&getted.index==index&&getted.hash==tx_hash) return false;
     else return true;
   });
 }
@@ -118,6 +116,12 @@ const mining = (meta:T.RefreshMeta,target:number)=>{
   }
 }
 
+const empty_location:T.Location = {
+  state:"yet",
+  index:0,
+  hash:_.toHash('')
+}
+
 
 export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
@@ -154,7 +158,7 @@ export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateDat
     console.log("invalid purehash");
     return false;
   }
-  else if(_.hash_size_check(hash)||_.hash_size_check(purehash)||_.hash_size_check(pre)||_.hash_size_check(next)){
+  else if(_.hash_size_check(hash)||_.hash_size_check(purehash)||_.hash_size_check(pre.hash)||_.hash_size_check(next.hash)){
     console.log("invalid hash size");
     return false;
   }
@@ -394,4 +398,70 @@ export const SignTx = (tx:T.Tx,my_pass:string,my_address:string)=>{
   const sign = CryptoSet.SignData(tx.hash,my_pass);
   tx.raw.signature[index] = sign;
   return tx;
+}
+
+export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
+  if(solvency.hash===validator.hash) return [solvency,validator];
+  solvency.contents.amount -= fee;
+  solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+  validator.contents.amount += fee;
+  validator.hash = _.toHash(JSON.stringify(validator.contents));
+  return [solvency,validator];
+}
+
+export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
+  if(solvency.hash===payee.hash) return [solvency,payee];
+  solvency.contents.amount -= gas;
+  solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+  payee.contents.amount += gas;
+  payee.hash = _.toHash(JSON.stringify(payee.contents));
+  return [solvency,payee];
+}
+
+export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_state:T.State,gas:number,fee:number)=>{
+  const after_gas = PayGas(solvency_state,payee_state,gas);
+  const after_fee = PayFee(after_gas[1],validator_state,fee);
+  if(solvency_state.hash===payee_state.hash&&payee_state.hash===validator_state.hash) return [solvency_state];
+  else if(solvency_state.hash===payee_state.hash) return after_fee;
+  else if(payee_state.hash===validator_state.hash) return after_gas;
+  else if(solvency_state.hash===validator_state.hash) return after_fee;
+  return [after_gas[0],after_fee[1],after_fee[2]];
+}
+
+export const AcceptRequestTx = async (tx:T.RequestTx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+  const solvency_state:T.State = await StateData.get(tx.meta.data.solvency);
+  const validator_state:T.State = await StateData.get(validator);
+  const fee = tx_fee(tx);
+  const after = PayFee(solvency_state,validator_state,fee);
+  await StateData.put(after[0].hash,after[0]);
+  await StateData.put(after[1].hash,after[1]);
+
+  await ForEach(tx.meta.data.base,async (key:string)=>{
+    let get_loc:T.Location = await LocationData.get(key) || empty_location;
+    get_loc = {
+      state:"already",
+      index:index,
+      hash:tx.hash
+    }
+    await LocationData.put(key,get_loc);
+  });
+  return [StateData,LocationData];
+}
+
+export const AcceptRefreshTx = async (req_tx:T.RequestTx,ref_tx:T.RefreshTx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+  if(req_tx.meta.data.type==="create"){
+    const state:T.Token = JSON.parse(req_tx.raw.raw[0]);
+    await StateData.put(CryptoSet.GenereateAddress(state.token,_.toHash('')),state);
+  }
+  else{
+    await ForEach(req_tx.meta.data.base,async (key:string)=>{
+      await StateData.delete(key);
+      await LocationData.delete(key);
+    });
+    await ForEach(ref_tx.raw.raw,async (val:string)=>{
+      const state:T.State = JSON.parse(val);
+      await StateData.put(state.hash,state);
+    });
+  }
+  return [StateData,LocationData];
 }

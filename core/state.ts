@@ -1,5 +1,3 @@
-declare function require(x: string): any;
-
 import * as _ from './basic'
 import * as T from './types'
 

@@ -10,7 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const _ = __importStar(require("./basic"));
 const CryptoSet = __importStar(require("./crypto_set"));
 const StateSet = __importStar(require("./state"));
-const { reduce, some } = require('p-iteration');
+const p_iteration_1 = require("p-iteration");
 const tx_fee = (tx) => {
     const price = tx.meta.feeprice;
     delete tx.meta.feeprice;
@@ -19,11 +19,11 @@ const tx_fee = (tx) => {
     return price * Buffer.from(target).length;
 };
 const requested_check = async (base, LocationData) => {
-    return await some(base, async (key) => {
+    return await p_iteration_1.some(base, async (key) => {
         const getted = await LocationData.get(key);
         if (getted == null)
             return false;
-        else if (getted.req.state == "yet")
+        else if (getted.state == "yet")
             return false;
         else
             return true;
@@ -44,11 +44,11 @@ const hashed_pub_check = (state, pubs) => {
     });
 };
 const refreshed_check = async (base, index, tx_hash, LocationData) => {
-    return await some(base, async (key) => {
+    return await p_iteration_1.some(base, async (key) => {
         const getted = await LocationData.get(key);
         if (getted == null)
             return true;
-        else if (getted.ref.state == "yet" && getted.req.state == "already" && getted.req.index == index && getted.req.hash == tx_hash)
+        else if (getted.state == "already" && getted.index == index && getted.hash == tx_hash)
             return false;
         else
             return true;
@@ -84,7 +84,7 @@ const output_check = async (type, base_states, output_raw, token_name_maxsize, S
             return JSON.parse(o);
         });
         const base_hashes = base_states.map(s => s.hash);
-        if (await some(new_states, async (s) => { state_check(s, token_name_maxsize) || await base_declaration_check(s, base_hashes, StateData); }))
+        if (await p_iteration_1.some(new_states, async (s) => { state_check(s, token_name_maxsize) || await base_declaration_check(s, base_hashes, StateData); }))
             return true;
         const pre_amount = base_states.reduce((sum, s) => { return sum + s.contents.amount; }, 0);
         const new_amount = new_states.reduce((sum, s) => { return sum + s.contents.amount; }, 0);
@@ -125,6 +125,11 @@ const mining = (meta, target) => {
         hash: hash
     };
 };
+const empty_location = {
+    state: "yet",
+    index: 0,
+    hash: _.toHash('')
+};
 exports.ValidRequestTx = async (tx, key_currency, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
@@ -157,7 +162,7 @@ exports.ValidRequestTx = async (tx, key_currency, StateData, LocationData) => {
         console.log("invalid purehash");
         return false;
     }
-    else if (_.hash_size_check(hash) || _.hash_size_check(purehash) || _.hash_size_check(pre) || _.hash_size_check(next)) {
+    else if (_.hash_size_check(hash) || _.hash_size_check(purehash) || _.hash_size_check(pre.hash) || _.hash_size_check(next.hash)) {
         console.log("invalid hash size");
         return false;
     }
@@ -221,7 +226,7 @@ exports.ValidRefreshTx = async (tx, chain, pow_target, key_currency, token_name_
     const token = req_tx.data.token;
     const date = new Date();
     const payee_state = await StateData.get(payee) || StateSet.CreateState(0, address, key_currency, {}, []);
-    const base_states = await reduce(req_tx.data.base, async (result, key) => {
+    const base_states = await p_iteration_1.reduce(req_tx.data.base, async (result, key) => {
         const getted = await StateData.get(key);
         if (getted)
             return result.concat(getted);
@@ -381,4 +386,70 @@ exports.SignTx = (tx, my_pass, my_address) => {
     const sign = CryptoSet.SignData(tx.hash, my_pass);
     tx.raw.signature[index] = sign;
     return tx;
+};
+exports.PayFee = (solvency, validator, fee) => {
+    if (solvency.hash === validator.hash)
+        return [solvency, validator];
+    solvency.contents.amount -= fee;
+    solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+    validator.contents.amount += fee;
+    validator.hash = _.toHash(JSON.stringify(validator.contents));
+    return [solvency, validator];
+};
+exports.PayGas = (solvency, payee, gas) => {
+    if (solvency.hash === payee.hash)
+        return [solvency, payee];
+    solvency.contents.amount -= gas;
+    solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+    payee.contents.amount += gas;
+    payee.hash = _.toHash(JSON.stringify(payee.contents));
+    return [solvency, payee];
+};
+exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => {
+    const after_gas = exports.PayGas(solvency_state, payee_state, gas);
+    const after_fee = exports.PayFee(after_gas[1], validator_state, fee);
+    if (solvency_state.hash === payee_state.hash && payee_state.hash === validator_state.hash)
+        return [solvency_state];
+    else if (solvency_state.hash === payee_state.hash)
+        return after_fee;
+    else if (payee_state.hash === validator_state.hash)
+        return after_gas;
+    else if (solvency_state.hash === validator_state.hash)
+        return after_fee;
+    return [after_gas[0], after_fee[1], after_fee[2]];
+};
+exports.AcceptRequestTx = async (tx, validator, index, StateData, LocationData) => {
+    const solvency_state = await StateData.get(tx.meta.data.solvency);
+    const validator_state = await StateData.get(validator);
+    const fee = tx_fee(tx);
+    const after = exports.PayFee(solvency_state, validator_state, fee);
+    await StateData.put(after[0].hash, after[0]);
+    await StateData.put(after[1].hash, after[1]);
+    await p_iteration_1.ForEach(tx.meta.data.base, async (key) => {
+        let get_loc = await LocationData.get(key) || empty_location;
+        get_loc = {
+            state: "already",
+            index: index,
+            hash: tx.hash
+        };
+        await LocationData.put(key, get_loc);
+    });
+    return [StateData, LocationData];
+};
+exports.AcceptRefreshTx = async (req_tx, ref_tx, validator, index, StateData, LocationData) => {
+    if (req_tx.meta.data.type === "create") {
+        const state = JSON.parse(req_tx.raw.raw[0]);
+        await StateData.put(CryptoSet.GenereateAddress(state.token, _.toHash('')), state);
+    }
+    else {
+        await p_iteration_1.ForEach(req_tx.meta.data.base, async (key) => {
+            await StateData.delete(key);
+            await LocationData.delete(key);
+        });
+        await p_iteration_1.ForEach(ref_tx.raw.raw, async (val) => {
+            const state = JSON.parse(val);
+            await StateData.put(state.hash, state);
+        });
+    }
+    return [StateData, LocationData];
 };

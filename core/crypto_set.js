@@ -13,8 +13,10 @@ const secp256k1 = __importStar(require("secp256k1"));
 exports.HashFromPass = (password) => {
     let sha256 = crypto.createHash('sha256');
     sha256.update(password);
-    sha256.update(sha256.digest('hex'));
-    const hash = sha256.digest('hex');
+    const pre = sha256.digest('hex');
+    let sha256_2 = crypto.createHash('sha256');
+    sha256_2.update(pre);
+    const hash = sha256_2.digest('hex');
     return hash;
 };
 exports.GenerateKeys = (password) => {

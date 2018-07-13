@@ -85,15 +85,10 @@ export type RefreshTx = {
 export type TxPure = RequestMeta | RefreshMeta;
 export type Tx = RequestTx | RefreshTx;
 
-export type LocationInfo = {
+export type Location = {
   state:'yet' | 'already';
   index:number;
   hash:string;
-}
-
-export type Location = {
-  req:LocationInfo;
-  ref:LocationInfo;
 }
 
 export type Candidates = {

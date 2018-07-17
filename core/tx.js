@@ -130,9 +130,10 @@ const empty_location = {
     index: 0,
     hash: _.toHash('')
 };
-exports.ValidRequestTx = async (tx, key_currency, StateData, LocationData) => {
+exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
+    const version = tx_meta.version;
     const purehash = tx_meta.purehash;
     const pre = tx_meta.pre;
     const next = tx_meta.next;
@@ -153,9 +154,12 @@ exports.ValidRequestTx = async (tx, key_currency, StateData, LocationData) => {
     const log_raw = raw.log;
     const date = new Date();
     const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, key_currency, {}, []);
-    const solvency_hashed_pubs = solvency_state.contents.owner.map(o => o.split(':')[2]);
     if (_.object_hash_check(hash, tx.meta)) {
         console.log("invalid hash");
+        return false;
+    }
+    else if (version != my_version) {
+        console.log("different version");
         return false;
     }
     else if (_.object_hash_check(purehash, tx_data)) {
@@ -206,9 +210,10 @@ exports.ValidRequestTx = async (tx, key_currency, StateData, LocationData) => {
         return true;
     }
 };
-exports.ValidRefreshTx = async (tx, chain, pow_target, key_currency, token_name_maxsize, StateData, LocationData) => {
+exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency, token_name_maxsize, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
+    const version = tx_meta.version;
     const address = tx_meta.address;
     const pub_key = tx_meta.pub_key;
     const timestamp = tx_meta.timestamp;
@@ -235,6 +240,10 @@ exports.ValidRefreshTx = async (tx, chain, pow_target, key_currency, token_name_
     const nexts = list_up_related(chain, req_tx, "next", []);
     if (_.object_hash_check(hash, tx_meta)) {
         console.log("invalid hash");
+        return false;
+    }
+    else if (version != my_version) {
+        console.log("different version");
         return false;
     }
     else if (_.Hex_to_Num(hash) > pow_target) {
@@ -297,7 +306,7 @@ exports.ValidRefreshTx = async (tx, chain, pow_target, key_currency, token_name_
         return true;
     }
 };
-exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, input_raw, log, pre, next, feeprice) => {
+exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, input_raw, log, version, pre, next, feeprice) => {
     const address = pub_key.map(p => CryptoSet.GenereateAddress(token, p));
     const date = new Date();
     const timestamp = date.getTime();
@@ -319,6 +328,7 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, in
     const purehash = _.toHash(JSON.stringify(data));
     const meta = {
         kind: "request",
+        version: version,
         purehash: purehash,
         pre: pre,
         next: next,
@@ -337,7 +347,7 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, in
     };
     return tx;
 };
-exports.CreateRefreshTx = (pub_key, target, feeprice, request, index, payee, output_raw, log_raw, chain) => {
+exports.CreateRefreshTx = (version, pub_key, target, feeprice, request, index, payee, output_raw, log_raw, chain) => {
     const req_tx = chain[index].txs.filter((tx) => {
         return tx.kind === "request" && _.toHash(JSON.stringify(tx)) === request;
     })[0];
@@ -348,6 +358,7 @@ exports.CreateRefreshTx = (pub_key, target, feeprice, request, index, payee, out
     const log_hash = log_raw.map(l => _.toHash(l));
     let meta = {
         kind: "refresh",
+        version: version,
         address: address,
         pub_key: pub_key,
         nonce: 0,

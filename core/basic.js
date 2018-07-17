@@ -40,5 +40,5 @@ exports.time_check = (timestamp) => {
 };
 exports.address_form_check = (address, token_name_maxsize) => {
     const splitted = address.split(":");
-    return splitted.length != 3 || splitted[0] != "Vr" || Buffer.from(splitted[1]).length > token_name_maxsize || splitted[2] === exports.toHash('');
+    return splitted.length != 3 || splitted[0] != "Vr" || Buffer.from(splitted[1]).length > token_name_maxsize;
 };

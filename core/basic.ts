@@ -41,5 +41,5 @@ export const time_check = (timestamp:number)=>{
 
 export const address_form_check = (address:string,token_name_maxsize:number)=>{
   const splitted = address.split(":");
-  return splitted.length!=3 || splitted[0]!="Vr" || Buffer.from(splitted[1]).length>token_name_maxsize || splitted[2]===toHash('');
+  return splitted.length!=3 || splitted[0]!="Vr" || Buffer.from(splitted[1]).length>token_name_maxsize;
 }

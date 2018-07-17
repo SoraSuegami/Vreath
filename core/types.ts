@@ -49,6 +49,7 @@ export type RequestData = {
 
 export type RequestMeta = {
   kind:"request";
+  version:number;
   purehash:string;
   pre:Relation;
   next:Relation;
@@ -64,6 +65,7 @@ export type RequestTx = {
 
 export type RefreshMeta = {
   kind:"refresh";
+  version:number;
   address:string[];
   pub_key:string[];
   nonce:number;
@@ -103,11 +105,8 @@ export type FraudInfo = {
 }
 
 export type BlockMeta = {
-  hash: string;
-  validatorSign: string;
-}
-
-export type BlockContents = {
+  version:number;
+  shard_id:number;
   index:number;
   parenthash:string;
   timestamp: number;
@@ -124,8 +123,9 @@ export type BlockContents = {
 }
 
 export type Block = {
+  hash: string;
+  validatorSign: string;
   meta:BlockMeta;
-  contents:BlockContents;
   txs: TxPure[];
   raws: TxRaw[];
 }

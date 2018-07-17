@@ -123,9 +123,10 @@ const empty_location:T.Location = {
 }
 
 
-export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateData:Trie,LocationData:Trie)=>{
+export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_currency:string,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
+  const version = tx_meta.version;
   const purehash = tx_meta.purehash;
   const pre = tx_meta.pre;
   const next = tx_meta.next;
@@ -148,10 +149,13 @@ export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateDat
   const date = new Date();
 
   const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,key_currency,{},[]);
-  const solvency_hashed_pubs = solvency_state.contents.owner.map(o=>o.split(':')[2])
 
   if(_.object_hash_check(hash,tx.meta)){
     console.log("invalid hash");
+    return false;
+  }
+  else if(version!=my_version){
+    console.log("different version");
     return false;
   }
   else if(_.object_hash_check(purehash,tx_data)){
@@ -204,9 +208,10 @@ export const ValidRequestTx = async (tx:T.RequestTx,key_currency:string,StateDat
 }
 
 
-export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],my_version:number,pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
+  const version = tx_meta.version;
   const address = tx_meta.address;
   const pub_key = tx_meta.pub_key;
   const timestamp = tx_meta.timestamp;
@@ -239,6 +244,10 @@ export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],pow_target:n
 
   if(_.object_hash_check(hash,tx_meta)){
     console.log("invalid hash");
+    return false;
+  }
+  else if(version!=my_version){
+    console.log("different version");
     return false;
   }
   else if(_.Hex_to_Num(hash)>pow_target){
@@ -302,7 +311,7 @@ export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],pow_target:n
   }
 }
 
-export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type:T.TxTypes,token:string,base:string[],commit:string[],input_raw:string[],log:string[],pre:T.Relation,next:T.Relation,feeprice:number)=>{
+export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type:T.TxTypes,token:string,base:string[],commit:string[],input_raw:string[],log:string[],version:number,pre:T.Relation,next:T.Relation,feeprice:number)=>{
   const address = pub_key.map(p=>CryptoSet.GenereateAddress(token,p));
   const date = new Date();
   const timestamp = date.getTime();
@@ -327,6 +336,7 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
 
   const meta:T.RequestMeta = {
     kind:"request",
+    version:version,
     purehash:purehash,
     pre:pre,
     next:next,
@@ -348,7 +358,7 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
   return tx;
 }
 
-export const CreateRefreshTx = (pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],log_raw:string[],chain:T.Block[])=>{
+export const CreateRefreshTx = (version:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],log_raw:string[],chain:T.Block[])=>{
   const req_tx:T.RequestMeta = chain[index].txs.filter((tx:T.TxPure)=>{
     return tx.kind==="request"&&_.toHash(JSON.stringify(tx))===request;
   })[0];
@@ -359,6 +369,7 @@ export const CreateRefreshTx = (pub_key:string[],target:number,feeprice:number,r
   const log_hash = log_raw.map(l=>_.toHash(l));
   let meta:T.RefreshMeta = {
     kind:"refresh",
+    version:version,
     address:address,
     pub_key:pub_key,
     nonce:0,
@@ -465,3 +476,4 @@ export const AcceptRefreshTx = async (req_tx:T.RequestTx,ref_tx:T.RefreshTx,vali
   }
   return [StateData,LocationData];
 }
+

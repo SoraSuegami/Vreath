@@ -104,7 +104,7 @@ const esc = __importStar(require("escodegen"));
 const est = __importStar(require("estraverse"));
 const pj = __importStar(require("prettyjson"));
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
-const code = "class d{constructor(z){this.z=z;}}";
+const code = "const a = {a:2}; const b = a.a";
 const option = {
     noColor: false
 };
@@ -171,27 +171,39 @@ const edit = (parsed, identifier = [], dependence = {}) => {
             console.log("enter");
             i++;
             console.log(pj.render(node, option));
-            if (node.type === "VariableDeclarator" && node.id != null && node.id.name != null)
+            if (node.type === "VariableDeclarator")
                 identifier.push(node.id.name);
-            else if (node.type === "FunctionDeclaration" && node.id != null && node.id.name != null) {
-                identifier.push(node.id.name);
-                node.params.forEach(p => identifier.push(p.name));
-            }
-            else if (node.type === "FunctionExpression" && node.id != null && node.id.name != null) {
+            else if (node.type === "FunctionDeclaration") {
                 identifier.push(node.id.name);
                 node.params.forEach(p => identifier.push(p.name));
             }
-            else if (node.type === "ClassDeclaration" && node.id != null && node.id.name != null)
+            else if (node.type === "FunctionExpression") {
                 identifier.push(node.id.name);
-            else if (node.type === "MethodDefinition" && node.key != null && node.key.name != null) {
+                node.params.forEach(p => identifier.push(p.name));
+            }
+            else if (node.type === "ClassDeclaration") {
+                identifier.push(node.id.name);
+                if (dependence[node.id.name] == null)
+                    dependence[node.id.name] = [];
+                dependence[node.id.name] = node.body.body.map(b => b.key.name);
+            }
+            else if (node.type === "ObjectExpression") {
+                console.log(parent);
+                if (dependence[parent.id.name] == null)
+                    dependence[parent.id.name] = [];
+                node.properties.forEach(p => { dependence[parent.id.name].push(p.key.name); });
+            }
+            else if (node.type === "MethodDefinition") {
                 identifier.push(node.key.name);
                 node.value.params.forEach(p => identifier.push(p.name));
             }
-            else if (node.type === "MemberExpression" && node.property != null && node.property.name != null)
+            else if (node.type === "MemberExpression") {
                 identifier.push(node.property.name);
-            else if (node.type === "LabeledStatement" && node.label != null && node.label.name != null)
+            }
+            else if (node.type === "LabeledStatement") {
                 identifier.push(node.label.name);
-            else if (node.type === "Property" && node.key != null && node.key.name != null)
+            }
+            else if (node.type === "Property")
                 identifier.push(node.key.name);
         },
         leave: (node, parent) => {
@@ -199,10 +211,15 @@ const edit = (parsed, identifier = [], dependence = {}) => {
             console.log("leave");
             i++;
             console.log(pj.render(node, option));
-            if (node.type === "Identifier" && node.name != null && identifier.indexOf(node.name) === -1)
+            if (node.type === "Identifier" && identifier.indexOf(node.name) === -1)
                 throw new Error(node.name + " is not declared!");
-            else if (node.type === "CallExpression" && node.callee != null && node.callee.name != null && identifier.indexOf(node.callee.name) === -1)
+            else if (node.type === "CallExpression" && identifier.indexOf(node.callee.name) === -1) {
                 throw new Error(node.name + " is not declared!");
+            }
+            else if (node.type === "MemberExpression" && (dependence[node.object.name] == null || dependence[node.object.name].indexOf(node.property.name) === -1)) {
+                throw new Error(node.object.name + " doesn't have property " + node.property.name);
+            }
+            //else if(node.type==="NewExpression"&&dependence[node.callee.name])
         }
     });
     //parsed.body.unshift(dec_gas_checker);

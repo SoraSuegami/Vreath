@@ -11,12 +11,59 @@ const _ = __importStar(require("./basic"));
 const CryptoSet = __importStar(require("./crypto_set"));
 const StateSet = __importStar(require("./state"));
 const p_iteration_1 = require("p-iteration");
-const tx_fee = (tx) => {
-    const price = tx.meta.feeprice;
-    delete tx.meta.feeprice;
-    delete tx.raw.signature;
-    const target = JSON.stringify(tx.meta) + JSON.stringify(tx.raw);
-    return price * Buffer.from(target).length;
+exports.empty_tx = () => {
+    const data = {
+        address: [],
+        pub_key: [],
+        timestamp: 0,
+        log_hash: [],
+        gas: 0,
+        solvency: _.toHash(""),
+        type: "change",
+        token: "",
+        base: [],
+        commit: [],
+        input: [],
+        request: _.toHash(""),
+        index: 0,
+        payee: _.toHash(""),
+        output: [],
+        trace: []
+    };
+    const meta = {
+        kind: "request",
+        version: 0,
+        purehash: _.ObjectHash(data),
+        nonce: 0,
+        pre: {
+            flag: false,
+            hash: _.toHash("")
+        },
+        next: {
+            flag: false,
+            hash: _.toHash("")
+        },
+        feeprice: 0,
+        data: data
+    };
+    const raw = {
+        signature: [],
+        raw: [],
+        log: []
+    };
+    const hash = _.ObjectHash(meta);
+    return {
+        hash: hash,
+        meta: meta,
+        raw: raw
+    };
+};
+exports.empty_tx_pure = () => {
+    const tx = exports.empty_tx();
+    return {
+        hash: tx.hash,
+        meta: tx.meta
+    };
 };
 const requested_check = async (base, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
@@ -92,11 +139,15 @@ const output_check = async (type, base_states, output_raw, token_name_maxsize, S
     }
 };
 const search_related_tx = (chain, hash, order, caller_hash) => {
-    return chain.reverse().reduce((result, block) => {
-        return result.concat(block.txs.filter((tx) => {
-            return tx.kind === "request" && tx.purehash === hash && tx[order].flag === true && tx[order].hash === caller_hash;
-        }));
-    }, []);
+    for (let block of chain) {
+        if (block.meta.kind === "key")
+            continue;
+        for (let tx of block.txs) {
+            if (tx.meta.kind == "request" && tx.meta.purehash === hash && tx.meta[order].flag === true && tx.meta[order].hash === caller_hash)
+                return tx.meta;
+        }
+    }
+    return exports.empty_tx_pure().meta;
 };
 const list_up_related = (chain, tx, order, result = []) => {
     if (tx.pre.flag === false)
@@ -106,8 +157,8 @@ const list_up_related = (chain, tx, order, result = []) => {
         order = 'next';
     else
         order = 'pre';
-    const searched = search_related_tx(chain, tx.pre.hash, order, tx.purehash)[0];
-    if (searched === null || searched.kind != "request")
+    const searched = search_related_tx(chain, tx.pre.hash, order, tx.purehash);
+    if (searched === exports.empty_tx_pure().meta || searched.kind != "request")
         return [];
     const new_pres = result.concat(searched);
     return list_up_related(chain, searched, ori_order, new_pres);
@@ -116,7 +167,7 @@ const mining = (meta, target) => {
     let hash;
     let num;
     do {
-        hash = _.toHash(JSON.stringify(meta));
+        hash = _.ObjectHash(meta);
         num = _.Hex_to_Num(hash);
         meta.nonce++;
     } while (num > target);
@@ -130,7 +181,7 @@ const empty_location = {
     index: 0,
     hash: _.toHash('')
 };
-exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, LocationData) => {
+exports.ValidTxBasic = (tx, my_version) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
     const version = tx_meta.version;
@@ -139,21 +190,14 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
     const next = tx_meta.next;
     const tx_data = tx_meta.data;
     const address = tx_data.address;
+    const token = tx_data.token;
     const pub_key = tx_data.pub_key;
     const timestamp = tx_data.timestamp;
-    const gas = tx_data.gas;
-    const solvency = tx_data.solvency;
-    const token = tx_data.token;
-    const base = tx_data.base;
-    const commit = tx_data.commit;
-    const input = tx_data.input;
     const log_hash = tx_data.log_hash;
     const raw = tx.raw;
     const sign = raw.signature;
-    const input_raw = raw.raw;
+    const raw_data = raw.raw;
     const log_raw = raw.log;
-    const date = new Date();
-    const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, key_currency, {}, []);
     if (_.object_hash_check(hash, tx.meta)) {
         console.log("invalid hash");
         return false;
@@ -170,7 +214,7 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
         console.log("invalid hash size");
         return false;
     }
-    else if (address.some((ad, i) => { return _.address_check(ad, pub_key[i], token); })) {
+    else if (address.some((add, i) => { return _.address_check(add, pub_key[i], token); })) {
         console.log("invalid address");
         return false;
     }
@@ -178,11 +222,41 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
         console.log("invalid pub_key");
         return false;
     }
-    else if (timestamp > date.getTime()) {
+    else if (_.time_check(timestamp)) {
         console.log("invalid timestamp");
         return false;
     }
-    else if (solvency_state.contents.amount < tx_fee(tx) + gas || hashed_pub_check(solvency_state, pub_key) || solvency_state.contents.token != key_currency || await requested_check([solvency], LocationData)) {
+    else if (address.some((ad, i) => { return _.sign_check(ad, token, hash, sign[i], pub_key[i]); })) {
+        console.log("invalid signature");
+        return false;
+    }
+    else if (raw_data.some((r, i) => { return r != _.toHash(raw_data[i]); })) {
+        console.log("invalid input hash");
+        return false;
+    }
+    else if (log_hash.some((l, i) => { return l != _.toHash(log_raw[i]); })) {
+        console.log("invalid log hash");
+        return false;
+    }
+    else {
+        return true;
+    }
+};
+exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, LocationData) => {
+    const tx_meta = tx.meta;
+    const tx_data = tx_meta.data;
+    const address = tx_data.address;
+    const pub_key = tx_data.pub_key;
+    const gas = tx_data.gas;
+    const solvency = tx_data.solvency;
+    const token = tx_data.token;
+    const base = tx_data.base;
+    const commit = tx_data.commit;
+    const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, key_currency, {}, []);
+    if (!exports.ValidTxBasic(tx, my_version)) {
+        return false;
+    }
+    else if (solvency_state.contents.amount < _.tx_fee(tx) + gas || hashed_pub_check(solvency_state, pub_key) || solvency_state.contents.token != key_currency || await requested_check([solvency], LocationData)) {
         console.log("invalid solvency");
         return false;
     }
@@ -194,18 +268,6 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
         console.log("commits are already committed");
         return false;
     }
-    else if (address.some((ad, i) => { return _.sign_check(ad, token, hash, sign[i], pub_key[i]); })) {
-        console.log("invalid signature");
-        return false;
-    }
-    else if (input.some((inp, i) => { return _.object_hash_check(inp, input_raw[i]); })) {
-        console.log("invalid input hash");
-        return false;
-    }
-    else if (log_hash.some((l, i) => { return _.object_hash_check(l, log_raw[i]); })) {
-        console.log("invalid log hash");
-        return false;
-    }
     else {
         return true;
     }
@@ -213,37 +275,27 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
 exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency, token_name_maxsize, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
-    const version = tx_meta.version;
-    const address = tx_meta.address;
-    const pub_key = tx_meta.pub_key;
-    const timestamp = tx_meta.timestamp;
-    const request = tx_meta.request;
-    const index = tx_meta.index;
-    const payee = tx_meta.payee;
-    const output = tx_meta.output;
-    const log_hash = tx_meta.log_hash;
+    const tx_data = tx_meta.data;
+    const address = tx_data.address;
+    const pub_key = tx_data.pub_key;
+    const request = tx_data.request;
+    const index = tx_data.index;
+    const payee = tx_data.payee;
+    const output = tx_data.output;
+    const trace = tx_data.trace;
     const raw = tx.raw;
     const output_raw = raw.raw;
-    const log_raw = raw.log;
-    const req_tx = chain[index].txs.filter((tx) => {
-        return tx.kind === "request" && _.toHash(JSON.stringify(tx)) === request;
-    })[0];
-    const token = req_tx.data.token;
-    const date = new Date();
+    const req_tx = _.find_tx(chain, request);
+    const token = req_tx.meta.data.token;
     const payee_state = await StateData.get(payee) || StateSet.CreateState(0, address, key_currency, {}, []);
-    const base_states = await p_iteration_1.reduce(req_tx.data.base, async (result, key) => {
+    const base_states = await p_iteration_1.reduce(req_tx.meta.data.base, async (result, key) => {
         const getted = await StateData.get(key);
         if (getted)
             return result.concat(getted);
     }, []);
-    const pres = list_up_related(chain, req_tx, "pre", []);
-    const nexts = list_up_related(chain, req_tx, "next", []);
-    if (_.object_hash_check(hash, tx_meta)) {
-        console.log("invalid hash");
-        return false;
-    }
-    else if (version != my_version) {
-        console.log("different version");
+    const pres = list_up_related(chain, req_tx.meta, "pre", []);
+    const nexts = list_up_related(chain, req_tx.meta, "next", []);
+    if (!exports.ValidTxBasic(tx, my_version)) {
         return false;
     }
     else if (_.Hex_to_Num(hash) > pow_target) {
@@ -254,51 +306,35 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency,
         console.log("invalid request index");
         return false;
     }
-    else if (req_tx == null) {
+    else if (req_tx == exports.empty_tx_pure()) {
         console.log("invalid request hash");
         return false;
     }
-    else if (address.some((ad, i) => { return _.address_check(ad, pub_key[i], token); })) {
-        console.log("invalid address");
-        return false;
-    }
-    else if (pub_key.some((pub) => { return pub != _.toHash(''); })) {
-        console.log("invalid pub_key");
-        return false;
-    }
-    else if (timestamp > date.getTime()) {
-        console.log("invalid timestamp");
-        return false;
-    }
-    else if (await refreshed_check(req_tx.data.base, index, request, LocationData)) {
+    else if (await refreshed_check(req_tx.meta.data.base, index, request, LocationData)) {
         console.log("base states are already refreshed");
         return false;
     }
-    else if (await refreshed_check([req_tx.data.solvency], index, request, LocationData)) {
+    else if (await refreshed_check([req_tx.meta.data.solvency], index, request, LocationData)) {
         console.log("invalid solvency");
         return false;
     }
-    else if (payee_state.contents.amount + req_tx.data.gas < tx_fee(tx) || hashed_pub_check(payee_state, pub_key) || payee_state.contents.token != key_currency) {
+    else if (payee_state.contents.amount + req_tx.meta.data.gas < _.tx_fee(tx) || hashed_pub_check(payee_state, pub_key) || payee_state.contents.token != key_currency) {
         console.log("invalid payee");
         return false;
     }
-    else if (output.some((o, i) => { return _.object_hash_check(o, output_raw[i]); })) {
-        console.log("invalid output check");
+    else if (trace[0] != _.ObjectHash(req_tx.meta.data.base) || trace[trace.length - 1] != _.ObjectHash(output)) {
+        console.log("invalid trace");
         return false;
     }
-    else if (log_hash.some((l, i) => { return _.object_hash_check(l, log_raw[i]); })) {
-        console.log("invalid log hash");
-        return false;
-    }
-    else if (await output_check(req_tx.data.type, base_states, output_raw, token_name_maxsize, StateData)) {
+    else if (await output_check(req_tx.meta.data.type, base_states, output_raw, token_name_maxsize, StateData)) {
         console.log("invalid output");
         return false;
     }
-    else if (req_tx.pre.flag === true && pres.length === 0) {
+    else if (req_tx.meta.pre.flag === true && pres.length === 0) {
         console.log("invalid pre txs");
         return false;
     }
-    else if (req_tx.next.flag === true && nexts.length === 0) {
+    else if (req_tx.meta.next.flag === true && nexts.length === 0) {
         console.log("invalid next txs");
         return false;
     }
@@ -312,10 +348,12 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, in
     const timestamp = date.getTime();
     const input = input_raw.map(i => _.toHash(i));
     const log_hash = log.map(l => _.toHash(l));
+    const empty = exports.empty_tx();
     const data = {
         address: address,
         pub_key: pub_key,
         timestamp: timestamp,
+        log_hash: log_hash,
         gas: gas,
         solvency: solvency,
         type: type,
@@ -323,19 +361,24 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, in
         base: base,
         commit: commit,
         input: input,
-        log_hash: log_hash
+        request: empty.meta.data.request,
+        index: empty.meta.data.index,
+        payee: empty.meta.data.payee,
+        output: empty.meta.data.output,
+        trace: empty.meta.data.trace
     };
-    const purehash = _.toHash(JSON.stringify(data));
+    const purehash = _.ObjectHash(data);
     const meta = {
         kind: "request",
         version: version,
         purehash: purehash,
+        nonce: empty.meta.nonce,
         pre: pre,
         next: next,
         feeprice: feeprice,
         data: data
     };
-    const hash = _.toHash(JSON.stringify(meta));
+    const hash = _.ObjectHash(meta);
     const tx = {
         hash: hash,
         meta: meta,
@@ -347,28 +390,40 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, commit, in
     };
     return tx;
 };
-exports.CreateRefreshTx = (version, pub_key, target, feeprice, request, index, payee, output_raw, log_raw, chain) => {
-    const req_tx = chain[index].txs.filter((tx) => {
-        return tx.kind === "request" && _.toHash(JSON.stringify(tx)) === request;
-    })[0];
+exports.CreateRefreshTx = (version, pub_key, target, feeprice, request, index, payee, output_raw, trace, log_raw, chain) => {
+    const req_tx = _.find_tx(chain, request).meta;
     const address = pub_key.map(p => CryptoSet.GenereateAddress(req_tx.data.token, p));
     const date = new Date();
     const timestamp = date.getTime();
     const output = output_raw.map(o => _.toHash(o));
     const log_hash = log_raw.map(l => _.toHash(l));
-    let meta = {
-        kind: "refresh",
-        version: version,
+    const empty = exports.empty_tx_pure();
+    let data = {
         address: address,
         pub_key: pub_key,
-        nonce: 0,
-        feeprice: feeprice,
         timestamp: timestamp,
+        log_hash: log_hash,
+        gas: empty.meta.data.gas,
+        solvency: empty.meta.data.solvency,
+        type: empty.meta.data.type,
+        token: empty.meta.data.token,
+        base: empty.meta.data.base,
+        commit: empty.meta.data.commit,
+        input: empty.meta.data.input,
         request: request,
         index: index,
         payee: payee,
         output: output,
-        log_hash: log_hash
+        trace: trace
+    };
+    let meta = {
+        kind: "refresh",
+        version: version,
+        purehash: _.ObjectHash(data),
+        pre: empty.meta.pre,
+        next: empty.meta.next,
+        feeprice: feeprice,
+        data: data
     };
     const mined = mining(meta, target);
     meta.nonce = mined.nonce;
@@ -386,13 +441,7 @@ exports.CreateRefreshTx = (version, pub_key, target, feeprice, request, index, p
     return tx;
 };
 exports.SignTx = (tx, my_pass, my_address) => {
-    let addresses;
-    if (tx.meta.kind === "request") {
-        addresses = tx.meta.data.address;
-    }
-    else {
-        addresses = tx.meta.address;
-    }
+    const addresses = tx.meta.data.address;
     const index = addresses.indexOf(my_address);
     const sign = CryptoSet.SignData(tx.hash, my_pass);
     tx.raw.signature[index] = sign;
@@ -402,18 +451,18 @@ exports.PayFee = (solvency, validator, fee) => {
     if (solvency.hash === validator.hash)
         return [solvency, validator];
     solvency.contents.amount -= fee;
-    solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+    solvency.hash = _.ObjectHash(solvency.contents);
     validator.contents.amount += fee;
-    validator.hash = _.toHash(JSON.stringify(validator.contents));
+    validator.hash = _.ObjectHash(validator.contents);
     return [solvency, validator];
 };
 exports.PayGas = (solvency, payee, gas) => {
     if (solvency.hash === payee.hash)
         return [solvency, payee];
     solvency.contents.amount -= gas;
-    solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+    solvency.hash = _.ObjectHash(solvency.contents);
     payee.contents.amount += gas;
-    payee.hash = _.toHash(JSON.stringify(payee.contents));
+    payee.hash = _.ObjectHash(payee.contents);
     return [solvency, payee];
 };
 exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => {

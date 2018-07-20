@@ -33,7 +33,7 @@ export type Relation = {
   hash:string
 }
 
-export type RequestData = {
+/*export type RequestData = {
   address:string[];
   pub_key:string[];
   timestamp:number;
@@ -75,6 +75,7 @@ export type RefreshMeta = {
   index:number;
   payee:string;
   output:string[];
+  trace:string[];
   log_hash:string[];
 }
 
@@ -84,8 +85,52 @@ export type RefreshTx = {
   raw:TxRaw;
 }
 
-export type TxPure = RequestMeta | RefreshMeta;
-export type Tx = RequestTx | RefreshTx;
+export type TxPure = {
+  hash:string;
+  meta:RequestMeta | RefreshMeta;
+}*/
+
+//export type Tx = RequestTx | RefreshTx;
+export type TxData = {
+  address:string[];
+  pub_key:string[];
+  timestamp:number;
+  log_hash:string[];
+  gas:number;
+  solvency:string;
+  type:TxTypes;
+  token:string;
+  base:string[];
+  commit:string[];
+  input:string[];
+  request:string;
+  index:number;
+  payee:string;
+  output:string[];
+  trace:string[];
+}
+
+export type TxMeta = {
+  kind:TxKind,
+  version:number;
+  purehash:string;
+  nonce:number;
+  pre:Relation;
+  next:Relation;
+  feeprice:number;
+  data:TxData;
+}
+
+export type TxPure = {
+  hash:string;
+  meta:TxMeta;
+}
+
+export type Tx = {
+  hash:string;
+  meta:TxMeta;
+  raw:TxRaw;
+}
 
 export type Location = {
   state:'yet' | 'already';
@@ -99,35 +144,46 @@ export type Candidates = {
 }
 
 export type FraudInfo = {
+  flag:boolean;
   index: number;
   hash: string;
-  step: string;
+  step: number;
 }
+
+export type BlockKind = "key" | "micro"
 
 export type BlockMeta = {
   version:number;
   shard_id:number;
+  kind:BlockKind;
   index:number;
   parenthash:string;
   timestamp: number;
+  fraud:FraudInfo;
+  pow_target:number;
+  pos_diff:number;
+  validator: string;
+  token:string;
+  validatorPub: string[];
+  candidates: string;
   stateroot: string;
   locationroot: string;
   tx_root: string;
   fee_sum:number;
-  pow_target:number;
-  stake_diff:number;
-  validator: string;
-  validatorPub: string;
-  candidates: string;
-  fraud:FraudInfo;
+}
+
+export type BlockPure = {
+  hash:string,
+  validatorSign: string[];
+  meta:BlockMeta;
 }
 
 export type Block = {
-  hash: string;
-  validatorSign: string;
+  hash:string,
+  validatorSign: string[];
   meta:BlockMeta;
-  txs: TxPure[];
-  raws: TxRaw[];
+  txs:TxPure[];
+  raws:TxRaw[];
 }
 
 export type Pool = {

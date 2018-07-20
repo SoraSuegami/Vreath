@@ -23,7 +23,7 @@ export function CreateState(amount:number,owner:string[],token:string,data:{[key
       data:data,
       product:product
   };
-  const hash = _.toHash(JSON.stringify(contents));
+  const hash = _.ObjectHash(contents);
   const state:T.State = {
     hash:hash,
     contents:contents

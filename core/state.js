@@ -27,7 +27,7 @@ function CreateState(amount, owner, token, data, product) {
         data: data,
         product: product
     };
-    const hash = _.toHash(JSON.stringify(contents));
+    const hash = _.ObjectHash(contents);
     const state = {
         hash: hash,
         contents: contents

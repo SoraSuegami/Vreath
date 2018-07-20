@@ -5,13 +5,64 @@ import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
 import {reduce,some,ForEach} from 'p-iteration'
 
+export const empty_tx = ():T.Tx=>{
+  const data:T.TxData = {
+    address:[],
+    pub_key:[],
+    timestamp:0,
+    log_hash:[],
+    gas:0,
+    solvency:_.toHash(""),
+    type:"change",
+    token:"",
+    base:[],
+    commit:[],
+    input:[],
+    request:_.toHash(""),
+    index:0,
+    payee:_.toHash(""),
+    output:[],
+    trace:[]
+  }
 
-const tx_fee = (tx:T.Tx)=>{
-  const price = tx.meta.feeprice;
-  delete tx.meta.feeprice;
-  delete tx.raw.signature;
-  const target = JSON.stringify(tx.meta)+JSON.stringify(tx.raw);
-  return price * Buffer.from(target).length;
+  const meta:T.TxMeta = {
+    kind:"request",
+    version:0,
+    purehash:_.ObjectHash(data),
+    nonce:0,
+    pre:{
+      flag:false,
+      hash:_.toHash("")
+    },
+    next:{
+      flag:false,
+      hash:_.toHash("")
+    },
+    feeprice:0,
+    data:data
+  }
+
+  const raw:T.TxRaw = {
+    signature:[],
+    raw:[],
+    log:[]
+  }
+
+  const hash = _.ObjectHash(meta);
+
+  return {
+    hash:hash,
+    meta:meta,
+    raw:raw
+  }
+}
+
+export const empty_tx_pure = ()=>{
+  const tx = empty_tx();
+  return {
+    hash:tx.hash,
+    meta:tx.meta
+  }
 }
 
 const requested_check = async (base:string[],LocationData:Trie):Promise<boolean>=>{
@@ -83,30 +134,32 @@ const output_check = async (type:T.TxTypes,base_states:T.State[],output_raw:stri
   }
 }
 
-const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller_hash:string)=>{
-  return chain.reverse().reduce((result:T.TxPure[],block)=>{
-    return result.concat(block.txs.filter((tx)=>{
-      return tx.kind==="request"&&tx.purehash===hash&&tx[order].flag===true&&tx[order].hash===caller_hash;
-    }));
-  },[]);
+const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller_hash:string):T.TxMeta=>{
+  for(let block of chain){
+    if(block.meta.kind==="key") continue;
+    for(let tx of block.txs){
+      if(tx.meta.kind=="request"&&tx.meta.purehash===hash&&tx.meta[order].flag===true&&tx.meta[order].hash===caller_hash) return tx.meta;
+    }
+  }
+  return empty_tx_pure().meta;
 }
 
-const list_up_related = (chain:T.Block[],tx:T.RequestMeta,order:'pre'|'next',result:T.RequestMeta[]=[]):T.RequestMeta[]=>{
+const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T.TxMeta[]=[]):T.Meta[]=>{
   if(tx.pre.flag===false) return result;
   const ori_order = order;
   if(order=='pre') order = 'next';
   else order = 'pre';
-  const searched = search_related_tx(chain,tx.pre.hash,order,tx.purehash)[0];
-  if(searched===null||searched.kind!="request") return [];
+  const searched = search_related_tx(chain,tx.pre.hash,order,tx.purehash);
+  if(searched===empty_tx_pure().meta||searched.kind!="request") return [];
   const new_pres = result.concat(searched);
   return list_up_related(chain,searched,ori_order,new_pres);
 }
 
-const mining = (meta:T.RefreshMeta,target:number)=>{
+const mining = (meta:T.TxMeta,target:number)=>{
   let hash:string;
   let num:number;
   do{
-    hash = _.toHash(JSON.stringify(meta));
+    hash = _.ObjectHash(meta);
     num = _.Hex_to_Num(hash);
     meta.nonce ++;
   }while(num>target);
@@ -122,8 +175,7 @@ const empty_location:T.Location = {
   hash:_.toHash('')
 }
 
-
-export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_currency:string,StateData:Trie,LocationData:Trie)=>{
+export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
   const version = tx_meta.version;
@@ -132,23 +184,14 @@ export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_curren
   const next = tx_meta.next;
   const tx_data = tx_meta.data;
   const address = tx_data.address;
+  const token = tx_data.token;
   const pub_key = tx_data.pub_key;
   const timestamp = tx_data.timestamp;
-  const gas = tx_data.gas;
-  const solvency = tx_data.solvency;
-  const token = tx_data.token;
-  const base = tx_data.base;
-  const commit = tx_data.commit;
-  const input = tx_data.input;
   const log_hash = tx_data.log_hash;
   const raw = tx.raw;
   const sign = raw.signature;
-  const input_raw = raw.raw;
+  const raw_data = raw.raw;
   const log_raw = raw.log;
-
-  const date = new Date();
-
-  const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,key_currency,{},[]);
 
   if(_.object_hash_check(hash,tx.meta)){
     console.log("invalid hash");
@@ -166,7 +209,7 @@ export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_curren
     console.log("invalid hash size");
     return false;
   }
-  else if(address.some((ad,i)=>{return _.address_check(ad,pub_key[i],token)})){
+  else if(address.some((add,i)=>{return _.address_check(add,pub_key[i],token)})){
     console.log("invalid address");
     return false;
   }
@@ -174,11 +217,44 @@ export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_curren
     console.log("invalid pub_key");
     return false;
   }
-  else if(timestamp>date.getTime()){
+  else if(_.time_check(timestamp)){
     console.log("invalid timestamp");
     return false;
   }
-  else if(solvency_state.contents.amount<tx_fee(tx)+gas||hashed_pub_check(solvency_state,pub_key)||solvency_state.contents.token!=key_currency||await requested_check([solvency],LocationData)){
+  else if(address.some((ad,i)=>{return _.sign_check(ad,token,hash,sign[i],pub_key[i])})){
+    console.log("invalid signature");
+    return false;
+  }
+  else if(raw_data.some((r,i)=>{return r!=_.toHash(raw_data[i])})){
+    console.log("invalid input hash");
+    return false;
+  }
+  else if(log_hash.some((l,i)=>{return l!=_.toHash(log_raw[i])})){
+    console.log("invalid log hash");
+    return false;
+  }
+  else{
+    return true;
+  }
+}
+
+export const ValidRequestTx = async (tx:T.Tx,my_version:number,key_currency:string,StateData:Trie,LocationData:Trie)=>{
+  const tx_meta = tx.meta;
+  const tx_data = tx_meta.data;
+  const address = tx_data.address;
+  const pub_key = tx_data.pub_key;
+  const gas = tx_data.gas;
+  const solvency = tx_data.solvency;
+  const token = tx_data.token;
+  const base = tx_data.base;
+  const commit = tx_data.commit;
+
+  const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,key_currency,{},[]);
+
+  if(!ValidTxBasic(tx,my_version)){
+    return false;
+  }
+  else if(solvency_state.contents.amount<_.tx_fee(tx)+gas||hashed_pub_check(solvency_state,pub_key)||solvency_state.contents.token!=key_currency||await requested_check([solvency],LocationData)){
     console.log("invalid solvency");
     return false;
   }
@@ -190,64 +266,41 @@ export const ValidRequestTx = async (tx:T.RequestTx,my_version:number,key_curren
     console.log("commits are already committed");
     return false;
   }
-  else if(address.some((ad,i)=>{return _.sign_check(ad,token,hash,sign[i],pub_key[i])})){
-    console.log("invalid signature");
-    return false;
-  }
-  else if(input.some((inp,i)=>{return _.object_hash_check(inp,input_raw[i])})){
-    console.log("invalid input hash");
-    return false;
-  }
-  else if(log_hash.some((l,i)=>{return _.object_hash_check(l,log_raw[i])})){
-    console.log("invalid log hash");
-    return false;
-  }
   else{
     return true;
   }
 }
 
 
-export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],my_version:number,pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
-  const version = tx_meta.version;
-  const address = tx_meta.address;
-  const pub_key = tx_meta.pub_key;
-  const timestamp = tx_meta.timestamp;
-  const request = tx_meta.request;
-  const index = tx_meta.index;
-  const payee = tx_meta.payee;
-  const output = tx_meta.output;
-  const log_hash = tx_meta.log_hash;
+  const tx_data = tx_meta.data;
+  const address = tx_data.address;
+  const pub_key = tx_data.pub_key;
+  const request = tx_data.request;
+  const index = tx_data.index;
+  const payee = tx_data.payee;
+  const output = tx_data.output;
+  const trace = tx_data.trace;
   const raw = tx.raw;
   const output_raw = raw.raw;
-  const log_raw = raw.log;
 
-  const req_tx:T.RequestMeta = chain[index].txs.filter((tx:T.TxPure)=>{
-    return tx.kind==="request"&&_.toHash(JSON.stringify(tx))===request;
-  })[0];
+  const req_tx = _.find_tx(chain,request);
 
-  const token = req_tx.data.token;
-
-  const date = new Date();
+  const token = req_tx.meta.data.token;
 
   const payee_state:T.State = await StateData.get(payee) || StateSet.CreateState(0,address,key_currency,{},[]);
 
-  const base_states:T.State[] = await reduce(req_tx.data.base,async (result:T.State[],key:string)=>{
+  const base_states:T.State[] = await reduce(req_tx.meta.data.base,async (result:T.State[],key:string)=>{
     const getted:T.State = await StateData.get(key);
     if(getted) return result.concat(getted);
   },[]);
 
-  const pres = list_up_related(chain,req_tx,"pre",[]);
-  const nexts = list_up_related(chain,req_tx,"next",[]);
+  const pres = list_up_related(chain,req_tx.meta,"pre",[]);
+  const nexts = list_up_related(chain,req_tx.meta,"next",[]);
 
-  if(_.object_hash_check(hash,tx_meta)){
-    console.log("invalid hash");
-    return false;
-  }
-  else if(version!=my_version){
-    console.log("different version");
+  if(!ValidTxBasic(tx,my_version)){
     return false;
   }
   else if(_.Hex_to_Num(hash)>pow_target){
@@ -258,51 +311,35 @@ export const ValidRefreshTx = async (tx:T.RefreshTx,chain:T.Block[],my_version:n
     console.log("invalid request index");
     return false;
   }
-  else if(req_tx==null){
+  else if(req_tx==empty_tx_pure()){
     console.log("invalid request hash");
     return false;
   }
-  else if(address.some((ad,i)=>{return _.address_check(ad,pub_key[i],token)})){
-    console.log("invalid address");
-    return false;
-  }
-  else if(pub_key.some((pub)=>{return pub!=_.toHash('')})){
-    console.log("invalid pub_key");
-    return false;
-  }
-  else if(timestamp>date.getTime()){
-    console.log("invalid timestamp");
-    return false;
-  }
-  else if(await refreshed_check(req_tx.data.base,index,request,LocationData)){
+  else if(await refreshed_check(req_tx.meta.data.base,index,request,LocationData)){
     console.log("base states are already refreshed");
     return false;
   }
-  else if(await refreshed_check([req_tx.data.solvency],index,request,LocationData)){
+  else if(await refreshed_check([req_tx.meta.data.solvency],index,request,LocationData)){
     console.log("invalid solvency");
     return false;
   }
-  else if(payee_state.contents.amount+req_tx.data.gas<tx_fee(tx)||hashed_pub_check(payee_state,pub_key)||payee_state.contents.token!=key_currency){
+  else if(payee_state.contents.amount+req_tx.meta.data.gas<_.tx_fee(tx)||hashed_pub_check(payee_state,pub_key)||payee_state.contents.token!=key_currency){
     console.log("invalid payee");
     return false;
   }
-  else if(output.some((o,i)=>{return _.object_hash_check(o,output_raw[i])})){
-    console.log("invalid output check");
+  else if(trace[0]!=_.ObjectHash(req_tx.meta.data.base)||trace[trace.length-1]!=_.ObjectHash(output)){
+    console.log("invalid trace");
     return false;
   }
-  else if(log_hash.some((l,i)=>{return _.object_hash_check(l,log_raw[i])})){
-    console.log("invalid log hash");
-    return false;
-  }
-  else if(await output_check(req_tx.data.type,base_states,output_raw,token_name_maxsize,StateData)){
+  else if(await output_check(req_tx.meta.data.type,base_states,output_raw,token_name_maxsize,StateData)){
     console.log("invalid output");
     return false;
   }
-  else if(req_tx.pre.flag===true&&pres.length===0){
+  else if(req_tx.meta.pre.flag===true&&pres.length===0){
     console.log("invalid pre txs");
     return false;
   }
-  else if(req_tx.next.flag===true&&nexts.length===0){
+  else if(req_tx.meta.next.flag===true&&nexts.length===0){
     console.log("invalid next txs");
     return false;
   }
@@ -317,11 +354,13 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
   const timestamp = date.getTime();
   const input = input_raw.map(i=>_.toHash(i));
   const log_hash = log.map(l=>_.toHash(l));
+  const empty = empty_tx();
 
-  const data:T.RequestData = {
+  const data:T.TxData = {
     address:address,
     pub_key:pub_key,
     timestamp:timestamp,
+    log_hash:log_hash,
     gas:gas,
     solvency:solvency,
     type:type,
@@ -329,24 +368,29 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
     base:base,
     commit:commit,
     input:input,
-    log_hash:log_hash
+    request:empty.meta.data.request,
+    index:empty.meta.data.index,
+    payee:empty.meta.data.payee,
+    output:empty.meta.data.output,
+    trace:empty.meta.data.trace
   }
 
-  const purehash = _.toHash(JSON.stringify(data));
+  const purehash = _.ObjectHash(data);
 
-  const meta:T.RequestMeta = {
+  const meta:T.TxMeta = {
     kind:"request",
     version:version,
     purehash:purehash,
+    nonce:empty.meta.nonce,
     pre:pre,
     next:next,
     feeprice:feeprice,
     data:data
   }
 
-  const hash = _.toHash(JSON.stringify(meta));
+  const hash = _.ObjectHash(meta);
 
-  const tx:T.RequestTx = {
+  const tx:T.Tx = {
     hash:hash,
     meta:meta,
     raw:{
@@ -358,28 +402,40 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
   return tx;
 }
 
-export const CreateRefreshTx = (version:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],log_raw:string[],chain:T.Block[])=>{
-  const req_tx:T.RequestMeta = chain[index].txs.filter((tx:T.TxPure)=>{
-    return tx.kind==="request"&&_.toHash(JSON.stringify(tx))===request;
-  })[0];
+export const CreateRefreshTx = (version:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],trace:string[],log_raw:string[],chain:T.Block[])=>{
+  const req_tx:T.TxMeta = _.find_tx(chain,request).meta;
   const address = pub_key.map(p=>CryptoSet.GenereateAddress(req_tx.data.token,p));
   const date = new Date();
   const timestamp = date.getTime();
   const output = output_raw.map(o=>_.toHash(o));
   const log_hash = log_raw.map(l=>_.toHash(l));
-  let meta:T.RefreshMeta = {
-    kind:"refresh",
-    version:version,
+  const empty = empty_tx_pure();
+  let data:T.TxData = {
     address:address,
     pub_key:pub_key,
-    nonce:0,
-    feeprice:feeprice,
     timestamp:timestamp,
+    log_hash:log_hash,
+    gas:empty.meta.data.gas,
+    solvency:empty.meta.data.solvency,
+    type:empty.meta.data.type,
+    token:empty.meta.data.token,
+    base:empty.meta.data.base,
+    commit:empty.meta.data.commit,
+    input:empty.meta.data.input,
     request:request,
     index:index,
     payee:payee,
     output:output,
-    log_hash:log_hash
+    trace:trace
+  }
+  let meta:T.TxMeta = {
+    kind:"refresh",
+    version:version,
+    purehash:_.ObjectHash(data),
+    pre:empty.meta.pre,
+    next:empty.meta.next,
+    feeprice:feeprice,
+    data:data
   }
   const mined = mining(meta,target);
   meta.nonce = mined.nonce;
@@ -389,7 +445,7 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
     raw:output_raw,
     log:log_raw
   }
-  const tx:T.RefreshTx = {
+  const tx:T.Tx = {
     hash:hash,
     meta:meta,
     raw:raw
@@ -398,13 +454,7 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
 }
 
 export const SignTx = (tx:T.Tx,my_pass:string,my_address:string)=>{
-  let addresses;
-  if(tx.meta.kind==="request"){
-    addresses = tx.meta.data.address;
-  }
-  else{
-    addresses = tx.meta.address;
-  }
+  const addresses = tx.meta.data.address;
   const index = addresses.indexOf(my_address);
   const sign = CryptoSet.SignData(tx.hash,my_pass);
   tx.raw.signature[index] = sign;
@@ -414,18 +464,18 @@ export const SignTx = (tx:T.Tx,my_pass:string,my_address:string)=>{
 export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
   if(solvency.hash===validator.hash) return [solvency,validator];
   solvency.contents.amount -= fee;
-  solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+  solvency.hash = _.ObjectHash(solvency.contents);
   validator.contents.amount += fee;
-  validator.hash = _.toHash(JSON.stringify(validator.contents));
+  validator.hash = _.ObjectHash(validator.contents);
   return [solvency,validator];
 }
 
 export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
   if(solvency.hash===payee.hash) return [solvency,payee];
   solvency.contents.amount -= gas;
-  solvency.hash = _.toHash(JSON.stringify(solvency.contents));
+  solvency.hash = _.ObjectHash(solvency.contents);
   payee.contents.amount += gas;
-  payee.hash = _.toHash(JSON.stringify(payee.contents));
+  payee.hash = _.ObjectHash(payee.contents);
   return [solvency,payee];
 }
 
@@ -439,7 +489,7 @@ export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_s
   return [after_gas[0],after_fee[1],after_fee[2]];
 }
 
-export const AcceptRequestTx = async (tx:T.RequestTx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+export const AcceptRequestTx = async (tx:T.Tx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
   const solvency_state:T.State = await StateData.get(tx.meta.data.solvency);
   const validator_state:T.State = await StateData.get(validator);
   const fee = tx_fee(tx);
@@ -459,7 +509,7 @@ export const AcceptRequestTx = async (tx:T.RequestTx,validator:string,index:numb
   return [StateData,LocationData];
 }
 
-export const AcceptRefreshTx = async (req_tx:T.RequestTx,ref_tx:T.RefreshTx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+export const AcceptRefreshTx = async (req_tx:T.Tx,ref_tx:T.Tx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
   if(req_tx.meta.data.type==="create"){
     const state:T.Token = JSON.parse(req_tx.raw.raw[0]);
     await StateData.put(CryptoSet.GenereateAddress(state.token,_.toHash('')),state);

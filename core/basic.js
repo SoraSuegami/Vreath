@@ -12,10 +12,20 @@ const TxSet = __importStar(require("./tx"));
 exports.toHash = (str) => {
     return CryptoSet.HashFromPass(str);
 };
+exports.ObjectSort = (obj) => {
+    const keys = Object.keys(obj).sort();
+    let maped = {};
+    keys.forEach(((key) => {
+        let val = obj[key];
+        if (typeof val === "object")
+            val = exports.ObjectSort(val);
+        maped[key] = val;
+    }));
+    return JSON.stringify(maped);
+};
 exports.ObjectHash = (obj) => {
-    const sorted = Object.keys(obj).slice().sort();
-    const maped = sorted.map(key => { return { [key]: obj[key] }; });
-    return exports.toHash(JSON.stringify(maped));
+    const sorted = exports.ObjectSort(obj);
+    return exports.toHash(sorted);
 };
 exports.Hex_to_Num = (str) => {
     return parseInt(str, 16);

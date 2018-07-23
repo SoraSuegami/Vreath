@@ -73,6 +73,7 @@ const check = (parsed, identifier = [], dependence = {}) => {
 const edit = (editted, states, gas_limit) => {
     const vreath_class = esp.parse(vm_class_1.vreath_vm_state.toString() + "const vreath_instance = new vreath_vm_state([],10);").body;
     const call_gas_checker = esp.parse("vreath_instance.gas_check();").body[0];
+    const call_main = esp.parse("if(vreath_instance.flag) ");
     est.traverse(editted, {
         enter: (node, parent) => {
             if (node.hasOwnProperty("body") && Array.isArray(node.body)) {
@@ -86,24 +87,39 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = async (code, states, gas_limit) => {
+exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], gas_limit) => {
+    const vreath = (() => {
+        switch (mode) {
+            case 0:
+                return new vm_class_1.vreath_vm_state(states, gas_limit, false, []);
+            case 1:
+                return new vm_class_1.vreath_vm_state(states, gas_limit, false, traced);
+            case 2:
+                return new vm_class_1.vreath_vm_state(states, gas_limit, true, traced);
+        }
+    })();
     try {
         const checked = check(esp.parse(code));
         const editted = edit(checked, states, gas_limit);
-        const generated = esc.generate(editted);
+        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath_instance.flag) main();})()";
         console.log(generated);
-        const vm = new vm2_1.VM();
-        const vreath_instance = new vm_class_1.vreath_vm_state(states, gas_limit);
-        vm.freeze(vreath_instance, "vreath_instance");
+        const vm = new vm2_1.VM({
+            sandbox: { step, inputs, req_tx }
+        });
+        vm.freeze(vreath, "vreath");
         vm.run(generated);
-        const result = vreath_instance.state_roots;
+        const result = vreath.state_roots;
         return result;
     }
     catch (e) {
         console.log(e);
+        if ((mode === 1 || mode == 2) && e.split("TraceError:").length == 2) {
+            const step = Number(e.split("TraceError:")[1]);
+            return vreath.state_roots.slice(0, -2);
+        }
         return [_.ObjectHash(states)];
     }
 };
-/*(async ()=>{
-    RunVM(code,[],10)
-})();*/ 
+(async () => {
+    //console.log(await RunVM("",[],[],10));
+})();

@@ -65,6 +65,13 @@ exports.empty_tx_pure = () => {
         meta: tx.meta
     };
 };
+const empty_location = () => {
+    return {
+        state: "yet",
+        index: 0,
+        hash: _.toHash("")
+    };
+};
 const requested_check = async (base, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
         const getted = await LocationData.get(key);
@@ -175,11 +182,6 @@ const mining = (meta, target) => {
         nonce: meta.nonce,
         hash: hash
     };
-};
-const empty_location = {
-    state: "yet",
-    index: 0,
-    hash: _.toHash('')
 };
 exports.ValidTxBasic = (tx, my_version) => {
     const hash = tx.hash;
@@ -486,7 +488,7 @@ exports.AcceptRequestTx = async (tx, validator, index, StateData, LocationData) 
     await StateData.put(after[0].hash, after[0]);
     await StateData.put(after[1].hash, after[1]);
     await p_iteration_1.ForEach(tx.meta.data.base, async (key) => {
-        let get_loc = await LocationData.get(key) || empty_location;
+        let get_loc = await LocationData.get(key) || empty_location();
         get_loc = {
             state: "already",
             index: index,

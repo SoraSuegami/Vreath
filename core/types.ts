@@ -148,6 +148,12 @@ export type FraudInfo = {
   index: number;
   hash: string;
   step: number;
+  data: string;
+}
+
+export type FraudData = {
+  states:State[],
+  inputs:any[]
 }
 
 export type BlockKind = "key" | "micro"
@@ -184,6 +190,7 @@ export type Block = {
   meta:BlockMeta;
   txs:TxPure[];
   raws:TxRaw[];
+  fraudData:FraudData;
 }
 
 export type Pool = {

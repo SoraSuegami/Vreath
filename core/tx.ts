@@ -65,6 +65,14 @@ export const empty_tx_pure = ()=>{
   }
 }
 
+const empty_location = ():T.Location => {
+  return{
+    state:"yet",
+    index:0,
+    hash:_.toHash("")
+  }
+}
+
 const requested_check = async (base:string[],LocationData:Trie):Promise<boolean>=>{
   return await some(base, async(key:string)=>{
     const getted:T.Location =  await LocationData.get(key);
@@ -144,7 +152,7 @@ const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller
   return empty_tx_pure().meta;
 }
 
-const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T.TxMeta[]=[]):T.Meta[]=>{
+const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T.TxMeta[]=[]):T.TxMeta[]=>{
   if(tx.pre.flag===false) return result;
   const ori_order = order;
   if(order=='pre') order = 'next';
@@ -169,11 +177,6 @@ const mining = (meta:T.TxMeta,target:number)=>{
   }
 }
 
-const empty_location:T.Location = {
-  state:"yet",
-  index:0,
-  hash:_.toHash('')
-}
 
 export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
   const hash = tx.hash;
@@ -498,7 +501,7 @@ export const AcceptRequestTx = async (tx:T.Tx,validator:string,index:number,Stat
   await StateData.put(after[1].hash,after[1]);
 
   await ForEach(tx.meta.data.base,async (key:string)=>{
-    let get_loc:T.Location = await LocationData.get(key) || empty_location;
+    let get_loc:T.Location = await LocationData.get(key) || empty_location();
     get_loc = {
       state:"already",
       index:index,

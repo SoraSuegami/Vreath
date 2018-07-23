@@ -6,10 +6,20 @@ export const toHash = (str:string)=>{
   return CryptoSet.HashFromPass(str);
 }
 
+export const ObjectSort = (obj:{[key:string]:any}|any[]):string=>{
+  const keys = Object.keys(obj).sort();
+  let maped:{[key:string]:any} = {};
+  keys.forEach(((key)=>{
+    let val = obj[key];
+    if(typeof val==="object") val = ObjectSort(val);
+    maped[key] = val;
+  }));
+  return JSON.stringify(maped);
+}
+
 export const ObjectHash = (obj:{[key:string]:any}|any[])=>{
-  const sorted = Object.keys(obj).slice().sort();
-  const maped = sorted.map(key=>{return {[key]:obj[key]}})
-  return toHash(JSON.stringify(maped));
+  const sorted = ObjectSort(obj);
+  return toHash(sorted);
 }
 
 export const Hex_to_Num = (str:string):number=>{

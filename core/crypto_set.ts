@@ -78,7 +78,7 @@ export const DecryptData = (data:string,mypass:string,Public:string)=>{
 }
 
 
-export const SignData = (data:string,password:string)=>{
+export const SignData = (data:string,password:string):string=>{
   const Private = Buffer.from(PullMyPrivate(password),'hex');
   const hash = crypto.createHash("sha256").update(data).digest();
   const sign = secp256k1.sign(hash,Private);

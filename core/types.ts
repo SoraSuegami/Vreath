@@ -139,7 +139,7 @@ export type Location = {
 }
 
 export type Candidates = {
-  address: string;
+  address: string[];
   amount: number;
 }
 

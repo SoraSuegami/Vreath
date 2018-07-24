@@ -177,6 +177,18 @@ const mining = (meta:T.TxMeta,target:number)=>{
   }
 }
 
+export const find_req_tx = (ref_tx:T.Tx,chain:T.Block[]):T.Tx=>{
+  const index = ref_tx.meta.data.index || 0;
+  const req_pure = chain[index].txs.filter(tx=>tx.hash===ref_tx.meta.data.request)[0];
+  if(req_pure==null) return empty_tx();
+  const req_raw = chain[index].raws[chain[index].txs.indexOf(req_pure)];
+  return {
+    hash:req_pure.hash,
+    meta:req_pure.meta,
+    raw:req_raw
+  }
+}
+
 
 export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
   const hash = tx.hash;
@@ -243,6 +255,7 @@ export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
 
 export const ValidRequestTx = async (tx:T.Tx,my_version:number,key_currency:string,StateData:Trie,LocationData:Trie)=>{
   const tx_meta = tx.meta;
+  const kind = tx_meta.kind;
   const tx_data = tx_meta.data;
   const address = tx_data.address;
   const pub_key = tx_data.pub_key;
@@ -255,6 +268,10 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,key_currency:stri
   const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,key_currency,{},[]);
 
   if(!ValidTxBasic(tx,my_version)){
+    return false;
+  }
+  else if(kind!="request"){
+    console.log("invalid kind");
     return false;
   }
   else if(solvency_state.contents.amount<_.tx_fee(tx)+gas||hashed_pub_check(solvency_state,pub_key)||solvency_state.contents.token!=key_currency||await requested_check([solvency],LocationData)){
@@ -278,6 +295,7 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,key_currency:stri
 export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
+  const kind = tx_meta.kind;
   const tx_data = tx_meta.data;
   const address = tx_data.address;
   const pub_key = tx_data.pub_key;
@@ -306,6 +324,10 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
   if(!ValidTxBasic(tx,my_version)){
     return false;
   }
+  else if(kind!="refresh"){
+    console.log("invalid kind");
+    return false;
+  }
   else if(_.Hex_to_Num(hash)>pow_target){
     console.log("invalid nonce");
     return false;
@@ -314,7 +336,7 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
     console.log("invalid request index");
     return false;
   }
-  else if(req_tx==empty_tx_pure()){
+  else if(req_tx==empty_tx_pure()||chain[tx.meta.data.index].txs.indexOf(req_tx)===-1){
     console.log("invalid request hash");
     return false;
   }
@@ -435,6 +457,7 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
     kind:"refresh",
     version:version,
     purehash:_.ObjectHash(data),
+    nonce:0,
     pre:empty.meta.pre,
     next:empty.meta.next,
     feeprice:feeprice,
@@ -492,10 +515,11 @@ export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_s
   return [after_gas[0],after_fee[1],after_fee[2]];
 }
 
-export const AcceptRequestTx = async (tx:T.Tx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+export const AcceptRequestTx = async (tx:T.Tx,my_version:number,key_currency:string,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+  if(!await ValidRequestTx(tx,my_version,key_currency,StateData,LocationData)) return [StateData,LocationData];
   const solvency_state:T.State = await StateData.get(tx.meta.data.solvency);
   const validator_state:T.State = await StateData.get(validator);
-  const fee = tx_fee(tx);
+  const fee = _.tx_fee(tx);
   const after = PayFee(solvency_state,validator_state,fee);
   await StateData.put(after[0].hash,after[0]);
   await StateData.put(after[1].hash,after[1]);
@@ -512,7 +536,9 @@ export const AcceptRequestTx = async (tx:T.Tx,validator:string,index:number,Stat
   return [StateData,LocationData];
 }
 
-export const AcceptRefreshTx = async (req_tx:T.Tx,ref_tx:T.Tx,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,key_currency:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+  if(!await ValidRefreshTx(ref_tx,chain,my_version,pow_target,key_currency,token_name_maxsize,StateData,LocationData)) return [StateData,LocationData];
+  const req_tx = find_req_tx(ref_tx,chain)
   if(req_tx.meta.data.type==="create"){
     const state:T.Token = JSON.parse(req_tx.raw.raw[0]);
     await StateData.put(CryptoSet.GenereateAddress(state.token,_.toHash('')),state);

@@ -9,8 +9,8 @@ export const toHash = (str:string)=>{
 export const ObjectSort = (obj:{[key:string]:any}|any[]):string=>{
   const keys = Object.keys(obj).sort();
   let maped:{[key:string]:any} = {};
-  keys.forEach(((key)=>{
-    let val = obj[key];
+  keys.forEach(((key:string)=>{
+    let val:any = obj[key];
     if(typeof val==="object") val = ObjectSort(val);
     maped[key] = val;
   }));

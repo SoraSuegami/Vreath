@@ -8,32 +8,21 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const TxSet = __importStar(require("./tx"));
-const { map, reduce, filter, forEach, some } = require('p-iteration');
-//const RadixTree = require('dfinity-radix-tree');
-//const levelup = require('levelup');
-//const leveldown = require('leveldown');
-//const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
-const rlp = require('rlp');
-const CryptoSet = require('./crypto_set.js');
-/*export type Pool = {
-  [key:string]:TxSet.Tx;
-}*/
-async function check_tx(tx, tag_limit, key_currency, fee_by_size, chain, StateData, DagData, RequestsAlias) {
-    if (tx.kind == "request") {
-        return await TxSet.ValidRequestTx(tx, tag_limit, key_currency, fee_by_size, StateData, RequestsAlias);
+const check_tx = async (tx, my_version, native, chain, pow_target, token_name_maxsize, StateData, LocationData) => {
+    if (tx.meta.kind == "request") {
+        return await TxSet.ValidRequestTx(tx, my_version, native, StateData, LocationData);
     }
-    else if (tx.kind == "refresh") {
-        return await TxSet.ValidRefreshTx(tx, chain, key_currency, fee_by_size, tag_limit, StateData, DagData, RequestsAlias);
+    else if (tx.meta.kind == "refresh") {
+        return await TxSet.ValidRefreshTx(tx, chain, my_version, pow_target, native, token_name_maxsize, StateData, LocationData);
     }
     else
         return false;
-}
-async function Tx_to_Pool(pool, tx, tag_limit, key_currency, fee_by_size, chain, StateData, DagData, RequestsAlias) {
-    if (!await check_tx(tx, tag_limit, key_currency, fee_by_size, chain, StateData, DagData, RequestsAlias))
+};
+async function Tx_to_Pool(pool, tx, my_version, native, chain, pow_target, token_name_maxsize, StateData, LocationData) {
+    if (!await check_tx(tx, my_version, native, chain, pow_target, token_name_maxsize, StateData, LocationData))
         return pool;
     const new_pool = ((pool) => {
-        pool[tx.meta.hash] = tx;
+        pool[tx.hash] = tx;
         return pool;
     })(pool);
     return new_pool;

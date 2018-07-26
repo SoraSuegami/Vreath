@@ -58,12 +58,15 @@ exports.empty_tx = () => {
         raw: raw
     };
 };
-exports.empty_tx_pure = () => {
-    const tx = exports.empty_tx();
+exports.tx_to_pure = (tx) => {
     return {
         hash: tx.hash,
         meta: tx.meta
     };
+};
+exports.empty_tx_pure = () => {
+    const tx = exports.empty_tx();
+    return exports.tx_to_pure(tx);
 };
 const empty_location = () => {
     return {
@@ -195,6 +198,59 @@ exports.find_req_tx = (ref_tx, chain) => {
         raw: req_raw
     };
 };
+const search_related_raw = (chain, hash, order, caller_hash) => {
+    for (let block of chain) {
+        if (block.meta.kind === "key")
+            continue;
+        for (let i in block.txs) {
+            const tx = block.txs[i];
+            if (tx.meta.kind == "request" && tx.meta.purehash === hash && tx.meta[order].flag === true && tx.meta[order].hash === caller_hash)
+                return block.raws[i];
+        }
+    }
+    return exports.empty_tx().raw;
+};
+const ValidNative = async (req_tx, ref_tx, chain, StateData) => {
+    try {
+        const base_state = await StateData.get(req_tx.meta.data.base[0]);
+        const new_states = JSON.parse(ref_tx.raw.raw[0]);
+        if (base_state == null || new_states == null)
+            return true;
+        const inputs = req_tx.raw.raw;
+        const type = inputs[0];
+        const other = inputs[1];
+        const amount = Number(inputs[2]);
+        const nonce = Number(inputs[3]);
+        switch (type) {
+            case "remit":
+                if (base_state.contents.owner === req_tx.meta.data.address && base_state.contents.amount - new_states.contents.amount === amount && req_tx.meta.next.flag === true)
+                    return false;
+                const next_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
+                const next_raw = search_related_raw(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
+                const next_inputs = next_raw.raw;
+                const next_type = next_inputs[0];
+                const next_other = next_inputs[1];
+                const next_amount = Number(next_inputs[2]);
+                const next_nonce = Number(next_inputs[3]);
+                return !(next_meta.data.address === req_tx.meta.data.address && next_type === "receive" && next_other === req_tx.meta.data.base[0] && amount === next_amount && nonce === next_nonce);
+            case "receive":
+                if (new_states.contents.amount - base_state.contents.amount === amount && req_tx.meta.next.flag === true)
+                    return false;
+                const pre_meta = search_related_tx(chain, req_tx.meta.pre.hash, 'next', req_tx.meta.purehash);
+                const pre_raw = search_related_raw(chain, req_tx.meta.pre.hash, 'next', req_tx.meta.purehash);
+                const pre_inputs = pre_raw.raw;
+                const pre_type = pre_inputs[0];
+                const pre_other = pre_inputs[1];
+                const pre_amount = Number(pre_inputs[2]);
+                const pre_nonce = Number(pre_inputs[3]);
+                return !(pre_meta.data.address === req_tx.meta.data.address && pre_type === "remit" && pre_other === req_tx.meta.data.base[0] && amount === pre_amount && nonce === pre_nonce);
+        }
+    }
+    catch (e) {
+        console.log(e);
+        return true;
+    }
+};
 exports.ValidTxBasic = (tx, my_version) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
@@ -256,7 +312,7 @@ exports.ValidTxBasic = (tx, my_version) => {
         return true;
     }
 };
-exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, LocationData) => {
+exports.ValidRequestTx = async (tx, my_version, native, StateData, LocationData) => {
     const tx_meta = tx.meta;
     const kind = tx_meta.kind;
     const tx_data = tx_meta.data;
@@ -267,7 +323,7 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
     const token = tx_data.token;
     const base = tx_data.base;
     const commit = tx_data.commit;
-    const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, key_currency, {}, []);
+    const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, native, {}, []);
     if (!exports.ValidTxBasic(tx, my_version)) {
         return false;
     }
@@ -275,7 +331,7 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
         console.log("invalid kind");
         return false;
     }
-    else if (solvency_state.contents.amount < _.tx_fee(tx) + gas || hashed_pub_check(solvency_state, pub_key) || solvency_state.contents.token != key_currency || await requested_check([solvency], LocationData)) {
+    else if (solvency_state.contents.amount < _.tx_fee(tx) + gas || hashed_pub_check(solvency_state, pub_key) || solvency_state.contents.token != native || await requested_check([solvency], LocationData)) {
         console.log("invalid solvency");
         return false;
     }
@@ -287,11 +343,15 @@ exports.ValidRequestTx = async (tx, my_version, key_currency, StateData, Locatio
         console.log("commits are already committed");
         return false;
     }
+    else if (token === native && base.length != 1) {
+        console.log("invalid natives txs");
+        return false;
+    }
     else {
         return true;
     }
 };
-exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency, token_name_maxsize, StateData, LocationData) => {
+exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, native, token_name_maxsize, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
     const kind = tx_meta.kind;
@@ -306,8 +366,14 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency,
     const raw = tx.raw;
     const output_raw = raw.raw;
     const req_tx = _.find_tx(chain, request);
+    const req_raw = chain[index].raws[chain[index].txs.indexOf(req_tx)];
+    const req_tx_full = {
+        hash: req_tx.hash,
+        meta: req_tx.meta,
+        raw: req_raw
+    };
     const token = req_tx.meta.data.token;
-    const payee_state = await StateData.get(payee) || StateSet.CreateState(0, address, key_currency, {}, []);
+    const payee_state = await StateData.get(payee) || StateSet.CreateState(0, address, native, {}, []);
     const base_states = await p_iteration_1.reduce(req_tx.meta.data.base, async (result, key) => {
         const getted = await StateData.get(key);
         if (getted)
@@ -342,7 +408,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency,
         console.log("invalid solvency");
         return false;
     }
-    else if (payee_state.contents.amount + req_tx.meta.data.gas < _.tx_fee(tx) || hashed_pub_check(payee_state, pub_key) || payee_state.contents.token != key_currency) {
+    else if (payee_state.contents.amount + req_tx.meta.data.gas < _.tx_fee(tx) || hashed_pub_check(payee_state, pub_key) || payee_state.contents.token != native) {
         console.log("invalid payee");
         return false;
     }
@@ -360,6 +426,10 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, key_currency,
     }
     else if (req_tx.meta.next.flag === true && nexts.length === 0) {
         console.log("invalid next txs");
+        return false;
+    }
+    else if (token === native && await ValidNative(req_tx_full, tx, chain, StateData)) {
+        console.log("invalid native txs");
         return false;
     }
     else {
@@ -503,8 +573,8 @@ exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => 
         return after_fee;
     return [after_gas[0], after_fee[1], after_fee[2]];
 };
-exports.AcceptRequestTx = async (tx, my_version, key_currency, validator, index, StateData, LocationData) => {
-    if (!await exports.ValidRequestTx(tx, my_version, key_currency, StateData, LocationData))
+exports.AcceptRequestTx = async (tx, my_version, native, validator, index, StateData, LocationData) => {
+    if (!await exports.ValidRequestTx(tx, my_version, native, StateData, LocationData))
         return [StateData, LocationData];
     const solvency_state = await StateData.get(tx.meta.data.solvency);
     const validator_state = await StateData.get(validator);
@@ -523,8 +593,8 @@ exports.AcceptRequestTx = async (tx, my_version, key_currency, validator, index,
     });
     return [StateData, LocationData];
 };
-exports.AcceptRefreshTx = async (ref_tx, chain, my_version, pow_target, key_currency, token_name_maxsize, StateData, LocationData) => {
-    if (!await exports.ValidRefreshTx(ref_tx, chain, my_version, pow_target, key_currency, token_name_maxsize, StateData, LocationData))
+exports.AcceptRefreshTx = async (ref_tx, chain, my_version, pow_target, native, token_name_maxsize, StateData, LocationData) => {
+    if (!await exports.ValidRefreshTx(ref_tx, chain, my_version, pow_target, native, token_name_maxsize, StateData, LocationData))
         return [StateData, LocationData];
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {

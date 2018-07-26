@@ -33,64 +33,6 @@ export type Relation = {
   hash:string
 }
 
-/*export type RequestData = {
-  address:string[];
-  pub_key:string[];
-  timestamp:number;
-  gas:number;
-  solvency:string;
-  type:TxTypes;
-  token:string;
-  base:string[];
-  commit:string[];
-  input:string[];
-  log_hash:string[];
-}
-
-export type RequestMeta = {
-  kind:"request";
-  version:number;
-  purehash:string;
-  pre:Relation;
-  next:Relation;
-  feeprice:number;
-  data:RequestData;
-}
-
-export type RequestTx = {
-  hash:string;
-  meta:RequestMeta;
-  raw:TxRaw;
-}
-
-export type RefreshMeta = {
-  kind:"refresh";
-  version:number;
-  address:string[];
-  pub_key:string[];
-  nonce:number;
-  feeprice:number;
-  timestamp:number;
-  request:string;
-  index:number;
-  payee:string;
-  output:string[];
-  trace:string[];
-  log_hash:string[];
-}
-
-export type RefreshTx = {
-  hash:string;
-  meta:RefreshMeta;
-  raw:TxRaw;
-}
-
-export type TxPure = {
-  hash:string;
-  meta:RequestMeta | RefreshMeta;
-}*/
-
-//export type Tx = RequestTx | RefreshTx;
 export type TxData = {
   address:string[];
   pub_key:string[];
@@ -169,7 +111,6 @@ export type BlockMeta = {
   pow_target:number;
   pos_diff:number;
   validator: string;
-  token:string;
   validatorPub: string[];
   candidates: string;
   stateroot: string;
@@ -182,6 +123,8 @@ export type BlockPure = {
   hash:string,
   validatorSign: string[];
   meta:BlockMeta;
+  natives:TxPure[];
+  units:TxPure[];
 }
 
 export type Block = {
@@ -189,6 +132,8 @@ export type Block = {
   validatorSign: string[];
   meta:BlockMeta;
   txs:TxPure[];
+  natives:TxPure[];
+  units:TxPure[];
   raws:TxRaw[];
   fraudData:FraudData;
 }

@@ -1,43 +1,21 @@
-declare function require(x: string): any;
-
-import * as crypto from 'crypto'
-import * as fs from 'fs'
-import * as _ from './basic'
 import {Trie} from './merkle_patricia'
-import * as StateSet from './state'
-import * as DagSet from './dag'
 import * as TxSet from './tx'
-import * as ChainSet from './chain'
 import * as T from './types'
 
-const {map,reduce,filter,forEach,some} = require('p-iteration');
-//const RadixTree = require('dfinity-radix-tree');
-//const levelup = require('levelup');
-//const leveldown = require('leveldown');
-//const db = levelup(leveldown('./db/state'));
-const IPFS = require('ipfs');
-const rlp = require('rlp');
-
-const CryptoSet = require('./crypto_set.js');
-
-/*export type Pool = {
-  [key:string]:TxSet.Tx;
-}*/
-
-async function check_tx(tx:T.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:T.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
-  if(tx.kind=="request"){
-    return await TxSet.ValidRequestTx(tx,tag_limit,key_currency,fee_by_size,StateData,RequestsAlias);
+const check_tx = async (tx:T.Tx,my_version:number,native:string,chain:T.Block[],pow_target:number,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+  if(tx.meta.kind=="request"){
+    return await TxSet.ValidRequestTx(tx,my_version,native,StateData,LocationData);
   }
-  else if(tx.kind=="refresh"){
-    return await TxSet.ValidRefreshTx(tx,chain,key_currency,fee_by_size,tag_limit,StateData,DagData,RequestsAlias);
+  else if(tx.meta.kind=="refresh"){
+    return await TxSet.ValidRefreshTx(tx,chain,my_version,pow_target,native,token_name_maxsize,StateData,LocationData);
   }
   else return false;
 }
 
-export async function Tx_to_Pool(pool:T.Pool,tx:T.Tx,tag_limit:number,key_currency:string,fee_by_size:number,chain:T.Block[],StateData:Trie,DagData:Trie,RequestsAlias:Trie){
-  if(! await check_tx(tx,tag_limit,key_currency,fee_by_size,chain,StateData,DagData,RequestsAlias)) return pool;
+export async function Tx_to_Pool(pool:T.Pool,tx:T.Tx,my_version:number,native:string,chain:T.Block[],pow_target:number,token_name_maxsize:number,StateData:Trie,LocationData:Trie){
+  if(! await check_tx(tx,my_version,native,chain,pow_target,token_name_maxsize,StateData,LocationData)) return pool;
   const new_pool = ((pool:T.Pool)=>{
-    pool[tx.meta.hash] = tx;
+    pool[tx.hash] = tx;
     return pool;
   })(pool);
   return new_pool;

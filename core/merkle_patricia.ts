@@ -14,17 +14,17 @@ const de_key = (key:string):string=>{
   return rlp.decode(key);
 }
 
-const en_value = (value):string=>{
+const en_value = (value:any):string=>{
   return rlp.encode(JSON.stringify(value));
 }
 
-const de_value = (value)=>{
+const de_value = (value:any)=>{
   return JSON.parse(rlp.decode(value));
 }
 
 export class Trie {
-  private trie
-  constructor(db,root:string=""){
+  private trie:any;
+  constructor(db:any,root:string=""){
     if(root=="") this.trie = new Merkle(db);
     else this.trie = new Merkle(db,Buffer.from(root,'hex'));
   }
@@ -35,7 +35,7 @@ export class Trie {
     return de_value(result);
   }
 
-  async put(key:string,value){
+  async put(key:string,value:any){
     await util.promisify(this.trie.put).bind(this.trie)(en_key(key),en_value(value));
     return this.trie;
   }
@@ -69,13 +69,13 @@ export class Trie {
     const stream = this.trie.createReadStream();
     return new Promise<{[key:string]:any;}>((resolve,reject)=>{
       try{
-        stream.on('data',(data)=>{
+        stream.on('data',(data:{key:string,value:any})=>{
           const key = de_key(data.key);
           const value = de_value(data.value);
           if(check(key,value)) result[key] = value;
         });
 
-        stream.on('end',(val)=>{
+        stream.on('end',(val:{key:string,value:any})=>{
           resolve(result);
         });
       }

@@ -12,15 +12,18 @@ export type State = {
 };
 
 export type Token = {
+  nonce:number;
   token: string;
   issued: number;
+  deposited:number;
   committed: string[];
+  code:string;
   developer: string[];
 };
 
 
 export type TxKind = 'request' | 'refresh';
-export type TxTypes = 'issue' | 'change' | 'scrap' | 'create';
+export type TxTypes = 'issue' | 'change' | 'scrap' | 'create' | 'update';
 
 export type TxRaw = {
   signature:string[];
@@ -43,7 +46,6 @@ export type TxData = {
   type:TxTypes;
   token:string;
   base:string[];
-  commit:string[];
   input:string[];
   request:string;
   index:number;

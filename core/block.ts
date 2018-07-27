@@ -505,7 +505,7 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
         const target = txs.concat(natives).concat(units);
         const refreshed:Trie[] = await reduce(target, async (result:Trie[],tx:T.Tx)=>{
             if(tx.meta.kind==="request"){
-                return await TxSet.AcceptRequestTx(tx,my_version,native,block.meta.validator,index,result[0],result[1]);
+                return await TxSet.AcceptRequestTx(tx,my_version,native,unit,block.meta.validator,index,result[0],result[1]);
             }
             else if(tx.meta.kind==="refresh"){
                 return await TxSet.AcceptRefreshTx(tx,chain,my_version,pow_target,native,token_name_maxsize,result[0],result[1]);

@@ -3,7 +3,7 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
-import {reduce,some,ForEach} from 'p-iteration'
+import {map,reduce,some,ForEach} from 'p-iteration'
 
 export const empty_tx = ():T.Tx=>{
   const data:T.TxData = {
@@ -16,7 +16,6 @@ export const empty_tx = ():T.Tx=>{
     type:"change",
     token:"",
     base:[],
-    commit:[],
     input:[],
     request:_.toHash(""),
     index:0,
@@ -86,15 +85,6 @@ const requested_check = async (base:string[],LocationData:Trie):Promise<boolean>
   });
 }
 
-const commited_check = async (token:string,commit:string[],StateData:Trie)=>{
-  const token_state:T.Token = await StateData.get(CryptoSet.GenereateAddress(token,_.toHash('')));
-  if(token_state==null) return true;
-  const committed = token_state.committed;
-  return commit.some((c:string)=>{
-    return committed.indexOf(c)!=-1
-  });
-}
-
 const hashed_pub_check = (state:T.State,pubs:string[])=>{
   return state.contents.owner.some((address,index)=>{
     return _.toHash(pubs[index]) != address.split(':')[2];
@@ -126,12 +116,27 @@ const base_declaration_check = async (target:T.State,base_hashes:string[],StateD
 const output_check = async (type:T.TxTypes,base_states:T.State[],output_raw:string[],token_name_maxsize:number,StateData:Trie)=>{
   if(type==="create"){
     const token_state:T.Token = JSON.parse(output_raw[0]);
-    const key = CryptoSet.GenereateAddress(token_state.token,_.toHash(''));
-    const getted:T.Token[] = await StateData.get(key);
+    const code:string = output_raw[1];
+    const key = token_state.token;
+    const getted:T.Token = await StateData.get(key);
     const dev_check = token_state.developer.some((dev)=>{
-      return dev===key || _.address_form_check(dev,token_name_maxsize)
+      return _.address_form_check(dev,token_name_maxsize)
     });
-    if(getted!=null||token_state.issued<0||dev_check) return true;
+    if(getted!=null||dev_check||token_state.nonce!=0||token_state.issued<0||token_state.code!=_.toHash(code)) return true;
+    else return false;
+  }
+  else if(type==="update"){
+    const token_state:T.Token = JSON.parse(output_raw[0]);
+    const key = token_state.token;
+    const empty = StateSet.CreateToken();
+    const getted:T.Token = await StateData.get(key) || empty;
+    const dev_check = token_state.developer.some((dev)=>{
+      return _.address_form_check(dev,token_name_maxsize)
+    });
+    const comm = token_state.committed.some((c:string)=>{
+      return getted.committed.indexOf(c)!=-1
+    });
+    if(key!=token_state.token||getted==empty||dev_check||getted.deposited-token_state.deposited<0) return true;
     else return false;
   }
   else{
@@ -167,18 +172,14 @@ const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T
   return list_up_related(chain,searched,ori_order,new_pres);
 }
 
-const mining = (meta:T.TxMeta,target:number)=>{
-  let hash:string;
+const mining = (request:string,refresher:string,output:string[],target:number)=>{
+  let nonce:number = -1;
   let num:number;
   do{
-    hash = _.ObjectHash(meta);
-    num = _.Hex_to_Num(hash);
-    meta.nonce ++;
+    nonce ++;
+    num = _.Hex_to_Num(request)+nonce+_.Hex_to_Num(refresher)+_.Hex_to_Num(_.ObjectHash(output));
   }while(num>target);
-  return {
-    nonce:meta.nonce,
-    hash:hash
-  }
+  return nonce;
 }
 
 export const find_req_tx = (ref_tx:T.Tx,chain:T.Block[]):T.Tx=>{
@@ -225,7 +226,7 @@ const ValidNative = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Tri
         const next_other = next_inputs[1];
         const next_amount = Number(next_inputs[2]);
         const next_nonce = Number(next_inputs[3]);
-        return !(next_meta.data.address===req_tx.meta.data.address&&next_type==="receive"&&next_other===req_tx.meta.data.base[0]&&amount===next_amount&&nonce===next_nonce);
+        return !(next_meta.data.token===req_tx.meta.data.token&&next_meta.data.address===req_tx.meta.data.address&&next_type==="receive"&&next_other===req_tx.meta.data.base[0]&&amount===next_amount&&nonce===next_nonce);
       case "receive":
         if(new_states.contents.amount-base_state.contents.amount===amount&&req_tx.meta.next.flag===true)return false;
         const pre_meta = search_related_tx(chain,req_tx.meta.pre.hash,'next',req_tx.meta.purehash);
@@ -235,8 +236,23 @@ const ValidNative = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Tri
         const pre_other = pre_inputs[1];
         const pre_amount = Number(pre_inputs[2]);
         const pre_nonce = Number(pre_inputs[3]);
-        return !(pre_meta.data.address===req_tx.meta.data.address&&pre_type==="remit"&&pre_other===req_tx.meta.data.base[0]&&amount===pre_amount&&nonce===pre_nonce);
+        return !(pre_meta.data.token===req_tx.meta.data.token&&pre_meta.data.address===req_tx.meta.data.address&&pre_type==="remit"&&pre_other===req_tx.meta.data.base[0]&&amount===pre_amount&&nonce===pre_nonce);
     }
+  }
+  catch(e){
+    console.log(e);
+    return true;
+  }
+}
+
+const ValidUnit = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Trie)=>{
+  try{
+    const base_state:T.State = await StateData.get(req_tx.meta.data.base[0]);
+    const new_states:T.State = JSON.parse(ref_tx.raw.raw[0]);
+    if(base_state==null||new_states==null) return true;
+    const inputs = req_tx.raw.raw;
+    const request = inputs[0];
+    const refresher = inputs[1];
   }
   catch(e){
     console.log(e);
@@ -308,7 +324,7 @@ export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
   }
 }
 
-export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,StateData:Trie,LocationData:Trie)=>{
+export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,unit:string,StateData:Trie,LocationData:Trie)=>{
   const tx_meta = tx.meta;
   const kind = tx_meta.kind;
   const tx_data = tx_meta.data;
@@ -318,7 +334,6 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,Sta
   const solvency = tx_data.solvency;
   const token = tx_data.token;
   const base = tx_data.base;
-  const commit = tx_data.commit;
 
   const solvency_state:T.State = await StateData.get(solvency) || StateSet.CreateState(0,address,native,{},[]);
 
@@ -337,11 +352,7 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,Sta
     console.log("base states are already requested");
     return false;
   }
-  else if(await commited_check(token,commit,StateData)){
-    console.log("commits are already committed");
-    return false;
-  }
-  else if(token===native&&base.length!=1){
+  else if((token===native||token===unit)&&base.length!=1){
     console.log("invalid natives txs");
     return false;
   }
@@ -354,6 +365,7 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,Sta
 export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,native:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
+  const nonce = tx_meta.nonce;
   const kind = tx_meta.kind;
   const tx_data = tx_meta.data;
   const address = tx_data.address;
@@ -393,7 +405,7 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
     console.log("invalid kind");
     return false;
   }
-  else if(_.Hex_to_Num(hash)>pow_target){
+  else if(_.Hex_to_Num(request)+nonce+_.Hex_to_Num(payee)+_.Hex_to_Num(_.ObjectHash(output))>pow_target){
     console.log("invalid nonce");
     return false;
   }
@@ -442,7 +454,7 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
   }
 }
 
-export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type:T.TxTypes,token:string,base:string[],commit:string[],input_raw:string[],log:string[],version:number,pre:T.Relation,next:T.Relation,feeprice:number)=>{
+export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type:T.TxTypes,token:string,base:string[],input_raw:string[],log:string[],version:number,pre:T.Relation,next:T.Relation,feeprice:number)=>{
   const address = pub_key.map(p=>CryptoSet.GenereateAddress(token,p));
   const date = new Date();
   const timestamp = date.getTime();
@@ -460,7 +472,6 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
     type:type,
     token:token,
     base:base,
-    commit:commit,
     input:input,
     request:empty.meta.data.request,
     index:empty.meta.data.index,
@@ -504,7 +515,7 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
   const output = output_raw.map(o=>_.toHash(o));
   const log_hash = log_raw.map(l=>_.toHash(l));
   const empty = empty_tx_pure();
-  let data:T.TxData = {
+  const data:T.TxData = {
     address:address,
     pub_key:pub_key,
     timestamp:timestamp,
@@ -514,7 +525,6 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
     type:empty.meta.data.type,
     token:empty.meta.data.token,
     base:empty.meta.data.base,
-    commit:empty.meta.data.commit,
     input:empty.meta.data.input,
     request:request,
     index:index,
@@ -522,19 +532,18 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
     output:output,
     trace:trace
   }
-  let meta:T.TxMeta = {
+  const nonce = mining(request,payee,output,target);
+  const meta:T.TxMeta = {
     kind:"refresh",
     version:version,
     purehash:_.ObjectHash(data),
-    nonce:0,
+    nonce:nonce,
     pre:empty.meta.pre,
     next:empty.meta.next,
     feeprice:feeprice,
     data:data
   }
-  const mined = mining(meta,target);
-  meta.nonce = mined.nonce;
-  const hash = mined.hash;
+  const hash = _.ObjectHash(meta);
   const raw:T.TxRaw = {
     signature:[],
     raw:output_raw,
@@ -584,8 +593,8 @@ export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_s
   return [after_gas[0],after_fee[1],after_fee[2]];
 }
 
-export const AcceptRequestTx = async (tx:T.Tx,my_version:number,native:string,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
-  if(!await ValidRequestTx(tx,my_version,native,StateData,LocationData)) return [StateData,LocationData];
+export const AcceptRequestTx = async (tx:T.Tx,my_version:number,native:string,unit:string,validator:string,index:number,StateData:Trie,LocationData:Trie)=>{
+  if(!await ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) return [StateData,LocationData];
   const solvency_state:T.State = await StateData.get(tx.meta.data.solvency);
   const validator_state:T.State = await StateData.get(validator);
   const fee = _.tx_fee(tx);
@@ -609,10 +618,27 @@ export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:num
   if(!await ValidRefreshTx(ref_tx,chain,my_version,pow_target,native,token_name_maxsize,StateData,LocationData)) return [StateData,LocationData];
   const req_tx = find_req_tx(ref_tx,chain)
   if(req_tx.meta.data.type==="create"){
-    const state:T.Token = JSON.parse(req_tx.raw.raw[0]);
-    await StateData.put(CryptoSet.GenereateAddress(state.token,_.toHash('')),state);
+    const token_info:T.Token = JSON.parse(req_tx.raw.raw[0]);
+    await StateData.put(token_info.token,token_info);
+  }
+  else if(req_tx.meta.data.type==="update"){
+    const token_info:T.Token = JSON.parse(req_tx.raw.raw[0]);
+    let pre_token = await StateData.get(token_info.token);
+    pre_token.nonce ++;
+    pre_token.deposited += token_info.deposited;
+    await StateData.put(token_info.token,pre_token);
   }
   else{
+    let token_info = await StateData.get(req_tx.meta.data.token);
+    token_info.nonce ++;
+    const base_states:T.State[] = await map(req_tx.meta.data.base, async (key:string)=>{
+      return await StateData.get(key);
+    });
+    const new_states:T.State[] = ref_tx.raw.raw.map(obj=>JSON.parse(obj));
+    const pre_amount_sum = base_states.reduce((sum,state)=>sum+state.contents.amount,0);
+    const new_amount_sum = new_states.reduce((sum,state)=>sum+state.contents.amount,0);
+    token_info.issued += (new_amount_sum-pre_amount_sum);
+    await StateData.put(req_tx.meta.data.token,token_info);
     await ForEach(req_tx.meta.data.base,async (key:string)=>{
       await StateData.delete(key);
       await LocationData.delete(key);

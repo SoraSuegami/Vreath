@@ -15,7 +15,7 @@ const test_address = CryptoSet.AddressFromPublic(test_pub);*/
   return func.toString().replace(/^\(\)\s=>\s{/,"").replace(/}$/,"");
 }*/
 
-export function CreateState(amount:number,owner:string[],token:string,data:{[key:string]:string},product:string[]){
+export const CreateState = (amount:number,owner:string[],token:string,data:{[key:string]:string},product:string[])=>{
   const contents:T.StateContent = {
       owner:owner,
       token:token,
@@ -31,3 +31,14 @@ export function CreateState(amount:number,owner:string[],token:string,data:{[key
   return state;
 }
 
+export const CreateToken = (nonce=0,token="",issued=0,deposited=0,committed:string[]=[],code="",developer:string[]=[]):T.Token=>{
+  return {
+    nonce:nonce,
+    token:token,
+    issued:issued,
+    deposited:deposited,
+    committed:committed,
+    code:code,
+    developer:developer
+  }
+}

@@ -493,7 +493,7 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
         const target = txs.concat(natives).concat(units);
         const refreshed = await p_iteration_1.reduce(target, async (result, tx) => {
             if (tx.meta.kind === "request") {
-                return await TxSet.AcceptRequestTx(tx, my_version, native, block.meta.validator, index, result[0], result[1]);
+                return await TxSet.AcceptRequestTx(tx, my_version, native, unit, block.meta.validator, index, result[0], result[1]);
             }
             else if (tx.meta.kind === "refresh") {
                 return await TxSet.AcceptRefreshTx(tx, chain, my_version, pow_target, native, token_name_maxsize, result[0], result[1]);

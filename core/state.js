@@ -19,7 +19,7 @@ const test_address = CryptoSet.AddressFromPublic(test_pub);*/
 /*function FunctoStr(func):string{
   return func.toString().replace(/^\(\)\s=>\s{/,"").replace(/}$/,"");
 }*/
-function CreateState(amount, owner, token, data, product) {
+exports.CreateState = (amount, owner, token, data, product) => {
     const contents = {
         owner: owner,
         token: token,
@@ -33,5 +33,15 @@ function CreateState(amount, owner, token, data, product) {
         contents: contents
     };
     return state;
-}
-exports.CreateState = CreateState;
+};
+exports.CreateToken = (nonce = 0, token = "", issued = 0, deposited = 0, committed = [], code = "", developer = []) => {
+    return {
+        nonce: nonce,
+        token: token,
+        issued: issued,
+        deposited: deposited,
+        committed: committed,
+        code: code,
+        developer: developer
+    };
+};

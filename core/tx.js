@@ -258,7 +258,7 @@ const ValidNative = async (req_tx, ref_tx, chain, StateData) => {
         return true;
     }
 };
-const ValidUnit = async (req_tx, ref_tx, StateData) => {
+const ValidUnit = async (req_tx, ref_tx, chain, StateData) => {
     try {
         const base_state = await StateData.get(req_tx.meta.data.base[0]);
         const new_state = JSON.parse(ref_tx.raw.raw[0]);
@@ -276,6 +276,14 @@ const ValidUnit = async (req_tx, ref_tx, StateData) => {
             state.hash = hash;
             return state;
         }, base_state);
+        const mined_check = item_refs.some(ref => {
+            const request = ref.meta.data.request;
+            const nonce = ref.meta.nonce;
+            const payee = ref.meta.data.payee;
+            const output = ref.meta.data.output;
+            const pow_target = chain[ref.meta.data.index].meta.pow_target;
+            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target;
+        });
         const empty_state = StateSet.CreateState(0, [], "", {}, []);
         const empty_token = StateSet.CreateToken();
         switch (type) {
@@ -285,7 +293,7 @@ const ValidUnit = async (req_tx, ref_tx, StateData) => {
                 const committed = item_refs.map(item => item.hash).some(key => {
                     return commit_token.committed.indexOf(key) != -1;
                 });
-                return req_tx.meta.data.type != "issue" || base_state.contents.owner != req_tx.meta.data.address || new_state.contents.amount - base_state.contents.amount != item_refs.length || req_tx.meta.pre.flag != true || valid_state != new_state || remit_state === empty_state || commit_token === empty_token || remit_state.contents.amount - price_sum < 0 || committed;
+                return mined_check || req_tx.meta.data.type != "issue" || base_state.contents.owner != req_tx.meta.data.address || new_state.contents.amount - base_state.contents.amount != item_refs.length || req_tx.meta.pre.flag != true || valid_state != new_state || remit_state === empty_state || commit_token === empty_token || remit_state.contents.amount - price_sum < 0 || committed;
             default:
                 return true;
         }
@@ -390,7 +398,7 @@ exports.ValidRequestTx = async (tx, my_version, native, unit, StateData, Locatio
         return true;
     }
 };
-exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, native, unit, token_name_maxsize, StateData, LocationData) => {
+exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
     const nonce = tx_meta.nonce;
@@ -406,6 +414,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, native, unit,
     const trace = tx_data.trace;
     const raw = tx.raw;
     const output_raw = raw.raw;
+    const pow_target = chain[index].meta.pow_target;
     const req_tx = _.find_tx(chain, request);
     const req_raw = chain[index].raws[chain[index].txs.indexOf(req_tx)];
     const req_tx_full = {
@@ -477,7 +486,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, pow_target, native, unit,
         console.log("invalid native txs");
         return false;
     }
-    else if (token === unit && await ValidUnit(req_tx_full, tx, StateData)) {
+    else if (token === unit && await ValidUnit(req_tx_full, tx, chain, StateData)) {
         console.log("invalid unit txs");
         return false;
     }
@@ -641,8 +650,8 @@ exports.AcceptRequestTx = async (tx, my_version, native, unit, validator, index,
     });
     return [StateData, LocationData];
 };
-exports.AcceptRefreshTx = async (ref_tx, chain, my_version, pow_target, native, unit, token_name_maxsize, StateData, LocationData) => {
-    if (!await exports.ValidRefreshTx(ref_tx, chain, my_version, pow_target, native, unit, token_name_maxsize, StateData, LocationData))
+exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData) => {
+    if (!await exports.ValidRefreshTx(ref_tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData))
         return [StateData, LocationData];
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {

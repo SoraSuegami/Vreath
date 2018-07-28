@@ -1,4 +1,4 @@
-declare function require(x: string): any;
+/*declare function require(x: string): any;
 
 const VM = require('ethereumjs-vm');
 
@@ -7,7 +7,7 @@ const code = "608060405234801561001057600080fd5b5061019e806100206000396000f30060
 
 vm.runCode({
   code: Buffer.from(code, 'hex'), // code needs to be a Buffer
-  data: Buffer.from("HelloWorld",'hex')
+  data: Buffer.from("HelloWorld",'hex'),
   gasLimit: Buffer.from('55555555', 'hex')
 }, function(err, results){
   if(err) console.log(err);

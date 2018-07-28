@@ -373,6 +373,28 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
     const raws = txs.map(tx => tx.raw).concat(natives.map(n => n.raw)).concat(units.map(u => u.raw));
     const tx_root = exports.GetTreeroot(pures.map(p => p.hash))[0];
     const fee_sum = tx_fee_sum(pures, raws);
+    const natives_reduced = natives.reduce((result, tx) => {
+        let copy = tx;
+        if (tx.meta.kind === "request") {
+            copy.meta.kind === "refresh";
+            return result.concat([tx, copy]);
+        }
+        else {
+            copy.meta.kind === "request";
+            return result.concat([copy, tx]);
+        }
+    }, []);
+    const units_reduced = units.reduce((result, tx) => {
+        let copy = tx;
+        if (tx.meta.kind === "request") {
+            copy.meta.kind === "refresh";
+            return result.concat([tx, copy]);
+        }
+        else {
+            copy.meta.kind === "request";
+            return result.concat([copy, tx]);
+        }
+    }, []);
     const meta = {
         version: version,
         shard_id: shard_id,
@@ -397,8 +419,8 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
         validatorSign: [],
         meta: meta,
         txs: pures,
-        natives: natives,
-        units: units,
+        natives: natives_reduced,
+        units: units_reduced,
         raws: raws,
         fraudData: fraudData
     };
@@ -451,7 +473,7 @@ const check_fraud_proof = async (block, chain, code, gas_limit, StateData) => {
         return true;
     return false;
 };
-exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, code, gas_limit, unit, rate, native, pow_target, token_name_maxsize, StateData, pre_StateData, LocationData) => {
+exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, code, gas_limit, native, unit, rate, token_name_maxsize, StateData, pre_StateData, LocationData) => {
     let index = block.meta.index;
     if (block.meta.fraud.flag) {
         index = block.meta.fraud.index - 1;
@@ -465,7 +487,8 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
         return {
             state: StateData,
             location: LocationData,
-            candidates: new_candidates
+            candidates: new_candidates,
+            chain: chain.concat(block)
         };
     }
     else if (block.meta.kind === "micro" && await exports.ValidMicroBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, unit, StateData) && (block.meta.fraud.flag === false || await check_fraud_proof(block, chain, code, gas_limit, StateData))) {
@@ -476,49 +499,27 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
                 raw: block.raws[i]
             };
         });
-        const natives_maped = block.natives.map((n, i) => {
+        const natives = block.natives.map((n, i) => {
             return {
                 hash: n.hash,
                 meta: n.meta,
                 raw: block.raws[i]
             };
         });
-        const natives = natives_maped.reduce((result, tx) => {
-            let copy = tx;
-            if (tx.meta.kind === "request") {
-                copy.meta.kind === "refresh";
-                return result.concat([tx, copy]);
-            }
-            else {
-                copy.meta.kind === "request";
-                return result.concat([copy, tx]);
-            }
-        }, []);
-        const units_maped = block.units.map((u, i) => {
+        const units = block.units.map((u, i) => {
             return {
                 hash: u.hash,
                 meta: u.meta,
                 raw: block.raws[i]
             };
         });
-        const units = units_maped.reduce((result, tx) => {
-            let copy = tx;
-            if (tx.meta.kind === "request") {
-                copy.meta.kind === "refresh";
-                return result.concat([tx, copy]);
-            }
-            else {
-                copy.meta.kind === "request";
-                return result.concat([copy, tx]);
-            }
-        }, []);
         const target = txs.concat(natives).concat(units);
         const refreshed = await p_iteration_1.reduce(target, async (result, tx) => {
             if (tx.meta.kind === "request") {
                 return await TxSet.AcceptRequestTx(tx, my_version, native, unit, block.meta.validator, index, result[0], result[1]);
             }
             else if (tx.meta.kind === "refresh") {
-                return await TxSet.AcceptRefreshTx(tx, chain, my_version, pow_target, native, unit, token_name_maxsize, result[0], result[1]);
+                return await TxSet.AcceptRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, result[0], result[1]);
             }
             else
                 return result;
@@ -527,14 +528,16 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
         return {
             state: refreshed[0],
             location: refreshed[1],
-            candidates: new_candidates
+            candidates: new_candidates,
+            chain: chain.concat(block)
         };
     }
     else {
         return {
             state: StateData,
             location: LocationData,
-            candidates: right_candidates
+            candidates: right_candidates,
+            chain: chain.concat(block)
         };
     }
 };

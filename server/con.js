@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.my_version = 0;
+exports.native = "native";
+exports.unit = "unit";
+exports.token_name_maxsize = 256;
+exports.block_time = 10;
+exports.max_blocks = 1;
+exports.block_size = 1000000;
+exports.gas_limit = 25;
+exports.rate = 0.8;

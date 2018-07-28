@@ -7,7 +7,7 @@ const check_tx = async (tx:T.Tx,my_version:number,native:string,unit:string,chai
     return await TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData);
   }
   else if(tx.meta.kind=="refresh"){
-    return await TxSet.ValidRefreshTx(tx,chain,my_version,pow_target,native,token_name_maxsize,StateData,LocationData);
+    return await TxSet.ValidRefreshTx(tx,chain,my_version,pow_target,native,unit,token_name_maxsize,StateData,LocationData);
   }
   else return false;
 }

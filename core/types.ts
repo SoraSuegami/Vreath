@@ -59,6 +59,7 @@ export type TxMeta = {
   version:number;
   purehash:string;
   nonce:number;
+  unit_price:number;
   pre:Relation;
   next:Relation;
   feeprice:number;

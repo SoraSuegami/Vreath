@@ -487,20 +487,42 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
                 raw:block.raws[i]
             }
         });
-        const natives = block.natives.map((n,i)=>{
+        const natives_maped:T.Tx[] = block.natives.map((n,i)=>{
             return {
                 hash:n.hash,
                 meta:n.meta,
                 raw:block.raws[i]
             }
         });
-        const units = block.units.map((u,i)=>{
+        const natives = natives_maped.reduce((result:T.Tx[],tx):T.Tx[]=>{
+            let copy = tx;
+            if(tx.meta.kind==="request"){
+                copy.meta.kind==="refresh";
+                return result.concat([tx,copy]);
+            }
+            else{
+                copy.meta.kind==="request";
+                return result.concat([copy,tx]);
+            }
+        },[]);
+        const units_maped:T.Tx[] = block.units.map((u,i)=>{
             return {
                 hash:u.hash,
                 meta:u.meta,
                 raw:block.raws[i]
             }
         });
+        const units = units_maped.reduce((result:T.Tx[],tx):T.Tx[]=>{
+            let copy = tx;
+            if(tx.meta.kind==="request"){
+                copy.meta.kind==="refresh";
+                return result.concat([tx,copy]);
+            }
+            else{
+                copy.meta.kind==="request";
+                return result.concat([copy,tx]);
+            }
+        },[]);
 
         const target = txs.concat(natives).concat(units);
         const refreshed:Trie[] = await reduce(target, async (result:Trie[],tx:T.Tx)=>{
@@ -508,7 +530,7 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
                 return await TxSet.AcceptRequestTx(tx,my_version,native,unit,block.meta.validator,index,result[0],result[1]);
             }
             else if(tx.meta.kind==="refresh"){
-                return await TxSet.AcceptRefreshTx(tx,chain,my_version,pow_target,native,token_name_maxsize,result[0],result[1]);
+                return await TxSet.AcceptRefreshTx(tx,chain,my_version,pow_target,native,unit,token_name_maxsize,result[0],result[1]);
             }
             else return result;
         },[StateData,LocationData]);

@@ -29,6 +29,7 @@ export const empty_tx = ():T.Tx=>{
     version:0,
     purehash:_.ObjectHash(data),
     nonce:0,
+    unit_price:0,
     pre:{
       flag:false,
       hash:_.toHash("")
@@ -208,35 +209,40 @@ const search_related_raw = (chain:T.Block[],hash:string,order:'pre'|'next',calle
 const ValidNative = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Trie)=>{
   try{
     const base_state:T.State = await StateData.get(req_tx.meta.data.base[0]);
-    const new_states:T.State = JSON.parse(ref_tx.raw.raw[0]);
-    if(base_state==null||new_states==null) return true;
+    const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]);
+    if(base_state==null||new_state==null) return true;
     const inputs = req_tx.raw.raw;
     const type = inputs[0];
     const other = inputs[1];
     const amount = Number(inputs[2]);
-    const nonce = Number(inputs[3]);
-
+    const empty_token = StateSet.CreateToken();
+    const valid_state = ((state:T.State)=>{
+      state.contents.amount += amount;
+      const hash = _.ObjectHash(state.contents);
+      state.hash = hash;
+      return state;
+    })(base_state)
     switch(type){
       case "remit":
-        if(base_state.contents.owner===req_tx.meta.data.address&&base_state.contents.amount-new_states.contents.amount===amount&&req_tx.meta.next.flag===true)return false;
-        const next_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
-        const next_raw= search_related_raw(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
-        const next_inputs = next_raw.raw;
-        const next_type = next_inputs[0];
-        const next_other = next_inputs[1];
-        const next_amount = Number(next_inputs[2]);
-        const next_nonce = Number(next_inputs[3]);
-        return !(next_meta.data.token===req_tx.meta.data.token&&next_meta.data.address===req_tx.meta.data.address&&next_type==="receive"&&next_other===req_tx.meta.data.base[0]&&amount===next_amount&&nonce===next_nonce);
-      case "receive":
-        if(new_states.contents.amount-base_state.contents.amount===amount&&req_tx.meta.next.flag===true)return false;
-        const pre_meta = search_related_tx(chain,req_tx.meta.pre.hash,'next',req_tx.meta.purehash);
-        const pre_raw = search_related_raw(chain,req_tx.meta.pre.hash,'next',req_tx.meta.purehash);
-        const pre_inputs = pre_raw.raw;
-        const pre_type = pre_inputs[0];
-        const pre_other = pre_inputs[1];
-        const pre_amount = Number(pre_inputs[2]);
-        const pre_nonce = Number(pre_inputs[3]);
-        return !(pre_meta.data.token===req_tx.meta.data.token&&pre_meta.data.address===req_tx.meta.data.address&&pre_type==="remit"&&pre_other===req_tx.meta.data.base[0]&&amount===pre_amount&&nonce===pre_nonce);
+        return req_tx.meta.data.type!="scrap"||base_state.contents.owner!=req_tx.meta.data.address||new_state.contents.amount-base_state.contents.amount!=amount||valid_state!=new_state||amount<=0;
+
+      case "deposit":
+        if(req_tx.meta.data.type!="scrap"||base_state.contents.owner!=req_tx.meta.data.address||amount>0||new_state.contents.amount-base_state.contents.amount!=amount||req_tx.meta.next.flag!=true||valid_state!=new_state)return true;
+        const depo_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const depo_raw = search_related_raw(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const depo_token_info:T.Token = JSON.parse(depo_raw.raw[0]) || empty_token;
+        return !(depo_meta.data.type==="update"&&depo_token_info!=empty_token&&depo_token_info.token===req_tx.meta.data.token&&amount+depo_token_info.deposited===0&&other===depo_token_info.token&&valid_state.contents.amount>=0);
+
+      case "withdrawal":
+        if(req_tx.meta.data.type!="issue"||base_state.contents.owner!=req_tx.meta.data.address||amount<0||new_state.contents.amount-base_state.contents.amount!=amount||req_tx.meta.pre.flag!=true||valid_state!=new_state)return true;
+        const with_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const with_raw= search_related_raw(chain,req_tx.meta.next.hash,'next',req_tx.meta.purehash);
+        const with_token_info:T.Token = JSON.parse(with_raw.raw[0]) || empty_token;
+        const pre_token_info:T.Token = await StateData.get(with_token_info.token) || empty_token;
+        return !(with_meta.data.type==="update"&&with_token_info!=empty_token&&pre_token_info!=empty_token&&with_token_info.token===req_tx.meta.data.token&&amount+with_token_info.deposited===0&&other===with_token_info.token&&valid_state.contents.amount>=0&&pre_token_info.deposited-amount>=0);
+
+      default:
+        return true;
     }
   }
   catch(e){
@@ -245,14 +251,37 @@ const ValidNative = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Tri
   }
 }
 
-const ValidUnit = async (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:Trie)=>{
+const ValidUnit = async (req_tx:T.Tx,ref_tx:T.Tx,StateData:Trie)=>{
   try{
     const base_state:T.State = await StateData.get(req_tx.meta.data.base[0]);
-    const new_states:T.State = JSON.parse(ref_tx.raw.raw[0]);
-    if(base_state==null||new_states==null) return true;
+    const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]);
+    if(base_state==null||new_state==null) return true;
     const inputs = req_tx.raw.raw;
-    const request = inputs[0];
-    const refresher = inputs[1];
+    const type = inputs[0];
+    const remiter = inputs[1];
+    const item_refs:T.Tx[] = JSON.parse(inputs[2]) || [empty_tx()];
+    const prices = item_refs.map(ref=>ref.meta.unit_price);
+    const price_sum = prices.reduce((sum,p)=>{return sum+p},0)
+    const valid_state = prices.reduce((state,price)=>{
+        state.contents.amount += price;
+        const hash = _.ObjectHash(state.contents);
+        state.hash = hash;
+        return state;
+    },base_state);
+    const empty_state = StateSet.CreateState(0,[],"",{},[]);
+    const empty_token = StateSet.CreateToken();
+
+    switch(type){
+      case "buy":
+        const remit_state:T.State = await StateData.get(remiter) || empty_state;
+        const commit_token:T.Token = await StateData.get(req_tx.meta.data.token) || empty_token;
+        const committed = item_refs.map(item=>item.hash).some(key=>{
+          return commit_token.committed.indexOf(key)!=-1;
+        });
+        return req_tx.meta.data.type!="issue"||base_state.contents.owner!=req_tx.meta.data.address||new_state.contents.amount-base_state.contents.amount!=item_refs.length||req_tx.meta.pre.flag!=true||valid_state!=new_state||remit_state===empty_state||commit_token===empty_token||remit_state.contents.amount-price_sum<0||committed;
+      default:
+        return true;
+    }
   }
   catch(e){
     console.log(e);
@@ -362,10 +391,11 @@ export const ValidRequestTx = async (tx:T.Tx,my_version:number,native:string,uni
 }
 
 
-export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,native:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,native:string,unit:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
   const hash = tx.hash;
   const tx_meta = tx.meta;
   const nonce = tx_meta.nonce;
+  const unit_price = tx_meta.unit_price;
   const kind = tx_meta.kind;
   const tx_data = tx_meta.data;
   const address = tx_data.address;
@@ -409,6 +439,10 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
     console.log("invalid nonce");
     return false;
   }
+  else if(unit_price<0){
+    console.log("invalid unit_price");
+    return false;
+  }
   else if(index<0||index>chain.length-1){
     console.log("invalid request index");
     return false;
@@ -449,6 +483,10 @@ export const ValidRefreshTx = async (tx:T.Tx,chain:T.Block[],my_version:number,p
     console.log("invalid native txs");
     return false;
   }
+  else if(token===unit&&await ValidUnit(req_tx_full,tx,StateData)){
+    console.log("invalid unit txs");
+    return false;
+  }
   else{
     return true;
   }
@@ -487,6 +525,7 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
     version:version,
     purehash:purehash,
     nonce:empty.meta.nonce,
+    unit_price:empty.meta.unit_price,
     pre:pre,
     next:next,
     feeprice:feeprice,
@@ -507,7 +546,7 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
   return tx;
 }
 
-export const CreateRefreshTx = (version:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],trace:string[],log_raw:string[],chain:T.Block[])=>{
+export const CreateRefreshTx = (version:number,unit_price:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],trace:string[],log_raw:string[],chain:T.Block[])=>{
   const req_tx:T.TxMeta = _.find_tx(chain,request).meta;
   const address = pub_key.map(p=>CryptoSet.GenereateAddress(req_tx.data.token,p));
   const date = new Date();
@@ -538,6 +577,7 @@ export const CreateRefreshTx = (version:number,pub_key:string[],target:number,fe
     version:version,
     purehash:_.ObjectHash(data),
     nonce:nonce,
+    unit_price:unit_price,
     pre:empty.meta.pre,
     next:empty.meta.next,
     feeprice:feeprice,
@@ -614,8 +654,8 @@ export const AcceptRequestTx = async (tx:T.Tx,my_version:number,native:string,un
   return [StateData,LocationData];
 }
 
-export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,native:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
-  if(!await ValidRefreshTx(ref_tx,chain,my_version,pow_target,native,token_name_maxsize,StateData,LocationData)) return [StateData,LocationData];
+export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:number,pow_target:number,native:string,unit:string,token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+  if(!await ValidRefreshTx(ref_tx,chain,my_version,pow_target,native,unit,token_name_maxsize,StateData,LocationData)) return [StateData,LocationData];
   const req_tx = find_req_tx(ref_tx,chain)
   if(req_tx.meta.data.type==="create"){
     const token_info:T.Token = JSON.parse(req_tx.raw.raw[0]);
@@ -625,8 +665,13 @@ export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:num
     const token_info:T.Token = JSON.parse(req_tx.raw.raw[0]);
     let pre_token = await StateData.get(token_info.token);
     pre_token.nonce ++;
-    pre_token.deposited += token_info.deposited;
+    pre_token.committed = pre_token.committed.concat(token_info.committed);
     await StateData.put(token_info.token,pre_token);
+    const deposit_amount = token_info.deposited;
+    let native_info:T.Token = await StateData.get(native);
+    native_info.deposited ++;
+    native_info.deposited += deposit_amount;
+    await StateData.put(native,native_info);
   }
   else{
     let token_info = await StateData.get(req_tx.meta.data.token);
@@ -638,7 +683,6 @@ export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:num
     const pre_amount_sum = base_states.reduce((sum,state)=>sum+state.contents.amount,0);
     const new_amount_sum = new_states.reduce((sum,state)=>sum+state.contents.amount,0);
     token_info.issued += (new_amount_sum-pre_amount_sum);
-    await StateData.put(req_tx.meta.data.token,token_info);
     await ForEach(req_tx.meta.data.base,async (key:string)=>{
       await StateData.delete(key);
       await LocationData.delete(key);
@@ -647,6 +691,43 @@ export const AcceptRefreshTx = async (ref_tx:T.Tx,chain:T.Block[],my_version:num
       const state:T.State = JSON.parse(val);
       await StateData.put(state.hash,state);
     });
+    if(req_tx.meta.data.token===native&&req_tx.meta.data.type==="scrap"&&req_tx.raw.raw[0]==="remit"){
+      const receiver = req_tx.raw.raw[1];
+      const amount = -1*Number(req_tx.raw.raw[2]);
+      let receiver_state:T.State = await StateData.get(receiver);
+      receiver_state.contents.amount += amount;
+      token_info.nonce++;
+      token_info.issued += amount;
+    }
+    else if(req_tx.meta.data.token===unit&&req_tx.meta.data.type==="issue"&&req_tx.raw.raw[0]==="buy"){
+      const inputs = req_tx.raw.raw;
+      const remiter = inputs[1];
+      const item_refs:T.Tx[] = JSON.parse(inputs[2]) || [empty_tx()];
+      const hashes = item_refs.map(ref=>ref.hash);
+      const sellers = item_refs.map(ref=>ref.meta.data.payee);
+      const price_sum = item_refs.reduce((sum,ref)=>{
+        return sum+ref.meta.unit_price;
+      },0)
+      const remiter_state:T.State = await StateData.get(remiter);
+      await StateData.delete(remiter);
+      const new_remiter = StateSet.CreateState(remiter_state.contents.amount-price_sum,remiter_state.contents.owner,remiter_state.contents.token,remiter_state.contents.data,remiter_state.contents.product);
+      await StateData.put(new_remiter.hash,new_remiter);
+      await ForEach(sellers,async (key:string,i:number)=>{
+        const pre:T.State = await StateData.get(key);
+        await StateData.delete(key);
+        const new_amount = pre.contents.amount+item_refs[i].meta.unit_price;
+        const new_state = StateSet.CreateState(new_amount,pre.contents.owner,pre.contents.token,pre.contents.data,pre.contents.product);
+        await StateData.put(new_state.hash,new_state);
+      });
+      let native_info = await StateData.get(native);
+      native_info.nonce += (sellers.length+1);
+      await StateData.put(native,native_info);
+      let unit_info = await StateData.get(unit);
+      unit_info.committed = unit_info.committed.concat(hashes);
+      await StateData.put(unit,unit_info);
+    }
+
+    await StateData.put(req_tx.meta.data.token,token_info);
   }
   return [StateData,LocationData];
 }

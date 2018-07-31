@@ -18,14 +18,14 @@ exports.empty_tx = () => {
         timestamp: 0,
         log_hash: [],
         gas: 0,
-        solvency: _.toHash(""),
+        solvency: "[]",
         type: "change",
         token: "",
         base: [],
         input: [],
         request: _.toHash(""),
         index: 0,
-        payee: _.toHash(""),
+        payee: "[]",
         output: [],
         trace: []
     };
@@ -77,8 +77,8 @@ const empty_location = () => {
 };
 const requested_check = async (base, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
-        const getted = await LocationData.get(key);
-        if (getted == null)
+        const getted = await LocationData.get(key) || empty_location();
+        if (getted === empty_location())
             return false;
         else if (getted.state == "yet")
             return false;
@@ -93,8 +93,8 @@ const hashed_pub_check = (state, pubs) => {
 };
 const refreshed_check = async (base, index, tx_hash, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
-        const getted = await LocationData.get(key);
-        if (getted == null)
+        const getted = await LocationData.get(key) || empty_location();
+        if (getted === empty_location())
             return true;
         else if (getted.state == "already" && getted.index == index && getted.hash == tx_hash)
             return false;
@@ -110,9 +110,9 @@ const state_check = (state, token_name_maxsize) => {
         Object.entries(state.contents.data).some((obj) => { return Buffer.from(obj[0]).length > hash_size || Buffer.from(obj[1]).length > hash_size; }) ||
         state.contents.product.some(pro => Buffer.from(pro).length > token_name_maxsize);
 };
-const base_declaration_check = async (target, base_hashes, StateData) => {
-    const getted = await StateData.get(target.hash);
-    return getted != null && base_hashes.indexOf(target.hash) === -1;
+const base_declaration_check = async (target, bases, StateData) => {
+    const getted = await StateData.get(JSON.stringify(target.contents.owner));
+    return getted != null && bases.indexOf(JSON.stringify(target.contents.owner)) === -1;
 };
 const output_check = async (type, base_states, output_raw, token_name_maxsize, StateData) => {
     if (type === "create") {
@@ -148,8 +148,9 @@ const output_check = async (type, base_states, output_raw, token_name_maxsize, S
         const new_states = output_raw.map((o) => {
             return JSON.parse(o);
         });
-        const base_hashes = base_states.map(s => s.hash);
-        if (await p_iteration_1.some(new_states, async (s) => { state_check(s, token_name_maxsize) || await base_declaration_check(s, base_hashes, StateData); }))
+        const bases = base_states.map(s => JSON.stringify(s.contents.owner));
+        const nonce_check = base_states.some((b, i) => b.contents.nonce + 1 != new_states[i].contents.nonce);
+        if (await p_iteration_1.some(new_states, async (s) => { state_check(s, token_name_maxsize) || await base_declaration_check(s, bases, StateData); }) || nonce_check)
             return true;
         const pre_amount = base_states.reduce((sum, s) => { return sum + s.contents.amount; }, 0);
         const new_amount = new_states.reduce((sum, s) => { return sum + s.contents.amount; }, 0);
@@ -282,9 +283,9 @@ const ValidUnit = async (req_tx, ref_tx, chain, StateData) => {
             const payee = ref.meta.data.payee;
             const output = ref.meta.data.output;
             const pow_target = chain[ref.meta.data.index].meta.pow_target;
-            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target;
+            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target;
         });
-        const empty_state = StateSet.CreateState(0, [], "", {}, []);
+        const empty_state = StateSet.CreateState();
         const empty_token = StateSet.CreateToken();
         switch (type) {
             case "buy":
@@ -374,7 +375,7 @@ exports.ValidRequestTx = async (tx, my_version, native, unit, StateData, Locatio
     const solvency = tx_data.solvency;
     const token = tx_data.token;
     const base = tx_data.base;
-    const solvency_state = await StateData.get(solvency) || StateSet.CreateState(0, address, native, {}, []);
+    const solvency_state = await StateData.get(solvency) || StateSet.CreateState();
     if (!exports.ValidTxBasic(tx, my_version)) {
         return false;
     }
@@ -423,7 +424,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         raw: req_raw
     };
     const token = req_tx.meta.data.token;
-    const payee_state = await StateData.get(payee) || StateSet.CreateState(0, address, native, {}, []);
+    const payee_state = await StateData.get(payee) || StateSet.CreateState();
     const base_states = await p_iteration_1.reduce(req_tx.meta.data.base, async (result, key) => {
         const getted = await StateData.get(key);
         if (getted)
@@ -438,7 +439,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         console.log("invalid kind");
         return false;
     }
-    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target) {
+    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target) {
         console.log("invalid nonce");
         return false;
     }
@@ -567,7 +568,7 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
         output: output,
         trace: trace
     };
-    const nonce = mining(request, payee, output, target);
+    const nonce = mining(request, JSON.stringify(payee), output, target);
     const meta = {
         kind: "refresh",
         version: version,
@@ -592,10 +593,10 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
     };
     return tx;
 };
-exports.SignTx = (tx, my_pass, my_address) => {
+exports.SignTx = (tx, my_private, my_address) => {
     const addresses = tx.meta.data.address;
     const index = addresses.indexOf(my_address);
-    const sign = CryptoSet.SignData(tx.hash, my_pass);
+    const sign = CryptoSet.SignData(tx.hash, my_private);
     tx.raw.signature[index] = sign;
     return tx;
 };
@@ -633,12 +634,12 @@ exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => 
 exports.AcceptRequestTx = async (tx, my_version, native, unit, validator, index, StateData, LocationData) => {
     if (!await exports.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData))
         return [StateData, LocationData];
-    const solvency_state = await StateData.get(tx.meta.data.solvency);
-    const validator_state = await StateData.get(validator);
+    const solvency_state = await StateData.get(JSON.stringify(tx.meta.data.solvency));
+    const validator_state = await StateData.get(JSON.stringify(validator));
     const fee = _.tx_fee(tx);
     const after = exports.PayFee(solvency_state, validator_state, fee);
-    await StateData.put(after[0].hash, after[0]);
-    await StateData.put(after[1].hash, after[1]);
+    await StateData.put(JSON.stringify(after[0].contents.owner), after[0]);
+    await StateData.put(JSON.stringify(after[1].contents.owner), after[1]);
     await p_iteration_1.ForEach(tx.meta.data.base, async (key) => {
         let get_loc = await LocationData.get(key) || empty_location();
         get_loc = {
@@ -686,7 +687,7 @@ exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_
         });
         await p_iteration_1.ForEach(ref_tx.raw.raw, async (val) => {
             const state = JSON.parse(val);
-            await StateData.put(state.hash, state);
+            await StateData.put(JSON.stringify(state.contents.owner), state);
         });
         if (req_tx.meta.data.token === native && req_tx.meta.data.type === "scrap" && req_tx.raw.raw[0] === "remit") {
             const receiver = req_tx.raw.raw[1];
@@ -707,13 +708,13 @@ exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_
             }, 0);
             const remiter_state = await StateData.get(remiter);
             await StateData.delete(remiter);
-            const new_remiter = StateSet.CreateState(remiter_state.contents.amount - price_sum, remiter_state.contents.owner, remiter_state.contents.token, remiter_state.contents.data, remiter_state.contents.product);
-            await StateData.put(new_remiter.hash, new_remiter);
+            const new_remiter = StateSet.CreateState(remiter_state.contents.nonce + 1, remiter_state.contents.owner, remiter_state.contents.token, remiter_state.contents.amount - price_sum, remiter_state.contents.data, remiter_state.contents.product);
+            await StateData.put(JSON.stringify(new_remiter.contents.owner), new_remiter);
             await p_iteration_1.ForEach(sellers, async (key, i) => {
                 const pre = await StateData.get(key);
                 await StateData.delete(key);
                 const new_amount = pre.contents.amount + item_refs[i].meta.unit_price;
-                const new_state = StateSet.CreateState(new_amount, pre.contents.owner, pre.contents.token, pre.contents.data, pre.contents.product);
+                const new_state = StateSet.CreateState(pre.contents.nonce + 1, pre.contents.owner, pre.contents.token, new_amount, pre.contents.data, pre.contents.product);
                 await StateData.put(new_state.hash, new_state);
             });
             let native_info = await StateData.get(native);

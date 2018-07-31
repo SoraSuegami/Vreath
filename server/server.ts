@@ -39,7 +39,7 @@ const my_shard_id = 0;
 app.use(express.static(__dirname+'/client'));
 
 app.get('/',(req, res) => {
-    res.sendFile(__dirname + '/src/index.html');
+    res.sendFile(__dirname + '/client/index.html');
 });
 
 io.on('connect',async (socket:any)=>{

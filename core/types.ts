@@ -1,4 +1,5 @@
 export type StateContent = {
+  nonce:number;
   owner: string[];
   token: string;
   amount: number;
@@ -113,7 +114,6 @@ export type BlockMeta = {
   fraud:FraudInfo;
   pow_target:number;
   pos_diff:number;
-  validator: string;
   validatorPub: string[];
   candidates: string;
   stateroot: string;

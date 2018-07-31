@@ -5,7 +5,7 @@ import * as pj from 'prettyjson'
 import {vreath_vm_state} from './vm_class';
 import * as _ from './basic';
 import * as T from './types';
-import {VM} from 'vm2'
+import vm from 'js-vm';
 
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";
@@ -95,11 +95,13 @@ export const RunVM = async (mode:0|1|2,code:string,states:T.State[],step:number,
         const editted = edit(checked,states,gas_limit);
         const generated =  "(async ()=>{"+esc.generate(editted)+"if(!vreath_instance.flag) main();})()";
         console.log(generated);
-        const vm = new VM({
-            sandbox:{step,inputs,req_tx}
-        });
-        vm.freeze(vreath,"vreath");
-        vm.run(generated);
+        const sandbox = {
+            vreath,
+            step,
+            inputs,
+            req_tx
+        };
+        vm.runInNewContext(generated,sandbox);
         const result = vreath.state_roots;
         return result;
     }

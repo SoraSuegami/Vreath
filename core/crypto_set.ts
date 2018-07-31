@@ -1,5 +1,4 @@
 import * as crypto from 'crypto'
-import * as fs from 'fs'
 import * as secp256k1 from 'secp256k1'
 
 export const HashFromPass = (password:string)=>{
@@ -25,37 +24,18 @@ export const GenerateKeys = (password:string)=>{
   const hash = HashFromPass(password);
   const private_filename = "./keys/private/"+hash+".txt";
   const public_filename = "./keys/public/"+hash+".txt";
-  fs.writeFileSync(private_filename,crypted,'hex');
-  fs.writeFileSync(public_filename,Public.toString('hex'),'hex');
   return{
     private:Private,
     public:Public
   }
 }
 
-export const PullMyPrivate = (password:string)=>{
-  const hash = HashFromPass(password);
-  const filename = "./keys/private/"+hash+".txt";
-  const private_file = fs.readFileSync(filename,'hex');
-  const decipher = crypto.createDecipher('aes-256-cbc', password);
-  let dec = decipher.update(private_file, 'hex', 'hex');
-  dec += decipher.final('hex');
-  return dec
-}
-
-export const PullMyPublic = (password:string)=>{
-  const hash = HashFromPass(password);
-  const filename = "./keys/public/"+hash+".txt";
-  const public_file = fs.readFileSync(filename,'hex');
-  return public_file;
-}
 
 export const PublicFromPrivate = (Private:string)=>{
   return secp256k1.publicKeyCreate(Buffer.from(Private,'hex')).toString('hex');
 }
 
-export const EncryptData = (data:string,mypass:string,Public:string):string=>{
-  const Private = Buffer.from(PullMyPrivate(mypass),'hex');
+export const EncryptData = (data:string,Private:string,Public:string):string=>{
   const ecdh = crypto.createECDH('secp256k1');
   const secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
   const cipher = crypto.createCipher('aes-256-cbc', secret);
@@ -64,9 +44,8 @@ export const EncryptData = (data:string,mypass:string,Public:string):string=>{
   return crypted;
 }
 
-export const DecryptData = (data:string,mypass:string,Public:string)=>{
+export const DecryptData = (data:string,Private:string,Public:string)=>{
   try{
-  const Private = Buffer.from(PullMyPrivate(mypass),'hex');
   const ecdh = crypto.createECDH('secp256k1');
   const secret = secp256k1.ecdh(Buffer.from(Public,'hex'),Private);
   const decipher = crypto.createDecipher('aes-256-cbc', secret);
@@ -78,8 +57,7 @@ export const DecryptData = (data:string,mypass:string,Public:string)=>{
 }
 
 
-export const SignData = (data:string,password:string):string=>{
-  const Private = Buffer.from(PullMyPrivate(password),'hex');
+export const SignData = (data:string,Private:string):string=>{
   const hash = crypto.createHash("sha256").update(data).digest();
   const sign = secp256k1.sign(hash,Private);
   return sign.signature.toString('hex');

@@ -39,7 +39,7 @@ let candidates = JSON.parse(fs.readFileSync("./json/candidates.json", "utf-8")) 
 const my_shard_id = 0;
 app.use(express_1.default.static(__dirname + '/client'));
 app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/src/index.html');
+    res.sendFile(__dirname + '/client/index.html');
 });
 io.on('connect', async (socket) => {
     try {

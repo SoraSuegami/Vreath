@@ -6,13 +6,16 @@ var __importStar = (this && this.__importStar) || function (mod) {
     result["default"] = mod;
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const esp = __importStar(require("esprima"));
 const esc = __importStar(require("escodegen"));
 const est = __importStar(require("estraverse"));
 const vm_class_1 = require("./vm_class");
 const _ = __importStar(require("./basic"));
-const vm2_1 = require("vm2");
+const js_vm_1 = __importDefault(require("js-vm"));
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";
 const option = {
@@ -103,11 +106,13 @@ exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], ga
         const editted = edit(checked, states, gas_limit);
         const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath_instance.flag) main();})()";
         console.log(generated);
-        const vm = new vm2_1.VM({
-            sandbox: { step, inputs, req_tx }
-        });
-        vm.freeze(vreath, "vreath");
-        vm.run(generated);
+        const sandbox = {
+            vreath,
+            step,
+            inputs,
+            req_tx
+        };
+        js_vm_1.default.runInNewContext(generated, sandbox);
         const result = vreath.state_roots;
         return result;
     }

@@ -30,7 +30,6 @@ const empty_block = () => {
         },
         pow_target: 0,
         pos_diff: 0,
-        validator: _.toHash(""),
         validatorPub: [],
         candidates: _.toHash(""),
         stateroot: _.toHash(""),
@@ -62,7 +61,8 @@ const search_key_block = (chain) => {
 };
 const search_micro_block = async (chain, key_block, native, StateData) => {
     return await p_iteration_1.filter(chain.slice(key_block.meta.index), async (block) => {
-        const state = await StateData.get(block.meta.validator);
+        const validator = block.meta.validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
+        const state = await StateData.get(JSON.stringify(validator));
         return block.meta.kind === "micro" && block.meta.validatorPub.some((pub, i) => _.address_check(state.contents.owner[i], pub, native));
     });
 };
@@ -130,7 +130,6 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
     const fraud = meta.fraud;
     const pow_target = meta.pow_target;
     const pos_diff = meta.pos_diff;
-    const validator = meta.validator;
     const validatorPub = meta.validatorPub;
     const candidates = meta.candidates;
     const stateroot = meta.stateroot;
@@ -140,6 +139,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
     const raws = block.raws;
     const fraudData = block.fraudData;
     const last = chain[chain.length - 1];
+    const validator = JSON.stringify(validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub)));
     const validator_state = await StateData.get(validator);
     const date = new Date();
     if (_.object_hash_check(hash, meta) || _.Hex_to_Num(_.toHash(last.hash) + _.ObjectHash(validator_state.contents.owner) + timestamp) > Math.pow(2, 256) * validator_state.contents.amount / pos_diff) {
@@ -229,7 +229,6 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
     const fraud = meta.fraud;
     const pow_target = meta.pow_target;
     const pos_diff = meta.pos_diff;
-    const validator = meta.validator;
     const validatorPub = meta.validatorPub;
     const candidates = meta.candidates;
     const stateroot = meta.stateroot;
@@ -245,6 +244,7 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
     const last = chain[chain.length - 1];
     const key_block = search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
+    const validator = JSON.stringify(validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub)));
     const validator_state = await StateData.get(validator);
     const tx_roots = txs.map(t => t.hash).concat(natives.map(n => n.hash)).concat(units.map(u => u.hash));
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
@@ -330,10 +330,10 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
         return true;
     }
 };
-exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos_diff, validator, native, validatorPub, candidates, stateroot, locationroot, fraudData, StateData) => {
+exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos_diff, native, validatorPub, candidates, stateroot, locationroot, fraudData, StateData) => {
     const last = chain[chain.length - 1];
     const validator_address = validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
-    const validator_state = await StateData.get(validator) || StateSet.CreateState(0, validator_address, native, {}, []);
+    const validator_state = await StateData.get(JSON.stringify(validator_address)) || StateSet.CreateState(0, validator_address, native, 0, {}, []);
     const timestamp = PoS_mining(last.hash, validator_address, validator_state.contents.amount, pos_diff);
     const empty = empty_block();
     const meta = {
@@ -346,7 +346,6 @@ exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos
         fraud: fraud,
         pow_target: pow_target,
         pos_diff: pos_diff,
-        validator: validator,
         validatorPub: validatorPub,
         candidates: candidates,
         stateroot: stateroot,
@@ -366,7 +365,7 @@ exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos
         fraudData: fraudData,
     };
 };
-exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_diff, validator, native, candidates, stateroot, locationroot, txs, natives, units, fraudData, block_time) => {
+exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_diff, native, candidates, stateroot, locationroot, txs, natives, units, fraudData, block_time) => {
     const last = chain[chain.length - 1];
     const timestamp = Wait_block_time(last.meta.timestamp, block_time);
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
@@ -405,7 +404,6 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
         fraud: fraud,
         pow_target: pow_target,
         pos_diff: pos_diff,
-        validator: validator,
         validatorPub: [],
         candidates: candidates,
         stateroot: stateroot,
@@ -425,14 +423,11 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
         fraudData: fraudData
     };
 };
-exports.SignBlock = async (block, password, my_pub, StateData) => {
-    const states = await StateData.get(block.meta.validator);
-    if (states == null)
-        return block;
-    const index = states.contents.owner.map(add => add.split(":")[2]).indexOf(_.toHash(my_pub));
+exports.SignBlock = async (block, my_private, my_pub) => {
+    const index = block.meta.validatorPub.map(add => add.split(":")[2]).indexOf(_.toHash(my_pub));
     if (index === -1)
         return block;
-    const sign = CryptoSet.SignData(block.hash, password);
+    const sign = CryptoSet.SignData(block.hash, my_private);
     block.validatorSign[index] = sign;
     return block;
 };
@@ -461,7 +456,7 @@ const NewCandidates = async (unit, rate, StateData) => {
 };
 const check_fraud_proof = async (block, chain, code, gas_limit, StateData) => {
     const tx = _.find_tx(chain, block.meta.fraud.hash);
-    const empty_state = StateSet.CreateState(0, [], "", {}, []);
+    const empty_state = StateSet.CreateState();
     const states = await p_iteration_1.map(tx.meta.data.base, async (key) => { return await StateData.get(key) || empty_state; });
     if (block.meta.fraud.flag === false || tx === TxSet.empty_tx_pure() || tx.meta.kind != "refresh" || block.meta.fraud.step < 0 || !Number.isInteger(block.meta.fraud.step) || block.meta.fraud.step > tx.meta.data.trace.length - 1 || states.indexOf(empty_state) != -1)
         return true;
@@ -516,7 +511,8 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
         const target = txs.concat(natives).concat(units);
         const refreshed = await p_iteration_1.reduce(target, async (result, tx) => {
             if (tx.meta.kind === "request") {
-                return await TxSet.AcceptRequestTx(tx, my_version, native, unit, block.meta.validator, index, result[0], result[1]);
+                const validator = block.meta.validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
+                return await TxSet.AcceptRequestTx(tx, my_version, native, unit, validator, index, result[0], result[1]);
             }
             else if (tx.meta.kind === "refresh") {
                 return await TxSet.AcceptRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, result[0], result[1]);

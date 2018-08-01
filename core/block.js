@@ -13,6 +13,15 @@ const StateSet = __importStar(require("./state"));
 const p_iteration_1 = require("p-iteration");
 const TxSet = __importStar(require("./tx"));
 const code_1 = require("./code");
+exports.empty_fraud = () => {
+    return {
+        flag: false,
+        index: 0,
+        hash: _.toHash(""),
+        step: 0,
+        data: _.ObjectHash({ states: [], inputs: [] })
+    };
+};
 const empty_block = () => {
     const meta = {
         version: 0,
@@ -103,10 +112,16 @@ const tx_fee_sum = (pure_txs, raws) => {
 const PoS_mining = (parenthash, address, balance, difficulty) => {
     let date;
     let timestamp;
+    let i = 0;
     do {
         date = new Date();
         timestamp = date.getTime();
-    } while (_.Hex_to_Num(_.toHash(parenthash + JSON.stringify(address) + timestamp.toString())) > Math.pow(2, 256) * balance / difficulty);
+        i++;
+        if (i > 300)
+            break;
+        console.log("left:" + _.Hex_to_Num(_.toHash(parenthash + JSON.stringify(address) + timestamp.toString())));
+        console.log("right:" + Math.pow(2, 256) * balance / difficulty);
+    } while (_.Hex_to_Num(_.toHash(parenthash)) + _.Hex_to_Num(_.ObjectHash(address)) + timestamp > Math.pow(2, 256) * balance / difficulty);
     return timestamp;
 };
 const Wait_block_time = (pre, block_time) => {
@@ -139,14 +154,20 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
     const raws = block.raws;
     const fraudData = block.fraudData;
     const last = chain[chain.length - 1];
+    const right_parenthash = (() => {
+        if (last != null)
+            return last.hash;
+        else
+            return _.toHash('');
+    })();
     const validator = JSON.stringify(validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub)));
     const validator_state = await StateData.get(validator);
     const date = new Date();
-    if (_.object_hash_check(hash, meta) || _.Hex_to_Num(_.toHash(last.hash) + _.ObjectHash(validator_state.contents.owner) + timestamp) > Math.pow(2, 256) * validator_state.contents.amount / pos_diff) {
+    if (_.object_hash_check(hash, meta) || _.Hex_to_Num(_.toHash(parenthash)) + _.Hex_to_Num(_.ObjectHash(validator_state.contents.owner)) + timestamp > Math.pow(2, 256) * validator_state.contents.amount / pos_diff) {
         console.log("invalid hash");
         return false;
     }
-    else if (validator_state == null || sign.some((s, i) => _.sign_check(validator_state.contents.owner[i], native, hash, s, validatorPub[i]))) {
+    else if (validator_state == null || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
         console.log("invalid validator signature");
         return false;
     }
@@ -162,7 +183,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         console.log("invalid index");
         return false;
     }
-    else if (parenthash != last.hash) {
+    else if (parenthash != right_parenthash) {
         console.log("invalid parenthash");
         return false;
     }
@@ -174,11 +195,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         console.log("invalid validator addresses");
         return false;
     }
-    else if (validatorPub.some(pub => pub != _.toHash(""))) {
-        console.log("invalid validator public key");
-        return false;
-    }
-    else if (candidates != _.ObjectHash(right_candidates.map(can => _.ObjectHash(can)))) {
+    else if (candidates != _.ObjectHash(right_candidates)) {
         console.log("invalid candidates");
         return false;
     }
@@ -255,7 +272,7 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
         console.log("invalid hash");
         return false;
     }
-    else if (validator_state == null || sign.some((s, i) => _.sign_check(validator_state.contents.owner[i], native, hash, s, right_pub[i]))) {
+    else if (validator_state == null || sign.some((s, i) => _.sign_check(hash, s, right_pub[i]))) {
         console.log("invalid validator signature");
         return false;
     }
@@ -332,16 +349,22 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
 };
 exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos_diff, native, validatorPub, candidates, stateroot, locationroot, fraudData, StateData) => {
     const last = chain[chain.length - 1];
+    const parenthash = (() => {
+        if (last == null)
+            return _.toHash('');
+        else
+            return last.hash;
+    })();
     const validator_address = validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
     const validator_state = await StateData.get(JSON.stringify(validator_address)) || StateSet.CreateState(0, validator_address, native, 0, {}, []);
-    const timestamp = PoS_mining(last.hash, validator_address, validator_state.contents.amount, pos_diff);
+    const timestamp = PoS_mining(parenthash, validator_address, validator_state.contents.amount, pos_diff);
     const empty = empty_block();
     const meta = {
         version: version,
         shard_id: shard_id,
         kind: "key",
         index: chain.length,
-        parenthash: last.hash,
+        parenthash: parenthash,
         timestamp: timestamp,
         fraud: fraud,
         pow_target: pow_target,
@@ -436,7 +459,7 @@ const get_units = async (unit, StateData) => {
         if (val == null)
             return false;
         const state = val;
-        return state.contents.token === unit;
+        return state.contents != null && state.contents.token === unit;
     });
     return Object.values(getted);
 };
@@ -533,7 +556,7 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
             state: StateData,
             location: LocationData,
             candidates: right_candidates,
-            chain: chain.concat(block)
+            chain: chain
         };
     }
 };

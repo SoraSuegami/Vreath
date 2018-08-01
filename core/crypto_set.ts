@@ -11,8 +11,15 @@ export const HashFromPass = (password:string)=>{
   return hash;
 }
 
+export const GenerateKeys = ()=>{
+  let Private
+  do {
+    Private = crypto.randomBytes(32)
+  } while (!secp256k1.privateKeyVerify(Private));
+  return Private.toString('hex');
+}
 
-export const GenerateKeys = (password:string)=>{
+/*export const GenerateKeys = (password:string)=>{
   let Private
   do {
     Private = crypto.randomBytes(32)
@@ -28,10 +35,10 @@ export const GenerateKeys = (password:string)=>{
     private:Private,
     public:Public
   }
-}
+}*/
 
 
-export const PublicFromPrivate = (Private:string)=>{
+export const PublicFromPrivate = (Private:string):string=>{
   return secp256k1.publicKeyCreate(Buffer.from(Private,'hex')).toString('hex');
 }
 
@@ -59,7 +66,7 @@ export const DecryptData = (data:string,Private:string,Public:string)=>{
 
 export const SignData = (data:string,Private:string):string=>{
   const hash = crypto.createHash("sha256").update(data).digest();
-  const sign = secp256k1.sign(hash,Private);
+  const sign = secp256k1.sign(Buffer.from(hash),Buffer.from(Private,'hex'));
   return sign.signature.toString('hex');
 }
 

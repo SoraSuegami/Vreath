@@ -18,23 +18,30 @@ exports.HashFromPass = (password) => {
     const hash = sha256_2.digest('hex');
     return hash;
 };
-exports.GenerateKeys = (password) => {
+exports.GenerateKeys = () => {
     let Private;
     do {
         Private = crypto.randomBytes(32);
     } while (!secp256k1.privateKeyVerify(Private));
-    const Public = secp256k1.publicKeyCreate(Private);
-    const cipher = crypto.createCipher('aes-256-cbc', password);
-    let crypted = cipher.update(Private.toString('hex'), 'hex', 'hex');
-    crypted += cipher.final('hex');
-    const hash = exports.HashFromPass(password);
-    const private_filename = "./keys/private/" + hash + ".txt";
-    const public_filename = "./keys/public/" + hash + ".txt";
-    return {
-        private: Private,
-        public: Public
-    };
+    return Private.toString('hex');
 };
+/*export const GenerateKeys = (password:string)=>{
+  let Private
+  do {
+    Private = crypto.randomBytes(32)
+  } while (!secp256k1.privateKeyVerify(Private));
+  const Public = secp256k1.publicKeyCreate(Private);
+  const cipher = crypto.createCipher('aes-256-cbc', password);
+  let crypted = cipher.update(Private.toString('hex'), 'hex', 'hex');
+  crypted += cipher.final('hex');
+  const hash = HashFromPass(password);
+  const private_filename = "./keys/private/"+hash+".txt";
+  const public_filename = "./keys/public/"+hash+".txt";
+  return{
+    private:Private,
+    public:Public
+  }
+}*/
 exports.PublicFromPrivate = (Private) => {
     return secp256k1.publicKeyCreate(Buffer.from(Private, 'hex')).toString('hex');
 };
@@ -61,7 +68,7 @@ exports.DecryptData = (data, Private, Public) => {
 };
 exports.SignData = (data, Private) => {
     const hash = crypto.createHash("sha256").update(data).digest();
-    const sign = secp256k1.sign(hash, Private);
+    const sign = secp256k1.sign(Buffer.from(hash), Buffer.from(Private, 'hex'));
     return sign.signature.toString('hex');
 };
 exports.verifyData = (data, sign, Public) => {

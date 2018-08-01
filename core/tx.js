@@ -68,7 +68,7 @@ exports.empty_tx_pure = () => {
     const tx = exports.empty_tx();
     return exports.tx_to_pure(tx);
 };
-const empty_location = () => {
+exports.empty_location = () => {
     return {
         state: "yet",
         index: 0,
@@ -77,8 +77,8 @@ const empty_location = () => {
 };
 const requested_check = async (base, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
-        const getted = await LocationData.get(key) || empty_location();
-        if (getted === empty_location())
+        const getted = await LocationData.get(key) || exports.empty_location();
+        if (getted === exports.empty_location())
             return false;
         else if (getted.state == "yet")
             return false;
@@ -93,8 +93,8 @@ const hashed_pub_check = (state, pubs) => {
 };
 const refreshed_check = async (base, index, tx_hash, LocationData) => {
     return await p_iteration_1.some(base, async (key) => {
-        const getted = await LocationData.get(key) || empty_location();
-        if (getted === empty_location())
+        const getted = await LocationData.get(key) || exports.empty_location();
+        if (getted === exports.empty_location())
             return true;
         else if (getted.state == "already" && getted.index == index && getted.hash == tx_hash)
             return false;
@@ -316,12 +316,13 @@ exports.ValidTxBasic = (tx, my_version) => {
     const token = tx_data.token;
     const pub_key = tx_data.pub_key;
     const timestamp = tx_data.timestamp;
+    const input = tx_data.input;
     const log_hash = tx_data.log_hash;
     const raw = tx.raw;
     const sign = raw.signature;
     const raw_data = raw.raw;
     const log_raw = raw.log;
-    if (_.object_hash_check(hash, tx.meta)) {
+    if (_.object_hash_check(hash, tx_meta)) {
         console.log("invalid hash");
         return false;
     }
@@ -341,19 +342,15 @@ exports.ValidTxBasic = (tx, my_version) => {
         console.log("invalid address");
         return false;
     }
-    else if (pub_key.some((pub) => { return pub != _.toHash(''); })) {
-        console.log("invalid pub_key");
-        return false;
-    }
     else if (_.time_check(timestamp)) {
         console.log("invalid timestamp");
         return false;
     }
-    else if (address.some((ad, i) => { return _.sign_check(ad, token, hash, sign[i], pub_key[i]); })) {
+    else if (sign.some((s, i) => { return _.sign_check(hash, s, pub_key[i]); })) {
         console.log("invalid signature");
         return false;
     }
-    else if (raw_data.some((r, i) => { return r != _.toHash(raw_data[i]); })) {
+    else if (input.some((inp, i) => { return inp != _.toHash(raw_data[i]); })) {
         console.log("invalid input hash");
         return false;
     }
@@ -641,7 +638,7 @@ exports.AcceptRequestTx = async (tx, my_version, native, unit, validator, index,
     await StateData.put(JSON.stringify(after[0].contents.owner), after[0]);
     await StateData.put(JSON.stringify(after[1].contents.owner), after[1]);
     await p_iteration_1.ForEach(tx.meta.data.base, async (key) => {
-        let get_loc = await LocationData.get(key) || empty_location();
+        let get_loc = await LocationData.get(key) || exports.empty_location();
         get_loc = {
             state: "already",
             index: index,
@@ -693,7 +690,9 @@ exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_
             const receiver = req_tx.raw.raw[1];
             const amount = -1 * Number(req_tx.raw.raw[2]);
             let receiver_state = await StateData.get(receiver);
+            receiver_state.contents.nonce++;
             receiver_state.contents.amount += amount;
+            await StateData.put(receiver, receiver_state);
             token_info.nonce++;
             token_info.issued += amount;
         }

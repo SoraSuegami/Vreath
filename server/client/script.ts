@@ -6,12 +6,16 @@ import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import {Trie} from '../../core/merkle_patricia'
 import {Tx_to_Pool} from '../../core/tx_pool'
+import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
+import * as Genesis from '../../genesis/index'
 import Vue from 'vue'
 import AtComponents from 'at-ui'
 import VueRouter from 'vue-router'
+
 //import 'at-ui-style'
 
+(async ()=>{
 let db = level('./trie');
 
 type Roots = {
@@ -22,20 +26,37 @@ const empty_root:Roots = {
     stateroot:_.toHash(''),
     locationroot:_.toHash('')
 }
+
+localStorage.setItem("candidates",JSON.stringify([{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}]));
+
 const getted = {
     roots:localStorage.getItem('root')||JSON.stringify(empty_root),
     pool:localStorage.getItem("tx_pool")||"{}",
     chain:localStorage.getItem("blockchain")||"[]",
-    candidates:localStorage.getItem("candidates")||"[]"
+    candidates:localStorage.getItem("candidates")||JSON.stringify([{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}])
 }
+
+
+localStorage.setItem("genesis_state",JSON.stringify(Genesis.state));
 
 let roots:Roots = JSON.parse(getted.roots);
 let StateData:Trie;
 if(roots.stateroot!=_.toHash('')) StateData = new Trie(db,roots.stateroot);
-else StateData = new Trie(db);
+else{
+    StateData = new Trie(db);
+    await StateData.put(JSON.stringify(Genesis.state[0].contents.owner),Genesis.state[0]);
+    await StateData.put(JSON.stringify(Genesis.state[1].contents.owner),Genesis.state[1]);
+    await StateData.put(Genesis.state[2].token,Genesis.state[2]);
+    await StateData.put(Genesis.state[3].token,Genesis.state[3]);
+    roots.stateroot = StateData.now_root();
+}
+
 let LocationData:Trie;
 if(roots.locationroot!=_.toHash('')) LocationData = new Trie(db,roots.locationroot);
-else LocationData = new Trie(db);
+else{
+    LocationData = new Trie(db);
+    roots.locationroot = LocationData.now_root();
+}
 let pool:T.Pool = JSON.parse(getted.pool);
 let chain:T.Block[] = JSON.parse(getted.chain);
 let candidates:T.Candidates[] = JSON.parse(getted.candidates);
@@ -66,29 +87,36 @@ socket.on('block',async (msg:string)=>{
         code = localStorage.getItem("contract_modules/"+target_tx.meta.data.token) || "";
         pre_StateData = new Trie(db,chain[fraud.index].meta.stateroot);
     }
-    const checked = await BlockSet.AcceptBlock(block,chain,my_shard_id,my_version,block_time,max_blocks,block_size,candidates,roots.stateroot,roots.locationroot,code,gas_limit,native,unit,rate,token_name_maxsize,StateData,pre_StateData,LocationData);
-    StateData = checked.state;
-    LocationData = checked.location;
-    candidates = checked.candidates;
-    chain = checked.chain;
+    const accepted = await BlockSet.AcceptBlock(block,chain,my_shard_id,my_version,block_time,max_blocks,block_size,candidates,roots.stateroot,roots.locationroot,code,gas_limit,native,unit,rate,token_name_maxsize,StateData,pre_StateData,LocationData);
+    if(chain.length===accepted.chain.length){console.log("receive invalid block"); return 0;}
+    block.txs.forEach(tx=>delete pool[tx.hash]);
+    StateData = accepted.state;
+    LocationData = accepted.location;
+    candidates = accepted.candidates;
+    chain = accepted.chain;
 });
 
 type Installed = {
     name:string;
     icon:string;
-    states:string[];
     pub_keys:string[][];
     deposited:number;
+}
+const wallet:Installed = {
+    name:"wallet",
+    icon:"./vreathrogoi.jpg",
+    pub_keys:[],
+    deposited:0
 }
 const setting:Installed = {
     name:"setting",
     icon:"./setting_icon.png",
-    states:[],
     pub_keys:[],
     deposited:0
 }
-localStorage.setItem("installed_tokens",JSON.stringify([setting]));
-let installed_tokens:Installed[] = JSON.parse(localStorage.getItem("installed_tokens")||"[setting]");
+
+localStorage.setItem("installed_tokens",JSON.stringify([wallet,setting]));
+let installed_tokens:Installed[] = JSON.parse(localStorage.getItem("installed_tokens")||"[wallet,setting]");
 
 Vue.use(VueRouter)
 Vue.use(AtComponents)
@@ -106,7 +134,7 @@ const Home = {
             class="vreath_app_unit">
                 <div>
                 <at-card>
-                <router-link to="/setting">
+                <router-link v-bind:to="item.name">
                 <img v-bind:src="item.icon" width="150" height="150"/>
                 </router-link>
                 <h2 class="vreath_app_name">{{item.name}}</h2>
@@ -117,6 +145,62 @@ const Home = {
     </div>
     `
 
+}
+
+const Wallet = {
+    data:function(){
+        return{
+            from:localStorage.getItem("my_address"),
+            to:"",
+            amount:"0",
+            secret:"",
+            balance:0
+        }
+    },
+    created:async function(){
+        try{
+            const state:T.State = await StateData.get(JSON.stringify([this.from]));
+            if(state!=null){
+                this.balance = state.contents.amount;
+            }
+        }
+        catch(e){
+            console.log(e);
+        }
+    },
+    methods:{
+        remit:async function(){
+            try{
+                const pub_key:string[] = [localStorage.getItem("my_pub")]
+                const from:string[] = [this.from];
+                const to:string[] = this.to.split(',');
+                const amount = this.amount;
+                console.log(await StateData.filter());
+                const pre_tx = TxSet.CreateRequestTx(pub_key,JSON.stringify(from),10,"scrap",native,[JSON.stringify(from)],["remit",JSON.stringify(to),amount],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,10);
+                const tx = TxSet.SignTx(pre_tx,this.secret,JSON.stringify(from));
+                if(!await TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) alert("invalid infomations");
+                else{
+                    alert("remit!")
+                    socket.emit('tx', JSON.stringify(tx));
+                    pool[tx.hash] = tx;
+                }
+            }
+            catch(e){
+                console.log(e);
+            }
+        }
+    },
+    template:`
+    <div>
+        <h2>Wallet</h2>
+        <at-input placeholder="from" v-model="from"></at-input>
+        <at-input placeholder="to" v-model="to"></at-input>
+        <at-input placeholder="amount" v-model="amount"></at-input>
+        <at-input placeholder="secret" type="password" v-model="secret"></at-input>
+        <at-button v-on:click="remit">Remit</at-button>
+        <h3>Balance:{{ balance }}</h3>
+    </div>
+    `
 }
 
 const Setting = {
@@ -147,15 +231,30 @@ const Setting = {
 const Account = {
     data:function(){
         return{
-            secret:""
+            secret:CryptoSet.GenerateKeys()
         }
     },
     computed:{
-        address:function():string{
+        pub_key:function():string{
             try{
-                return CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(this.secret))
+                console.log(this.secret);
+                return CryptoSet.PublicFromPrivate(this.secret);
             }
             catch(e){return ""}
+        },
+        address:function():string{
+            if(this.pub_key==="") return "";
+            try{
+                return CryptoSet.GenereateAddress(native,this.pub_key);
+            }
+            catch(e){return ""}
+        }
+    },
+    methods:{
+        save:function(){
+            localStorage.setItem('my_secret',this.secret);
+            localStorage.setItem('my_pub',this.pub_key);
+            localStorage.setItem('my_address',this.address);
         }
     },
     template:`
@@ -163,6 +262,7 @@ const Account = {
         <h2>Account</h2>
         <at-input v-model="secret" placeholder="secret" type="passowrd" size="large" status="info"></at-input><br>
         <p>address:{{address}}</p>
+        <at-button v-on:click="save">Save</at-button>
     </div>
     `
 };
@@ -200,6 +300,7 @@ const Deposit = {
 
 let routes = [
     { path: '/', component:Home},
+    { path: '/wallet', component:Wallet},
     { path: '/setting', component:Setting,
       children: [
         { path: 'account', component: Account },
@@ -215,3 +316,4 @@ const router = new VueRouter({
 const app = new Vue({
     router: router
 }).$mount('#app')
+})()

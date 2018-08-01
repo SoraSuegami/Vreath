@@ -42,10 +42,10 @@ exports.object_hash_check = (hash, obj) => {
     return hash != exports.ObjectHash(obj);
 };
 exports.hash_size_check = (hash) => {
-    return Buffer.from(hash).length != 128;
+    return Buffer.from(hash).length != Buffer.from(exports.toHash('')).length;
 };
-exports.sign_check = (address, token, hash, signature, pub_key) => {
-    return address != CryptoSet.GenereateAddress(token, exports.toHash("")) && CryptoSet.verifyData(hash, signature, pub_key) == false;
+exports.sign_check = (hash, signature, pub_key) => {
+    return CryptoSet.verifyData(hash, signature, pub_key) == false;
 };
 exports.address_check = (address, Public, token) => {
     return address != CryptoSet.GenereateAddress(token, Public);
@@ -60,9 +60,9 @@ exports.address_form_check = (address, token_name_maxsize) => {
 };
 exports.tx_fee = (tx) => {
     const price = tx.meta.feeprice;
-    delete tx.meta.feeprice;
-    delete tx.raw.signature;
-    const target = JSON.stringify(tx.meta) + JSON.stringify(tx.raw);
+    const meta_part = Object.entries(tx.meta).filter(en => en[0] != "feeprice");
+    const raw_part = Object.entries(tx.raw).filter(en => en[0] != "signature");
+    const target = JSON.stringify(meta_part) + JSON.stringify(raw_part);
     return price * Buffer.from(target).length;
 };
 exports.find_tx = (chain, hash) => {

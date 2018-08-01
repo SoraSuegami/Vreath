@@ -1,10 +1,7 @@
-declare function require(x: string): any;
-
-import * as util from 'util'
-
-const Merkle = require('merkle-patricia-tree');
-const rlp = require('rlp');
-
+import Merkle from 'merkle-patricia-tree'
+import rlp from 'rlp'
+import {Promise} from 'es6-promise'
+import promisify from 'util.promisify'
 
 const en_key = (key:string):string=>{
   return rlp.encode(key);
@@ -30,18 +27,18 @@ export class Trie {
   }
 
   async get(key:string){
-    const result = await util.promisify(this.trie.get).bind(this.trie)(en_key(key));
+    const result = await promisify(this.trie.get).bind(this.trie)(en_key(key));
     if(result==null) return null;
     return de_value(result);
   }
 
   async put(key:string,value:any){
-    await util.promisify(this.trie.put).bind(this.trie)(en_key(key),en_value(value));
+    await promisify(this.trie.put).bind(this.trie)(en_key(key),en_value(value));
     return this.trie;
   }
 
   async delete(key:string){
-    await util.promisify(this.trie.del).bind(this.trie)(en_key(key));
+    await promisify(this.trie.del).bind(this.trie)(en_key(key));
     return this.trie;
   }
 
@@ -55,12 +52,12 @@ export class Trie {
   }
 
   async commit(){
-    await util.promisify(this.trie.commit).bind(this.trie)();
+    await promisify(this.trie.commit).bind(this.trie)();
     return this.trie;
   }
 
   async revert(){
-    await util.promisify(this.trie.revert).bind(this.trie)();
+    await promisify(this.trie.revert).bind(this.trie)();
     return this.trie;
   }
 

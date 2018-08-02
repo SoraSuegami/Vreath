@@ -76,6 +76,12 @@ export const find_tx = (chain:T.Block[],hash:string)=>{
     for(let tx of block.txs){
       if(tx.hash===hash) return tx;
     }
+    for(let tx of block.natives){
+      if(tx.hash===hash) return tx;
+    }
+    for(let tx of block.units){
+      if(tx.hash===hash) return tx;
+    }
   }
   return TxSet.empty_tx_pure();
 }

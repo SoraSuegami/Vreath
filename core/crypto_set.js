@@ -73,7 +73,7 @@ exports.SignData = (data, Private) => {
 };
 exports.verifyData = (data, sign, Public) => {
     const hash = crypto.createHash("sha256").update(data).digest();
-    const verify = secp256k1.verify(hash, Buffer.from(sign, 'hex'), Buffer.from(Public, 'hex'));
+    const verify = secp256k1.verify(Buffer.from(hash), Buffer.from(sign, 'hex'), Buffer.from(Public, 'hex'));
     return verify;
 };
 exports.GenereateAddress = (id, Public) => {

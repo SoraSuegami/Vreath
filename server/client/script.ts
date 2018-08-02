@@ -8,15 +8,17 @@ import {Trie} from '../../core/merkle_patricia'
 import {Tx_to_Pool} from '../../core/tx_pool'
 import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
+import {RunVM} from '../../core/code'
 import * as Genesis from '../../genesis/index'
 import Vue from 'vue'
 import AtComponents from 'at-ui'
 import VueRouter from 'vue-router'
-
+import {map,forEach} from 'p-iteration'
 //import 'at-ui-style'
 
 (async ()=>{
 let db = level('./trie');
+
 
 type Roots = {
     stateroot:string;
@@ -28,12 +30,14 @@ const empty_root:Roots = {
 }
 
 localStorage.setItem("candidates",JSON.stringify([{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}]));
+localStorage.setItem("codes",JSON.stringify({"native":"'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};"}))
 
 const getted = {
     roots:localStorage.getItem('root')||JSON.stringify(empty_root),
     pool:localStorage.getItem("tx_pool")||"{}",
     chain:localStorage.getItem("blockchain")||"[]",
-    candidates:localStorage.getItem("candidates")||JSON.stringify([{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}])
+    candidates:localStorage.getItem("candidates")||JSON.stringify([{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}]),
+    codes:localStorage.getItem("codes")||JSON.stringify({"native":"'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};"})
 }
 
 
@@ -60,6 +64,7 @@ else{
 let pool:T.Pool = JSON.parse(getted.pool);
 let chain:T.Block[] = JSON.parse(getted.chain);
 let candidates:T.Candidates[] = JSON.parse(getted.candidates);
+let codes = JSON.parse(getted.codes);
 
 const my_shard_id = 0;
 
@@ -69,15 +74,11 @@ const ip = "localhost";
     'force new connection':true,
     port:port
 };*/
+const pow_target = 100000000000000000000000000000000;
+const pos_diff = 10000000
+let processing:string[] = [];
 
-const socket = io.connect("http://"+ip+":"+port);
-socket.on('tx',async (msg:string)=>{
-    const tx:T.Tx = JSON.parse(msg);
-    const new_pool = await Tx_to_Pool(pool,tx,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData);
-    pool = new_pool;
-});
-
-socket.on('block',async (msg:string)=>{
+const block_accepting = async (msg:string)=>{
     const block:T.Block = JSON.parse(msg);
     let code:string = "";
     let pre_StateData:Trie = StateData;
@@ -88,12 +89,62 @@ socket.on('block',async (msg:string)=>{
         pre_StateData = new Trie(db,chain[fraud.index].meta.stateroot);
     }
     const accepted = await BlockSet.AcceptBlock(block,chain,my_shard_id,my_version,block_time,max_blocks,block_size,candidates,roots.stateroot,roots.locationroot,code,gas_limit,native,unit,rate,token_name_maxsize,StateData,pre_StateData,LocationData);
-    if(chain.length===accepted.chain.length){console.log("receive invalid block"); return 0;}
+    if(accepted.chain.length===0){console.log("receive invalid block"); return 0;}
     block.txs.forEach(tx=>delete pool[tx.hash]);
     StateData = accepted.state;
     LocationData = accepted.location;
     candidates = accepted.candidates;
-    chain = accepted.chain;
+    chain = chain.concat(accepted.chain);
+    const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
+    if(reqs_pure.length>0){
+        const reqs_raw = reqs_pure.map((req,i)=>block.raws[i]);
+        const reqs = reqs_pure.map((pure,i):T.Tx=>{
+            return{
+                hash:pure.hash,
+                meta:pure.meta,
+                raw:reqs_raw[i]
+            }
+        });
+        await forEach(reqs,async (req:T.Tx)=>{
+            const my_private = localStorage.getItem('my_secret') || "";
+            const my_public = localStorage.getItem('my_pub') || "";
+            const my_address = localStorage.getItem('my_address') || "";
+            const code = codes[req.meta.data.token];
+            const base_states:T.State[] = await map(req.meta.data.base,async (base:string)=>{return await StateData.get(base)});
+            const runed = await RunVM(0,code,base_states,0,req.raw.raw,req,[],gas_limit);
+            const output = runed.states.map(s=>JSON.stringify(s));
+            const created = TxSet.CreateRefreshTx(my_version,10,[my_public],pow_target,10,req.hash,block.meta.index,JSON.stringify([my_address]),output,runed.traced,[],chain);
+            const ref = TxSet.SignTx(created,my_private,my_address);
+            console.log(ref);
+            if(!await TxSet.ValidRefreshTx(ref,chain,my_version,native,unit,token_name_maxsize,StateData,LocationData)){console.log("fail to create valid refresh tx"); return 0;}
+            pool[ref.hash] = ref;
+            socket.emit('tx',JSON.stringify(ref));
+        })
+    }
+}
+
+const socket = io.connect("http://"+ip+":"+port);
+socket.on('tx',async (msg:string)=>{
+    const tx:T.Tx = JSON.parse(msg);
+    const new_pool = await Tx_to_Pool(pool,tx,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData);
+    pool = new_pool;
+});
+
+socket.on('block',async (msg:string)=>{
+    processing.push(msg);
+    if(processing.length===1){
+        await block_accepting(msg);
+        processing = processing.filter(p=>p!=msg);
+    }
+    else{
+        setInterval(async ()=>{
+            if(processing.length===1){
+                clearInterval();
+                await block_accepting(msg);
+                processing = processing.filter(p=>p!=msg);
+            }
+        },5000);
+    }
 });
 
 type Installed = {
@@ -151,9 +202,9 @@ const Wallet = {
     data:function(){
         return{
             from:localStorage.getItem("my_address"),
-            to:"",
-            amount:"0",
-            secret:"",
+            to:"Vr:native:1181567ccfa945016eccca505107ec3b43f9541e158f87d8c9be0a678593995d",
+            amount:"100",
+            secret:"a611b2b5da5da90b280475743675dd36444fde49d3166d614f5d9d7e1763768a",
             balance:0
         }
     },
@@ -175,9 +226,8 @@ const Wallet = {
                 const from:string[] = [this.from];
                 const to:string[] = this.to.split(',');
                 const amount = this.amount;
-                console.log(await StateData.filter());
-                const pre_tx = TxSet.CreateRequestTx(pub_key,JSON.stringify(from),10,"scrap",native,[JSON.stringify(from)],["remit",JSON.stringify(to),amount],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,10);
-                const tx = TxSet.SignTx(pre_tx,this.secret,JSON.stringify(from));
+                const pre_tx = TxSet.CreateRequestTx(pub_key,JSON.stringify(from),10,"scrap",native,[JSON.stringify(from)],["remit",JSON.stringify(to),"-"+amount],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,10);
+                const tx = TxSet.SignTx(pre_tx,this.secret,this.from);
                 if(!await TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) alert("invalid infomations");
                 else{
                     alert("remit!")

@@ -3,9 +3,10 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
-import {map,filter,reduce} from 'p-iteration'
+import {map,filter,reduce,some} from 'p-iteration'
 import * as TxSet from './tx'
 import {RunVM} from './code'
+import { token_name_maxsize } from '../server/con';
 
 export const empty_fraud = ():T.FraudInfo=>{
     return {
@@ -17,7 +18,7 @@ export const empty_fraud = ():T.FraudInfo=>{
     }
 }
 
-const empty_block = ():T.Block=>{
+export const empty_block = ():T.Block=>{
     const meta:T.BlockMeta = {
         version:0,
         shard_id:0,
@@ -126,6 +127,41 @@ const Wait_block_time = (pre:number,block_time:number)=>{
     return timestamp;
 }
 
+const txs_check = async (block:T.Block,my_version:number,native:string,unit:string,chain:T.Block[],token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+    const txs = block.txs.map((tx,i):T.Tx=>{
+        return {
+            hash:tx.hash,
+            meta:tx.meta,
+            raw:block.raws[i]
+        }
+    });
+    const natives:T.Tx[] = block.natives.map((n,i)=>{
+        return {
+            hash:n.hash,
+            meta:n.meta,
+            raw:block.raws[i]
+        }
+    });
+    const units:T.Tx[] = block.units.map((u,i)=>{
+        return {
+            hash:u.hash,
+            meta:u.meta,
+            raw:block.raws[i]
+        }
+    });
+
+    const target = txs.concat(natives).concat(units);
+    return await some(target,async (tx:T.Tx)=>{
+        if(tx.meta.kind==="request"){
+            const validator = block.meta.validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
+            return !await TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData);
+        }
+        else if(tx.meta.kind==="refresh"){
+            return !await TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,token_name_maxsize,StateData,LocationData);
+        }
+        else return true;
+    });
+}
 
 export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,StateData:Trie)=>{
     const hash = block.hash;
@@ -163,7 +199,7 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
         console.log("invalid hash");
         return false;
     }
-    else if(validator_state==null||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
+    else if(validator_state==null||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
         console.log("invalid validator signature");
         return false;
     }
@@ -187,7 +223,7 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
         console.log("invalid timestamp");
         return false;
     }
-    else if(validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
+    else if(validator_state.contents.owner.length===0||validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
         console.log("invalid validator addresses");
         return false;
     }
@@ -217,6 +253,7 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
     }
     else if(fraudData.states.length!=0&&fraudData.inputs.length!=0&&_.object_hash_check(fraud.data,fraudData)){
         console.log("invalid fraudData");
+        return false;
     }
     else if(Buffer.from(JSON.stringify(meta)+JSON.stringify(block.txs)+JSON.stringify(block.natives)+JSON.stringify(block.units)+JSON.stringify(raws)).length>block_size){
         console.log("too big block");
@@ -231,7 +268,7 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
     }
 }
 
-export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,unit:string,StateData:Trie)=>{
+export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,unit:string,StateData:Trie,LocationData:Trie)=>{
     const hash = block.hash;
     const sign = block.validatorSign;
     const meta:T.BlockMeta = block.meta;
@@ -257,6 +294,10 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
 
     const empty = empty_block();
     const last = chain[chain.length-1];
+    const right_parenthash = (()=>{
+        if(last!=null) return last.hash;
+        else return _.toHash('');
+    })();
     const key_block = search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
 
@@ -275,7 +316,7 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
         console.log("invalid hash");
         return false;
     }
-    else if(validator_state==null||sign.some((s,i)=>_.sign_check(hash,s,right_pub[i]))){
+    else if(validator_state==null||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
         console.log("invalid validator signature");
         return false;
     }
@@ -291,23 +332,23 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
         console.log("invalid index");
         return false;
     }
-    else if(parenthash!=last.hash){
+    else if(parenthash!=right_parenthash){
         console.log("invalid parenthash");
         return false;
     }
-    else if(_.time_check(timestamp)&&now-last.meta.timestamp<block_time){
+    else if(last==null||_.time_check(timestamp)&&now-last.meta.timestamp<block_time){
         console.log("invalid timestamp");
         return false;
     }
-    else if(validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
+    else if(validator_state.contents.owner.length===0||validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
         console.log("invalid validator addresses");
         return false;
     }
-    else if(validatorPub!=empty.meta.validatorPub){
+    else if(_.ObjectHash(validatorPub)!=_.ObjectHash(right_pub)){
         console.log("invalid validator public key");
         return false;
     }
-    else if(candidates!=_.ObjectHash(right_candidates.map(can=>_.ObjectHash(can)))){
+    else if(candidates!=_.ObjectHash(right_candidates)){
         console.log("invalid candidates");
         return false;
     }
@@ -333,6 +374,7 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     }
     else if(fraudData.states.length!=0&&fraudData.inputs.length!=0&&_.object_hash_check(fraud.data,fraudData)){
         console.log("invalid fraudData");
+        return false;
     }
     else if(Buffer.from(JSON.stringify(meta)+JSON.stringify(txs)+JSON.stringify(natives)+JSON.stringify(units)+JSON.stringify(raws)).length>block_size){
         console.log("too big block");
@@ -340,6 +382,10 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     }
     else if(already_micro.length+1>max_blocks){
         console.log("too many micro blocks");
+        return false;
+    }
+    else if(await txs_check(block,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData)){
+        console.log("invalid txs");
         return false;
     }
     else if(txs.some(tx=>tx.meta.data.token===native||tx.meta.data.token===unit)){
@@ -391,35 +437,14 @@ export const CreateKeyBlock = async (version:number,shard_id:number,chain:T.Bloc
     }
 }
 
-export const CreateMicroBlock = (version:number,shard_id:number,chain:T.Block[],fraud:T.FraudInfo,pow_target:number,pos_diff:number,native:string,candidates:string,stateroot:string,locationroot:string,txs:T.Tx[],natives:T.Tx[],units:T.Tx[],fraudData:T.FraudData,block_time:number):T.Block=>{
+export const CreateMicroBlock = (version:number,shard_id:number,chain:T.Block[],fraud:T.FraudInfo,pow_target:number,pos_diff:number,validatorPub:string[],candidates:string,stateroot:string,locationroot:string,txs:T.Tx[],natives:T.Tx[],units:T.Tx[],fraudData:T.FraudData,block_time:number):T.Block=>{
     const last = chain[chain.length-1];
     const timestamp = Wait_block_time(last.meta.timestamp,block_time);
     const pures:T.TxPure[] = txs.map(tx=>{return {hash:tx.hash,meta:tx.meta}}).concat(natives.map(n=>{return {hash:n.hash,meta:n.meta}})).concat(units.map(u=>{return {hash:u.hash,meta:u.meta}}));
     const raws:T.TxRaw[] = txs.map(tx=>tx.raw).concat(natives.map(n=>n.raw)).concat(units.map(u=>u.raw));
-    const tx_root = GetTreeroot(pures.map(p=>p.hash))[0];
+    const tx_root = GetTreeroot(txs.map(t=>t.hash).concat(natives.map(n=>n.hash)).concat(units.map(u=>u.hash)))[0];
     const fee_sum = tx_fee_sum(pures,raws);
-    const natives_reduced = natives.reduce((result:T.Tx[],tx):T.Tx[]=>{
-        let copy = tx;
-        if(tx.meta.kind==="request"){
-            copy.meta.kind==="refresh";
-            return result.concat([tx,copy]);
-        }
-        else{
-            copy.meta.kind==="request";
-            return result.concat([copy,tx]);
-        }
-    },[]);
-    const units_reduced = units.reduce((result:T.Tx[],tx):T.Tx[]=>{
-        let copy = tx;
-        if(tx.meta.kind==="request"){
-            copy.meta.kind==="refresh";
-            return result.concat([tx,copy]);
-        }
-        else{
-            copy.meta.kind==="request";
-            return result.concat([copy,tx]);
-        }
-    },[]);
+
     const meta:T.BlockMeta = {
         version:version,
         shard_id:shard_id,
@@ -430,7 +455,7 @@ export const CreateMicroBlock = (version:number,shard_id:number,chain:T.Block[],
         fraud:fraud,
         pow_target:pow_target,
         pos_diff:pos_diff,
-        validatorPub:[],
+        validatorPub:validatorPub,
         candidates:candidates,
         stateroot:stateroot,
         locationroot:locationroot,
@@ -442,16 +467,16 @@ export const CreateMicroBlock = (version:number,shard_id:number,chain:T.Block[],
         hash:hash,
         validatorSign:[],
         meta:meta,
-        txs:pures,
-        natives:natives_reduced,
-        units:units_reduced,
+        txs:txs.map(t=>TxSet.tx_to_pure(t)),
+        natives:natives.map(n=>TxSet.tx_to_pure(n)),
+        units:units.map(u=>TxSet.tx_to_pure(u)),
         raws:raws,
         fraudData:fraudData
     }
 }
 
 export const SignBlock = async (block:T.Block,my_private:string,my_pub:string)=>{
-    const index = block.meta.validatorPub.map(add=>add.split(":")[2]).indexOf(_.toHash(my_pub));
+    const index = block.meta.validatorPub.indexOf(my_pub);
     if(index===-1) return block;
     const sign = CryptoSet.SignData(block.hash,my_private);
     block.validatorSign[index] = sign;
@@ -493,8 +518,8 @@ const check_fraud_proof = async (block:T.Block,chain:T.Block[],code:string,gas_l
     const this_block = chain[tx.meta.data.index];
     const req = this_block.txs.filter(t=>t.hash===tx.meta.data.request)[0];
     const inputs = this_block.raws[this_block.txs.indexOf(req)].raw;
-    const result:string[] = await RunVM(2,code,states,block.meta.fraud.step,inputs,req,tx.meta.data.trace,gas_limit);
-    if(result!=tx.meta.data.trace) return true;
+    const result = await RunVM(2,code,states,block.meta.fraud.step,inputs,req,tx.meta.data.trace,gas_limit);
+    if(result.traced!=tx.meta.data.trace) return true;
     return false;
 }
 
@@ -513,10 +538,10 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
             state:StateData,
             location:LocationData,
             candidates:new_candidates,
-            chain:chain.concat(block)
+            chain:[block]
         }
     }
-    else if(block.meta.kind==="micro"&&await ValidMicroBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,unit,StateData)&&(block.meta.fraud.flag===false||await check_fraud_proof(block,chain,code,gas_limit,StateData))){
+    else if(block.meta.kind==="micro"&&await ValidMicroBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,unit,StateData,LocationData)&&(block.meta.fraud.flag===false||await check_fraud_proof(block,chain,code,gas_limit,StateData))){
         const txs = block.txs.map((tx,i):T.Tx=>{
             return {
                 hash:tx.hash,
@@ -543,10 +568,10 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
         const refreshed:Trie[] = await reduce(target, async (result:Trie[],tx:T.Tx)=>{
             if(tx.meta.kind==="request"){
                 const validator = block.meta.validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
-                return await TxSet.AcceptRequestTx(tx,my_version,native,unit,validator,index,result[0],result[1]);
+                return await TxSet.AcceptRequestTx(tx,validator,index,result[0],result[1]);
             }
             else if(tx.meta.kind==="refresh"){
-                return await TxSet.AcceptRefreshTx(tx,chain,my_version,native,unit,token_name_maxsize,result[0],result[1]);
+                return await TxSet.AcceptRefreshTx(tx,chain,native,unit,result[0],result[1]);
             }
             else return result;
         },[StateData,LocationData]);
@@ -555,7 +580,7 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
             state:refreshed[0],
             location:refreshed[1],
             candidates:new_candidates,
-            chain:chain.concat(block)
+            chain:[block]
         }
     }
     else{
@@ -563,7 +588,7 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
             state:StateData,
             location:LocationData,
             candidates:right_candidates,
-            chain:chain
+            chain:[]
         }
     }
 }

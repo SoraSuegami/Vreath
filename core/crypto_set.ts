@@ -73,7 +73,7 @@ export const SignData = (data:string,Private:string):string=>{
 
 export const verifyData = (data:string,sign:string,Public:string)=>{
   const hash = crypto.createHash("sha256").update(data).digest();
-  const verify = secp256k1.verify(hash,Buffer.from(sign,'hex'),Buffer.from(Public,'hex'));
+  const verify = secp256k1.verify(Buffer.from(hash),Buffer.from(sign,'hex'),Buffer.from(Public,'hex'));
   return verify
 }
 

@@ -14,9 +14,9 @@ class vreath_vm_state {
         this._gas_limit = _gas_limit;
         this._finish_flag = _finish_flag;
         this._traced = _traced;
+        this._gas_sum = 0;
         this._state_roots = [];
         this._states = _states;
-        this._gas_sum = 0;
         this._gas_limit = _gas_limit;
         this._finish_flag = _finish_flag;
         this._traced = _traced;
@@ -37,8 +37,8 @@ class vreath_vm_state {
     }
     _refresh_roots() {
         this._gas_sum = 0;
-        const hash_map = this._states.map(s => s.hash);
-        this._state_roots.push(_.ObjectHash(this._states));
+        const hashed = this._states.map(s => _.ObjectHash(s));
+        this._state_roots.push(_.ObjectHash(hashed));
         this._check_traced();
     }
     get states() {
@@ -76,8 +76,9 @@ class vreath_vm_state {
         });
         this._refresh_roots();
     }
-    create_state(owner, token, amount, data, product) {
+    create_state(nonce, owner, token, amount, data, product) {
         const contents = {
+            nonce: nonce,
             owner: owner,
             token: token,
             amount: amount,
@@ -92,21 +93,3 @@ class vreath_vm_state {
     }
 }
 exports.vreath_vm_state = vreath_vm_state;
-class vreath_vm_run {
-    constructor(_code) {
-        this._code = _code;
-        this.finish_flag = true;
-        this._code = code;
-    }
-    end() {
-        this.finish_flag = false;
-    }
-    run(_vreath_state) {
-        const vreath_state = _vreath_state;
-        if (this.finish_flag) {
-            this.run(vreath_state);
-        }
-        return vreath_state.state_roots;
-    }
-}
-exports.vreath_vm_run = vreath_vm_run;

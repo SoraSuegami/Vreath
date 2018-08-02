@@ -73,6 +73,14 @@ exports.find_tx = (chain, hash) => {
             if (tx.hash === hash)
                 return tx;
         }
+        for (let tx of block.natives) {
+            if (tx.hash === hash)
+                return tx;
+        }
+        for (let tx of block.units) {
+            if (tx.hash === hash)
+                return tx;
+        }
     }
     return TxSet.empty_tx_pure();
 };

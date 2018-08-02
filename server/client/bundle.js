@@ -169,6 +169,14 @@ exports.find_tx = (chain, hash) => {
             if (tx.hash === hash)
                 return tx;
         }
+        for (let tx of block.natives) {
+            if (tx.hash === hash)
+                return tx;
+        }
+        for (let tx of block.units) {
+            if (tx.hash === hash)
+                return tx;
+        }
     }
     return TxSet.empty_tx_pure();
 };
@@ -200,6 +208,7 @@ const StateSet = __importStar(__webpack_require__(/*! ./state */ "./core/state.j
 const p_iteration_1 = __webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js");
 const TxSet = __importStar(__webpack_require__(/*! ./tx */ "./core/tx.js"));
 const code_1 = __webpack_require__(/*! ./code */ "./core/code.js");
+const con_1 = __webpack_require__(/*! ../server/con */ "./server/con.js");
 exports.empty_fraud = () => {
     return {
         flag: false,
@@ -209,7 +218,7 @@ exports.empty_fraud = () => {
         data: _.ObjectHash({ states: [], inputs: [] })
     };
 };
-const empty_block = () => {
+exports.empty_block = () => {
     const meta = {
         version: 0,
         shard_id: 0,
@@ -253,7 +262,7 @@ const search_key_block = (chain) => {
         if (block.meta.kind === "key")
             return block;
     }
-    return empty_block();
+    return exports.empty_block();
 };
 const search_micro_block = async (chain, key_block, native, StateData) => {
     return await p_iteration_1.filter(chain.slice(key_block.meta.index), async (block) => {
@@ -320,6 +329,41 @@ const Wait_block_time = (pre, block_time) => {
     } while (timestamp - pre < block_time);
     return timestamp;
 };
+const txs_check = async (block, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
+    const txs = block.txs.map((tx, i) => {
+        return {
+            hash: tx.hash,
+            meta: tx.meta,
+            raw: block.raws[i]
+        };
+    });
+    const natives = block.natives.map((n, i) => {
+        return {
+            hash: n.hash,
+            meta: n.meta,
+            raw: block.raws[i]
+        };
+    });
+    const units = block.units.map((u, i) => {
+        return {
+            hash: u.hash,
+            meta: u.meta,
+            raw: block.raws[i]
+        };
+    });
+    const target = txs.concat(natives).concat(units);
+    return await p_iteration_1.some(target, async (tx) => {
+        if (tx.meta.kind === "request") {
+            const validator = block.meta.validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
+            return !await TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
+        }
+        else if (tx.meta.kind === "refresh") {
+            return !await TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData);
+        }
+        else
+            return true;
+    });
+};
 exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, StateData) => {
     const hash = block.hash;
     const sign = block.validatorSign;
@@ -354,7 +398,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         console.log("invalid hash");
         return false;
     }
-    else if (validator_state == null || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
+    else if (validator_state == null || sign.length === 0 || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
         console.log("invalid validator signature");
         return false;
     }
@@ -378,7 +422,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         console.log("invalid timestamp");
         return false;
     }
-    else if (validator_state.contents.owner.some((add, i) => _.address_check(add, validatorPub[i], native))) {
+    else if (validator_state.contents.owner.length === 0 || validator_state.contents.owner.some((add, i) => _.address_check(add, validatorPub[i], native))) {
         console.log("invalid validator addresses");
         return false;
     }
@@ -408,6 +452,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
     }
     else if (fraudData.states.length != 0 && fraudData.inputs.length != 0 && _.object_hash_check(fraud.data, fraudData)) {
         console.log("invalid fraudData");
+        return false;
     }
     else if (Buffer.from(JSON.stringify(meta) + JSON.stringify(block.txs) + JSON.stringify(block.natives) + JSON.stringify(block.units) + JSON.stringify(raws)).length > block_size) {
         console.log("too big block");
@@ -421,7 +466,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         return true;
     }
 };
-exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, unit, StateData) => {
+exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, unit, StateData, LocationData) => {
     const hash = block.hash;
     const sign = block.validatorSign;
     const meta = block.meta;
@@ -444,8 +489,14 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
     const units = block.units;
     const raws = block.raws;
     const fraudData = block.fraudData;
-    const empty = empty_block();
+    const empty = exports.empty_block();
     const last = chain[chain.length - 1];
+    const right_parenthash = (() => {
+        if (last != null)
+            return last.hash;
+        else
+            return _.toHash('');
+    })();
     const key_block = search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
     const validator = JSON.stringify(validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub)));
@@ -459,7 +510,7 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
         console.log("invalid hash");
         return false;
     }
-    else if (validator_state == null || sign.some((s, i) => _.sign_check(hash, s, right_pub[i]))) {
+    else if (validator_state == null || sign.length === 0 || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
         console.log("invalid validator signature");
         return false;
     }
@@ -475,23 +526,23 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
         console.log("invalid index");
         return false;
     }
-    else if (parenthash != last.hash) {
+    else if (parenthash != right_parenthash) {
         console.log("invalid parenthash");
         return false;
     }
-    else if (_.time_check(timestamp) && now - last.meta.timestamp < block_time) {
+    else if (last == null || _.time_check(timestamp) && now - last.meta.timestamp < block_time) {
         console.log("invalid timestamp");
         return false;
     }
-    else if (validator_state.contents.owner.some((add, i) => _.address_check(add, validatorPub[i], native))) {
+    else if (validator_state.contents.owner.length === 0 || validator_state.contents.owner.some((add, i) => _.address_check(add, validatorPub[i], native))) {
         console.log("invalid validator addresses");
         return false;
     }
-    else if (validatorPub != empty.meta.validatorPub) {
+    else if (_.ObjectHash(validatorPub) != _.ObjectHash(right_pub)) {
         console.log("invalid validator public key");
         return false;
     }
-    else if (candidates != _.ObjectHash(right_candidates.map(can => _.ObjectHash(can)))) {
+    else if (candidates != _.ObjectHash(right_candidates)) {
         console.log("invalid candidates");
         return false;
     }
@@ -517,6 +568,7 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
     }
     else if (fraudData.states.length != 0 && fraudData.inputs.length != 0 && _.object_hash_check(fraud.data, fraudData)) {
         console.log("invalid fraudData");
+        return false;
     }
     else if (Buffer.from(JSON.stringify(meta) + JSON.stringify(txs) + JSON.stringify(natives) + JSON.stringify(units) + JSON.stringify(raws)).length > block_size) {
         console.log("too big block");
@@ -524,6 +576,10 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
     }
     else if (already_micro.length + 1 > max_blocks) {
         console.log("too many micro blocks");
+        return false;
+    }
+    else if (await txs_check(block, my_version, native, unit, chain, con_1.token_name_maxsize, StateData, LocationData)) {
+        console.log("invalid txs");
         return false;
     }
     else if (txs.some(tx => tx.meta.data.token === native || tx.meta.data.token === unit)) {
@@ -545,7 +601,7 @@ exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos
     const validator_address = validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
     const validator_state = await StateData.get(JSON.stringify(validator_address)) || StateSet.CreateState(0, validator_address, native, 0, {}, []);
     const timestamp = PoS_mining(parenthash, validator_address, validator_state.contents.amount, pos_diff);
-    const empty = empty_block();
+    const empty = exports.empty_block();
     const meta = {
         version: version,
         shard_id: shard_id,
@@ -575,35 +631,13 @@ exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos
         fraudData: fraudData,
     };
 };
-exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_diff, native, candidates, stateroot, locationroot, txs, natives, units, fraudData, block_time) => {
+exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_diff, validatorPub, candidates, stateroot, locationroot, txs, natives, units, fraudData, block_time) => {
     const last = chain[chain.length - 1];
     const timestamp = Wait_block_time(last.meta.timestamp, block_time);
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
     const raws = txs.map(tx => tx.raw).concat(natives.map(n => n.raw)).concat(units.map(u => u.raw));
-    const tx_root = exports.GetTreeroot(pures.map(p => p.hash))[0];
+    const tx_root = exports.GetTreeroot(txs.map(t => t.hash).concat(natives.map(n => n.hash)).concat(units.map(u => u.hash)))[0];
     const fee_sum = tx_fee_sum(pures, raws);
-    const natives_reduced = natives.reduce((result, tx) => {
-        let copy = tx;
-        if (tx.meta.kind === "request") {
-            copy.meta.kind === "refresh";
-            return result.concat([tx, copy]);
-        }
-        else {
-            copy.meta.kind === "request";
-            return result.concat([copy, tx]);
-        }
-    }, []);
-    const units_reduced = units.reduce((result, tx) => {
-        let copy = tx;
-        if (tx.meta.kind === "request") {
-            copy.meta.kind === "refresh";
-            return result.concat([tx, copy]);
-        }
-        else {
-            copy.meta.kind === "request";
-            return result.concat([copy, tx]);
-        }
-    }, []);
     const meta = {
         version: version,
         shard_id: shard_id,
@@ -614,7 +648,7 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
         fraud: fraud,
         pow_target: pow_target,
         pos_diff: pos_diff,
-        validatorPub: [],
+        validatorPub: validatorPub,
         candidates: candidates,
         stateroot: stateroot,
         locationroot: locationroot,
@@ -626,15 +660,15 @@ exports.CreateMicroBlock = (version, shard_id, chain, fraud, pow_target, pos_dif
         hash: hash,
         validatorSign: [],
         meta: meta,
-        txs: pures,
-        natives: natives_reduced,
-        units: units_reduced,
+        txs: txs.map(t => TxSet.tx_to_pure(t)),
+        natives: natives.map(n => TxSet.tx_to_pure(n)),
+        units: units.map(u => TxSet.tx_to_pure(u)),
         raws: raws,
         fraudData: fraudData
     };
 };
 exports.SignBlock = async (block, my_private, my_pub) => {
-    const index = block.meta.validatorPub.map(add => add.split(":")[2]).indexOf(_.toHash(my_pub));
+    const index = block.meta.validatorPub.indexOf(my_pub);
     if (index === -1)
         return block;
     const sign = CryptoSet.SignData(block.hash, my_private);
@@ -674,7 +708,7 @@ const check_fraud_proof = async (block, chain, code, gas_limit, StateData) => {
     const req = this_block.txs.filter(t => t.hash === tx.meta.data.request)[0];
     const inputs = this_block.raws[this_block.txs.indexOf(req)].raw;
     const result = await code_1.RunVM(2, code, states, block.meta.fraud.step, inputs, req, tx.meta.data.trace, gas_limit);
-    if (result != tx.meta.data.trace)
+    if (result.traced != tx.meta.data.trace)
         return true;
     return false;
 };
@@ -693,10 +727,10 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
             state: StateData,
             location: LocationData,
             candidates: new_candidates,
-            chain: chain.concat(block)
+            chain: [block]
         };
     }
-    else if (block.meta.kind === "micro" && await exports.ValidMicroBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, unit, StateData) && (block.meta.fraud.flag === false || await check_fraud_proof(block, chain, code, gas_limit, StateData))) {
+    else if (block.meta.kind === "micro" && await exports.ValidMicroBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, unit, StateData, LocationData) && (block.meta.fraud.flag === false || await check_fraud_proof(block, chain, code, gas_limit, StateData))) {
         const txs = block.txs.map((tx, i) => {
             return {
                 hash: tx.hash,
@@ -722,10 +756,10 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
         const refreshed = await p_iteration_1.reduce(target, async (result, tx) => {
             if (tx.meta.kind === "request") {
                 const validator = block.meta.validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
-                return await TxSet.AcceptRequestTx(tx, my_version, native, unit, validator, index, result[0], result[1]);
+                return await TxSet.AcceptRequestTx(tx, validator, index, result[0], result[1]);
             }
             else if (tx.meta.kind === "refresh") {
-                return await TxSet.AcceptRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, result[0], result[1]);
+                return await TxSet.AcceptRefreshTx(tx, chain, native, unit, result[0], result[1]);
             }
             else
                 return result;
@@ -735,7 +769,7 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
             state: refreshed[0],
             location: refreshed[1],
             candidates: new_candidates,
-            chain: chain.concat(block)
+            chain: [block]
         };
     }
     else {
@@ -743,7 +777,7 @@ exports.AcceptBlock = async (block, chain, my_shard_id, my_version, block_time, 
             state: StateData,
             location: LocationData,
             candidates: right_candidates,
-            chain: chain
+            chain: []
         };
     }
 };
@@ -776,7 +810,6 @@ const esp = __importStar(__webpack_require__(/*! esprima */ "./node_modules/espr
 const esc = __importStar(__webpack_require__(/*! escodegen */ "./node_modules/escodegen/escodegen.js"));
 const est = __importStar(__webpack_require__(/*! estraverse */ "./node_modules/estraverse/estraverse.js"));
 const vm_class_1 = __webpack_require__(/*! ./vm_class */ "./core/vm_class.js");
-const _ = __importStar(__webpack_require__(/*! ./basic */ "./core/basic.js"));
 const js_vm_1 = __importDefault(__webpack_require__(/*! js-vm */ "./node_modules/js-vm/dist/js-vm.js"));
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";
@@ -825,10 +858,10 @@ const check = (parsed, identifier = [], dependence = {}) => {
         leave: (node, parent) => {
             if (node.type === "Identifier" && identifier.indexOf(node.name) === -1)
                 throw new Error(node.name + " is not declared!");
-            else if (node.type === "CallExpression" && identifier.indexOf(node.callee.name) === -1) {
+            else if (node.type === "CallExpression" && node.callee.name != null && identifier.indexOf(node.callee.name) === -1) {
                 throw new Error(node.name + " is not declared!");
             }
-            else if (node.type === "MemberExpression" && (dependence[node.object.name] == null || dependence[node.object.name].indexOf(node.property.name) === -1)) {
+            else if (node.type === "MemberExpression" && node.object != null && node.object.name != null && node.property != null && node.property.name != null && (dependence[node.object.name] == null || dependence[node.object.name].indexOf(node.property.name) === -1)) {
                 throw new Error(node.object.name + " doesn't have property " + node.property.name);
             }
         }
@@ -836,9 +869,9 @@ const check = (parsed, identifier = [], dependence = {}) => {
     return parsed;
 };
 const edit = (editted, states, gas_limit) => {
-    const vreath_class = esp.parse(vm_class_1.vreath_vm_state.toString() + "const vreath_instance = new vreath_vm_state([],10);").body;
-    const call_gas_checker = esp.parse("vreath_instance.gas_check();").body[0];
-    const call_main = esp.parse("if(vreath_instance.flag) ");
+    //const vreath_class = esp.parse(vreath_vm_state.toString()+"const vreath_instance = new vreath_vm_state([],"+gas_limit+");").body;
+    const call_gas_checker = esp.parse("vreath.gas_check();").body[0];
+    //const call_main = esp.parse("if(vreath_instance.flag) main();");
     est.traverse(editted, {
         enter: (node, parent) => {
             if (node.hasOwnProperty("body") && Array.isArray(node.body)) {
@@ -852,7 +885,8 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], gas_limit) => {
+exports.RunVM = async (mode, code, states, step, input, tx, traced = [], gas_limit) => {
+    const ori_states = JSON.stringify(states);
     const vreath = (() => {
         switch (mode) {
             case 0:
@@ -864,27 +898,43 @@ exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], ga
         }
     })();
     try {
-        const checked = check(esp.parse(code));
-        const editted = edit(checked, states, gas_limit);
-        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath_instance.flag) main();})()";
+        const identifier = ["vreath", "step", "input", "tx", "Number"];
+        const dependence = {
+            "vreath": ["gas_check", "end", "states", "gas_sum", "flag", "state_roots", "add_states", "change_states", "delete_states", "create_state"],
+            "tx": ["hash", "meta", "raw"],
+            "state": ["hash", "contents"]
+        };
+        const checked = check(esp.parse(code), identifier, dependence);
+        const editted = edit(checked, JSON.parse(ori_states), gas_limit);
+        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath.flag) main();})()";
         console.log(generated);
         const sandbox = {
             vreath,
             step,
-            inputs,
-            req_tx
+            input,
+            tx
         };
         js_vm_1.default.runInNewContext(generated, sandbox);
-        const result = vreath.state_roots;
-        return result;
+        const states = vreath.states;
+        const traced = vreath.state_roots;
+        return {
+            states: states,
+            traced: traced
+        };
     }
     catch (e) {
         console.log(e);
         if ((mode === 1 || mode == 2) && e.split("TraceError:").length == 2) {
             const step = Number(e.split("TraceError:")[1]);
-            return vreath.state_roots.slice(0, -2);
+            return {
+                states: vreath.states,
+                traced: vreath.state_roots.slice(0, -2)
+            };
         }
-        return [_.ObjectHash(states)];
+        return {
+            states: vreath.states,
+            traced: vreath.state_roots
+        };
     }
 };
 (async () => {
@@ -977,7 +1027,7 @@ exports.SignData = (data, Private) => {
 };
 exports.verifyData = (data, sign, Public) => {
     const hash = crypto.createHash("sha256").update(data).digest();
-    const verify = secp256k1.verify(hash, Buffer.from(sign, 'hex'), Buffer.from(Public, 'hex'));
+    const verify = secp256k1.verify(Buffer.from(hash), Buffer.from(sign, 'hex'), Buffer.from(Public, 'hex'));
     return verify;
 };
 exports.GenereateAddress = (id, Public) => {
@@ -1354,9 +1404,9 @@ const search_related_raw = (chain, hash, order, caller_hash) => {
     }
     return exports.empty_tx().raw;
 };
-const ValidNative = async (req_tx, ref_tx, chain, StateData) => {
+const ValidNative = async (req_tx, ref_tx, base_state, chain, StateData) => {
     try {
-        const base_state = await StateData.get(req_tx.meta.data.base[0]);
+        console.log(base_state);
         const new_state = JSON.parse(ref_tx.raw.raw[0]);
         if (base_state == null || new_state == null)
             return true;
@@ -1373,22 +1423,24 @@ const ValidNative = async (req_tx, ref_tx, chain, StateData) => {
         })(base_state);
         switch (type) {
             case "remit":
-                return req_tx.meta.data.type != "scrap" || base_state.contents.owner != req_tx.meta.data.address || new_state.contents.amount - base_state.contents.amount != amount || valid_state != new_state || amount <= 0;
+                console.log(new_state.contents.amount - base_state.contents.amount);
+                console.log(amount);
+                return req_tx.meta.data.type != "scrap" || base_state.contents.owner != req_tx.meta.data.address || new_state.contents.amount - base_state.contents.amount != amount || valid_state != new_state || amount >= 0;
             case "deposit":
-                if (req_tx.meta.data.type != "scrap" || base_state.contents.owner != req_tx.meta.data.address || amount > 0 || new_state.contents.amount - base_state.contents.amount != amount || req_tx.meta.next.flag != true || valid_state != new_state)
+                if (req_tx.meta.data.type != "scrap" || base_state.contents.owner != req_tx.meta.data.address || amount >= 0 || new_state.contents.amount - base_state.contents.amount != amount || req_tx.meta.next.flag != true || valid_state != new_state)
                     return true;
                 const depo_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
                 const depo_raw = search_related_raw(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
                 const depo_token_info = JSON.parse(depo_raw.raw[0]) || empty_token;
-                return !(depo_meta.data.type === "update" && depo_token_info != empty_token && depo_token_info.token === req_tx.meta.data.token && amount + depo_token_info.deposited === 0 && other === depo_token_info.token && valid_state.contents.amount >= 0);
+                return !(depo_meta.data.type === "update" && depo_token_info != empty_token && depo_token_info.token === req_tx.meta.data.token && amount + depo_token_info.deposited === 0 && other === depo_token_info.token && valid_state.contents.amount > 0);
             case "withdrawal":
-                if (req_tx.meta.data.type != "issue" || base_state.contents.owner != req_tx.meta.data.address || amount < 0 || new_state.contents.amount - base_state.contents.amount != amount || req_tx.meta.pre.flag != true || valid_state != new_state)
+                if (req_tx.meta.data.type != "issue" || base_state.contents.owner != req_tx.meta.data.address || amount <= 0 || new_state.contents.amount - base_state.contents.amount != amount || req_tx.meta.pre.flag != true || valid_state != new_state)
                     return true;
                 const with_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
                 const with_raw = search_related_raw(chain, req_tx.meta.next.hash, 'next', req_tx.meta.purehash);
                 const with_token_info = JSON.parse(with_raw.raw[0]) || empty_token;
                 const pre_token_info = await StateData.get(with_token_info.token) || empty_token;
-                return !(with_meta.data.type === "update" && with_token_info != empty_token && pre_token_info != empty_token && with_token_info.token === req_tx.meta.data.token && amount + with_token_info.deposited === 0 && other === with_token_info.token && valid_state.contents.amount >= 0 && pre_token_info.deposited - amount >= 0);
+                return !(with_meta.data.type === "update" && with_token_info != empty_token && pre_token_info != empty_token && with_token_info.token === req_tx.meta.data.token && amount + with_token_info.deposited === 0 && other === with_token_info.token && valid_state.contents.amount > 0 && pre_token_info.deposited - amount > 0);
             default:
                 return true;
         }
@@ -1477,7 +1529,7 @@ exports.ValidTxBasic = (tx, my_version) => {
         console.log("invalid hash size");
         return false;
     }
-    else if (address.some((add, i) => { return _.address_check(add, pub_key[i], token); })) {
+    else if (address.length === 0 || address.some((add, i) => { return _.address_check(add, pub_key[i], token); })) {
         console.log("invalid address");
         return false;
     }
@@ -1485,7 +1537,7 @@ exports.ValidTxBasic = (tx, my_version) => {
         console.log("invalid timestamp");
         return false;
     }
-    else if (sign.some((s, i) => { return _.sign_check(hash, s, pub_key[i]); })) {
+    else if (sign.length === 0 || sign.some((s, i) => { return _.sign_check(hash, s, pub_key[i]); })) {
         console.log("invalid signature");
         return false;
     }
@@ -1553,7 +1605,18 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
     const output_raw = raw.raw;
     const pow_target = chain[index].meta.pow_target;
     const req_tx = _.find_tx(chain, request);
-    const req_raw = chain[index].raws[chain[index].txs.indexOf(req_tx)];
+    const req_raw = (() => {
+        const txs_index = chain[index].txs.indexOf(req_tx);
+        if (txs_index != -1)
+            return chain[index].raws[txs_index];
+        const natives_index = chain[index].natives.indexOf(req_tx);
+        if (natives_index != -1)
+            return chain[index].raws[natives_index];
+        const units_index = chain[index].units.indexOf(req_tx);
+        if (units_index != -1)
+            return chain[index].raws[units_index];
+        return exports.empty_tx().raw;
+    })();
     const req_tx_full = {
         hash: req_tx.hash,
         meta: req_tx.meta,
@@ -1566,6 +1629,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         if (getted)
             return result.concat(getted);
     }, []);
+    console.log(base_states);
     const pres = list_up_related(chain, req_tx.meta, "pre", []);
     const nexts = list_up_related(chain, req_tx.meta, "next", []);
     if (!exports.ValidTxBasic(tx, my_version)) {
@@ -1587,7 +1651,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         console.log("invalid request index");
         return false;
     }
-    else if (req_tx == exports.empty_tx_pure() || chain[tx.meta.data.index].txs.indexOf(req_tx) === -1) {
+    else if (req_tx == exports.empty_tx_pure() || (chain[tx.meta.data.index].txs.indexOf(req_tx) === -1 && chain[tx.meta.data.index].natives.indexOf(req_tx) === -1 && chain[tx.meta.data.index].units.indexOf(req_tx) === -1)) {
         console.log("invalid request hash");
         return false;
     }
@@ -1603,7 +1667,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         console.log("invalid payee");
         return false;
     }
-    else if (trace[0] != _.ObjectHash(req_tx.meta.data.base) || trace[trace.length - 1] != _.ObjectHash(output)) {
+    else if (trace[0] != _.ObjectHash(base_states.map(b => _.ObjectHash(b))) || trace[trace.length - 1] != _.ObjectHash(output)) {
         console.log("invalid trace");
         return false;
     }
@@ -1619,7 +1683,7 @@ exports.ValidRefreshTx = async (tx, chain, my_version, native, unit, token_name_
         console.log("invalid next txs");
         return false;
     }
-    else if (token === native && await ValidNative(req_tx_full, tx, chain, StateData)) {
+    else if (token === native && await ValidNative(req_tx_full, tx, base_states[0], chain, StateData)) {
         console.log("invalid native txs");
         return false;
     }
@@ -1684,7 +1748,8 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
     const address = pub_key.map(p => CryptoSet.GenereateAddress(req_tx.data.token, p));
     const date = new Date();
     const timestamp = date.getTime();
-    const output = output_raw.map(o => _.toHash(o));
+    const token = req_tx.data.token;
+    const output = output_raw.map(o => _.ObjectHash(JSON.parse(o)));
     const log_hash = log_raw.map(l => _.toHash(l));
     const empty = exports.empty_tx_pure();
     const data = {
@@ -1695,7 +1760,7 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
         gas: empty.meta.data.gas,
         solvency: empty.meta.data.solvency,
         type: empty.meta.data.type,
-        token: empty.meta.data.token,
+        token: token,
         base: empty.meta.data.base,
         input: empty.meta.data.input,
         request: request,
@@ -1732,6 +1797,8 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
 exports.SignTx = (tx, my_private, my_address) => {
     const addresses = tx.meta.data.address;
     const index = addresses.indexOf(my_address);
+    if (index === -1)
+        return tx;
     const sign = CryptoSet.SignData(tx.hash, my_private);
     tx.raw.signature[index] = sign;
     return tx;
@@ -1767,16 +1834,14 @@ exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => 
         return after_fee;
     return [after_gas[0], after_fee[1], after_fee[2]];
 };
-exports.AcceptRequestTx = async (tx, my_version, native, unit, validator, index, StateData, LocationData) => {
-    if (!await exports.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData))
-        return [StateData, LocationData];
-    const solvency_state = await StateData.get(JSON.stringify(tx.meta.data.solvency));
+exports.AcceptRequestTx = async (tx, validator, index, StateData, LocationData) => {
+    const solvency_state = await StateData.get(tx.meta.data.solvency);
     const validator_state = await StateData.get(JSON.stringify(validator));
     const fee = _.tx_fee(tx);
     const after = exports.PayFee(solvency_state, validator_state, fee);
     await StateData.put(JSON.stringify(after[0].contents.owner), after[0]);
     await StateData.put(JSON.stringify(after[1].contents.owner), after[1]);
-    await p_iteration_1.ForEach(tx.meta.data.base, async (key) => {
+    await p_iteration_1.forEach(tx.meta.data.base, async (key) => {
         let get_loc = await LocationData.get(key) || exports.empty_location();
         get_loc = {
             state: "already",
@@ -1787,9 +1852,7 @@ exports.AcceptRequestTx = async (tx, my_version, native, unit, validator, index,
     });
     return [StateData, LocationData];
 };
-exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData) => {
-    if (!await exports.ValidRefreshTx(ref_tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData))
-        return [StateData, LocationData];
+exports.AcceptRefreshTx = async (ref_tx, chain, native, unit, StateData, LocationData) => {
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {
         const token_info = JSON.parse(req_tx.raw.raw[0]);
@@ -1817,11 +1880,11 @@ exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_
         const pre_amount_sum = base_states.reduce((sum, state) => sum + state.contents.amount, 0);
         const new_amount_sum = new_states.reduce((sum, state) => sum + state.contents.amount, 0);
         token_info.issued += (new_amount_sum - pre_amount_sum);
-        await p_iteration_1.ForEach(req_tx.meta.data.base, async (key) => {
+        await p_iteration_1.forEach(req_tx.meta.data.base, async (key) => {
             await StateData.delete(key);
             await LocationData.delete(key);
         });
-        await p_iteration_1.ForEach(ref_tx.raw.raw, async (val) => {
+        await p_iteration_1.forEach(ref_tx.raw.raw, async (val) => {
             const state = JSON.parse(val);
             await StateData.put(JSON.stringify(state.contents.owner), state);
         });
@@ -1848,7 +1911,7 @@ exports.AcceptRefreshTx = async (ref_tx, chain, my_version, native, unit, token_
             await StateData.delete(remiter);
             const new_remiter = StateSet.CreateState(remiter_state.contents.nonce + 1, remiter_state.contents.owner, remiter_state.contents.token, remiter_state.contents.amount - price_sum, remiter_state.contents.data, remiter_state.contents.product);
             await StateData.put(JSON.stringify(new_remiter.contents.owner), new_remiter);
-            await p_iteration_1.ForEach(sellers, async (key, i) => {
+            await p_iteration_1.forEach(sellers, async (key, i) => {
                 const pre = await StateData.get(key);
                 await StateData.delete(key);
                 const new_amount = pre.contents.amount + item_refs[i].meta.unit_price;
@@ -1937,9 +2000,9 @@ class vreath_vm_state {
         this._gas_limit = _gas_limit;
         this._finish_flag = _finish_flag;
         this._traced = _traced;
+        this._gas_sum = 0;
         this._state_roots = [];
         this._states = _states;
-        this._gas_sum = 0;
         this._gas_limit = _gas_limit;
         this._finish_flag = _finish_flag;
         this._traced = _traced;
@@ -1960,8 +2023,8 @@ class vreath_vm_state {
     }
     _refresh_roots() {
         this._gas_sum = 0;
-        const hash_map = this._states.map(s => s.hash);
-        this._state_roots.push(_.ObjectHash(this._states));
+        const hashed = this._states.map(s => _.ObjectHash(s));
+        this._state_roots.push(_.ObjectHash(hashed));
         this._check_traced();
     }
     get states() {
@@ -1999,8 +2062,9 @@ class vreath_vm_state {
         });
         this._refresh_roots();
     }
-    create_state(owner, token, amount, data, product) {
+    create_state(nonce, owner, token, amount, data, product) {
         const contents = {
+            nonce: nonce,
             owner: owner,
             token: token,
             amount: amount,
@@ -2015,24 +2079,6 @@ class vreath_vm_state {
     }
 }
 exports.vreath_vm_state = vreath_vm_state;
-class vreath_vm_run {
-    constructor(_code) {
-        this._code = _code;
-        this.finish_flag = true;
-        this._code = code;
-    }
-    end() {
-        this.finish_flag = false;
-    }
-    run(_vreath_state) {
-        const vreath_state = _vreath_state;
-        if (this.finish_flag) {
-            this.run(vreath_state);
-        }
-        return vreath_state.state_roots;
-    }
-}
-exports.vreath_vm_run = vreath_vm_run;
 
 
 /***/ }),
@@ -94504,10 +94550,12 @@ const merkle_patricia_1 = __webpack_require__(/*! ../../core/merkle_patricia */ 
 const tx_pool_1 = __webpack_require__(/*! ../../core/tx_pool */ "./core/tx_pool.js");
 const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
 const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
+const code_1 = __webpack_require__(/*! ../../core/code */ "./core/code.js");
 const Genesis = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
 const vue_1 = __importDefault(__webpack_require__(/*! vue */ "./node_modules/vue/dist/vue.js"));
 const at_ui_1 = __importDefault(__webpack_require__(/*! at-ui */ "./node_modules/at-ui/dist/at.js"));
 const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./node_modules/vue-router/dist/vue-router.esm.js"));
+const p_iteration_1 = __webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js");
 //import 'at-ui-style'
 (async () => {
     let db = level_browserify_1.default('./trie');
@@ -94516,11 +94564,13 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
         locationroot: _.toHash('')
     };
     localStorage.setItem("candidates", JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }]));
+    localStorage.setItem("codes", JSON.stringify({ "native": "'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};" }));
     const getted = {
         roots: localStorage.getItem('root') || JSON.stringify(empty_root),
         pool: localStorage.getItem("tx_pool") || "{}",
         chain: localStorage.getItem("blockchain") || "[]",
-        candidates: localStorage.getItem("candidates") || JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }])
+        candidates: localStorage.getItem("candidates") || JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }]),
+        codes: localStorage.getItem("codes") || JSON.stringify({ "native": "'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};" })
     };
     localStorage.setItem("genesis_state", JSON.stringify(Genesis.state));
     let roots = JSON.parse(getted.roots);
@@ -94545,6 +94595,7 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
     let pool = JSON.parse(getted.pool);
     let chain = JSON.parse(getted.chain);
     let candidates = JSON.parse(getted.candidates);
+    let codes = JSON.parse(getted.codes);
     const my_shard_id = 0;
     const port = "57750";
     const ip = "localhost";
@@ -94552,13 +94603,10 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
         'force new connection':true,
         port:port
     };*/
-    const socket = socket_io_client_1.default.connect("http://" + ip + ":" + port);
-    socket.on('tx', async (msg) => {
-        const tx = JSON.parse(msg);
-        const new_pool = await tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, StateData, LocationData);
-        pool = new_pool;
-    });
-    socket.on('block', async (msg) => {
+    const pow_target = 100000000000000000000000000000000;
+    const pos_diff = 10000000;
+    let processing = [];
+    const block_accepting = async (msg) => {
         const block = JSON.parse(msg);
         let code = "";
         let pre_StateData = StateData;
@@ -94569,7 +94617,7 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
             pre_StateData = new merkle_patricia_1.Trie(db, chain[fraud.index].meta.stateroot);
         }
         const accepted = await BlockSet.AcceptBlock(block, chain, my_shard_id, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, roots.stateroot, roots.locationroot, code, con_1.gas_limit, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, pre_StateData, LocationData);
-        if (chain.length === accepted.chain.length) {
+        if (accepted.chain.length === 0) {
             console.log("receive invalid block");
             return 0;
         }
@@ -94577,7 +94625,58 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
         StateData = accepted.state;
         LocationData = accepted.location;
         candidates = accepted.candidates;
-        chain = accepted.chain;
+        chain = chain.concat(accepted.chain);
+        const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+        if (reqs_pure.length > 0) {
+            const reqs_raw = reqs_pure.map((req, i) => block.raws[i]);
+            const reqs = reqs_pure.map((pure, i) => {
+                return {
+                    hash: pure.hash,
+                    meta: pure.meta,
+                    raw: reqs_raw[i]
+                };
+            });
+            await p_iteration_1.forEach(reqs, async (req) => {
+                const my_private = localStorage.getItem('my_secret') || "";
+                const my_public = localStorage.getItem('my_pub') || "";
+                const my_address = localStorage.getItem('my_address') || "";
+                const code = codes[req.meta.data.token];
+                const base_states = await p_iteration_1.map(req.meta.data.base, async (base) => { return await StateData.get(base); });
+                const runed = await code_1.RunVM(0, code, base_states, 0, req.raw.raw, req, [], con_1.gas_limit);
+                const output = runed.states.map(s => JSON.stringify(s));
+                const created = TxSet.CreateRefreshTx(con_1.my_version, 10, [my_public], pow_target, 10, req.hash, block.meta.index, JSON.stringify([my_address]), output, runed.traced, [], chain);
+                const ref = TxSet.SignTx(created, my_private, my_address);
+                console.log(ref);
+                if (!await TxSet.ValidRefreshTx(ref, chain, con_1.my_version, con_1.native, con_1.unit, con_1.token_name_maxsize, StateData, LocationData)) {
+                    console.log("fail to create valid refresh tx");
+                    return 0;
+                }
+                pool[ref.hash] = ref;
+                socket.emit('tx', JSON.stringify(ref));
+            });
+        }
+    };
+    const socket = socket_io_client_1.default.connect("http://" + ip + ":" + port);
+    socket.on('tx', async (msg) => {
+        const tx = JSON.parse(msg);
+        const new_pool = await tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, StateData, LocationData);
+        pool = new_pool;
+    });
+    socket.on('block', async (msg) => {
+        processing.push(msg);
+        if (processing.length === 1) {
+            await block_accepting(msg);
+            processing = processing.filter(p => p != msg);
+        }
+        else {
+            setInterval(async () => {
+                if (processing.length === 1) {
+                    clearInterval();
+                    await block_accepting(msg);
+                    processing = processing.filter(p => p != msg);
+                }
+            }, 5000);
+        }
     });
     const wallet = {
         name: "wallet",
@@ -94623,9 +94722,9 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
         data: function () {
             return {
                 from: localStorage.getItem("my_address"),
-                to: "",
-                amount: "0",
-                secret: "",
+                to: "Vr:native:1181567ccfa945016eccca505107ec3b43f9541e158f87d8c9be0a678593995d",
+                amount: "100",
+                secret: "a611b2b5da5da90b280475743675dd36444fde49d3166d614f5d9d7e1763768a",
                 balance: 0
             };
         },
@@ -94647,9 +94746,8 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
                     const from = [this.from];
                     const to = this.to.split(',');
                     const amount = this.amount;
-                    console.log(await StateData.filter());
-                    const pre_tx = TxSet.CreateRequestTx(pub_key, JSON.stringify(from), 10, "scrap", con_1.native, [JSON.stringify(from)], ["remit", JSON.stringify(to), amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 10);
-                    const tx = TxSet.SignTx(pre_tx, this.secret, JSON.stringify(from));
+                    const pre_tx = TxSet.CreateRequestTx(pub_key, JSON.stringify(from), 10, "scrap", con_1.native, [JSON.stringify(from)], ["remit", JSON.stringify(to), "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 10);
+                    const tx = TxSet.SignTx(pre_tx, this.secret, this.from);
                     if (!await TxSet.ValidRequestTx(tx, con_1.my_version, con_1.native, con_1.unit, StateData, LocationData))
                         alert("invalid infomations");
                     else {
@@ -94807,9 +94905,9 @@ exports.my_version = 0;
 exports.native = "native";
 exports.unit = "unit";
 exports.token_name_maxsize = 256;
-exports.block_time = 10;
-exports.max_blocks = 1;
-exports.block_size = 1000000;
+exports.block_time = 5000;
+exports.max_blocks = 5;
+exports.block_size = 100000;
 exports.gas_limit = 25;
 exports.rate = 0.8;
 

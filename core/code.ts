@@ -6,6 +6,7 @@ import {vreath_vm_state} from './vm_class';
 import * as _ from './basic';
 import * as T from './types';
 import vm from 'js-vm';
+import { state } from '../genesis';
 
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";
@@ -52,10 +53,10 @@ const check = (parsed,identifier:string[]=[],dependence:{[key:string]:string[]}=
         },
         leave:(node,parent)=>{
             if(node.type==="Identifier"&&identifier.indexOf(node.name)===-1) throw new Error(node.name+" is not declared!");
-            else if(node.type==="CallExpression"&&identifier.indexOf(node.callee.name)===-1){
+            else if(node.type==="CallExpression"&&node.callee.name!=null&&identifier.indexOf(node.callee.name)===-1){
                 throw new Error(node.name+" is not declared!");
             }
-            else if(node.type==="MemberExpression"&&(dependence[node.object.name]==null||dependence[node.object.name].indexOf(node.property.name)===-1)){
+            else if(node.type==="MemberExpression"&&node.object!=null&&node.object.name!=null&&node.property!=null&&node.property.name!=null&&(dependence[node.object.name]==null||dependence[node.object.name].indexOf(node.property.name)===-1)){
                 throw new Error(node.object.name + " doesn't have property " + node.property.name);
             }
         }
@@ -63,9 +64,9 @@ const check = (parsed,identifier:string[]=[],dependence:{[key:string]:string[]}=
     return parsed;
 };
 const edit = (editted,states:T.State[],gas_limit:number)=>{
-    const vreath_class = esp.parse(vreath_vm_state.toString()+"const vreath_instance = new vreath_vm_state([],10);").body;
-    const call_gas_checker = esp.parse("vreath_instance.gas_check();").body[0];
-    const call_main = esp.parse("if(vreath_instance.flag) ");
+    //const vreath_class = esp.parse(vreath_vm_state.toString()+"const vreath_instance = new vreath_vm_state([],"+gas_limit+");").body;
+    const call_gas_checker = esp.parse("vreath.gas_check();").body[0];
+    //const call_main = esp.parse("if(vreath_instance.flag) main();");
     est.traverse(editted,{
         enter:(node,parent)=>{
             if(node.hasOwnProperty("body")&&Array.isArray(node.body)){
@@ -79,7 +80,8 @@ const edit = (editted,states:T.State[],gas_limit:number)=>{
     return editted;
 };
 
-export const RunVM = async (mode:0|1|2,code:string,states:T.State[],step:number,inputs:{[key:string]:any},req_tx:T.TxPure,traced:string[]=[],gas_limit:number)=>{
+export const RunVM = async (mode:0|1|2,code:string,states:T.State[],step:number,input:string[],tx:T.TxPure,traced:string[]=[],gas_limit:number)=>{
+    const ori_states = JSON.stringify(states);
     const vreath = (()=>{
         switch(mode){
             case 0:
@@ -91,27 +93,43 @@ export const RunVM = async (mode:0|1|2,code:string,states:T.State[],step:number,
         }
     })();
     try{
-        const checked = check(esp.parse(code));
-        const editted = edit(checked,states,gas_limit);
-        const generated =  "(async ()=>{"+esc.generate(editted)+"if(!vreath_instance.flag) main();})()";
+        const identifier = ["vreath","step","input","tx","Number"]
+        const dependence = {
+            "vreath":["gas_check","end","states","gas_sum","flag","state_roots","add_states","change_states","delete_states","create_state"],
+            "tx":["hash","meta","raw"],
+            "state":["hash","contents"]
+        }
+        const checked = check(esp.parse(code),identifier,dependence);
+        const editted = edit(checked,JSON.parse(ori_states),gas_limit);
+        const generated =  "(async ()=>{"+esc.generate(editted)+"if(!vreath.flag) main();})()";
         console.log(generated);
         const sandbox = {
             vreath,
             step,
-            inputs,
-            req_tx
+            input,
+            tx
         };
         vm.runInNewContext(generated,sandbox);
-        const result = vreath.state_roots;
-        return result;
+        const states = vreath.states;
+        const traced = vreath.state_roots;
+        return {
+            states:states,
+            traced:traced
+        };
     }
     catch(e){
         console.log(e);
         if((mode===1||mode==2)&&e.split("TraceError:").length==2){
             const step = Number(e.split("TraceError:")[1]);
-            return vreath.state_roots.slice(0,-2);
+            return {
+                states:vreath.states,
+                traced:vreath.state_roots.slice(0,-2)
+            }
         }
-        return [_.ObjectHash(states)];
+        return {
+            states:vreath.states,
+            traced:vreath.state_roots
+        }
     }
 };
 

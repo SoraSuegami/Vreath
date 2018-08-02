@@ -2,12 +2,11 @@ import * as _ from './basic';
 import * as T from './types';
 
 export class vreath_vm_state{
-    private _gas_sum:number;
+    private _gas_sum:number = 0;
     private _state_roots:string[] = [];
 
     constructor(private _states:T.State[],private _gas_limit:number,private _finish_flag:boolean=false,private _traced:string[]=[]){
         this._states = _states;
-        this._gas_sum = 0;
         this._gas_limit = _gas_limit;
         this._finish_flag = _finish_flag;
         this._traced = _traced;
@@ -30,8 +29,8 @@ export class vreath_vm_state{
 
     private _refresh_roots(){
         this._gas_sum = 0;
-        const hash_map = this._states.map(s=>s.hash);
-        this._state_roots.push(_.ObjectHash(this._states));
+        const hashed = this._states.map(s=>_.ObjectHash(s));
+        this._state_roots.push(_.ObjectHash(hashed));
         this._check_traced();
     }
 
@@ -74,8 +73,9 @@ export class vreath_vm_state{
         this._refresh_roots();
     }
 
-    public create_state(owner:string[],token:string,amount:number,data:{[key:string]: string;},product:string[]):T.State{
+    public create_state(nonce:number,owner:string[],token:string,amount:number,data:{[key:string]: string;},product:string[]):T.State{
         const contents:T.StateContent = {
+            nonce:nonce,
             owner:owner,
             token:token,
             amount:amount,
@@ -87,22 +87,5 @@ export class vreath_vm_state{
             hash:hash,
             contents:contents
         }
-    }
-}
-
-export class vreath_vm_run{
-    private finish_flag = true;
-    constructor(private _code:string){
-        this._code = code;
-    }
-    private end(){
-        this.finish_flag = false;
-    }
-    public run(_vreath_state:vreath_vm_state):string[]{
-        const vreath_state = _vreath_state;
-        if(this.finish_flag){
-            this.run(vreath_state);
-        }
-        return vreath_state.state_roots;
     }
 }

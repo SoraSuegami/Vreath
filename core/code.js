@@ -14,7 +14,6 @@ const esp = __importStar(require("esprima"));
 const esc = __importStar(require("escodegen"));
 const est = __importStar(require("estraverse"));
 const vm_class_1 = require("./vm_class");
-const _ = __importStar(require("./basic"));
 const js_vm_1 = __importDefault(require("js-vm"));
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";
@@ -63,10 +62,10 @@ const check = (parsed, identifier = [], dependence = {}) => {
         leave: (node, parent) => {
             if (node.type === "Identifier" && identifier.indexOf(node.name) === -1)
                 throw new Error(node.name + " is not declared!");
-            else if (node.type === "CallExpression" && identifier.indexOf(node.callee.name) === -1) {
+            else if (node.type === "CallExpression" && node.callee.name != null && identifier.indexOf(node.callee.name) === -1) {
                 throw new Error(node.name + " is not declared!");
             }
-            else if (node.type === "MemberExpression" && (dependence[node.object.name] == null || dependence[node.object.name].indexOf(node.property.name) === -1)) {
+            else if (node.type === "MemberExpression" && node.object != null && node.object.name != null && node.property != null && node.property.name != null && (dependence[node.object.name] == null || dependence[node.object.name].indexOf(node.property.name) === -1)) {
                 throw new Error(node.object.name + " doesn't have property " + node.property.name);
             }
         }
@@ -74,9 +73,9 @@ const check = (parsed, identifier = [], dependence = {}) => {
     return parsed;
 };
 const edit = (editted, states, gas_limit) => {
-    const vreath_class = esp.parse(vm_class_1.vreath_vm_state.toString() + "const vreath_instance = new vreath_vm_state([],10);").body;
-    const call_gas_checker = esp.parse("vreath_instance.gas_check();").body[0];
-    const call_main = esp.parse("if(vreath_instance.flag) ");
+    //const vreath_class = esp.parse(vreath_vm_state.toString()+"const vreath_instance = new vreath_vm_state([],"+gas_limit+");").body;
+    const call_gas_checker = esp.parse("vreath.gas_check();").body[0];
+    //const call_main = esp.parse("if(vreath_instance.flag) main();");
     est.traverse(editted, {
         enter: (node, parent) => {
             if (node.hasOwnProperty("body") && Array.isArray(node.body)) {
@@ -90,7 +89,8 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], gas_limit) => {
+exports.RunVM = async (mode, code, states, step, input, tx, traced = [], gas_limit) => {
+    const ori_states = JSON.stringify(states);
     const vreath = (() => {
         switch (mode) {
             case 0:
@@ -102,27 +102,43 @@ exports.RunVM = async (mode, code, states, step, inputs, req_tx, traced = [], ga
         }
     })();
     try {
-        const checked = check(esp.parse(code));
-        const editted = edit(checked, states, gas_limit);
-        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath_instance.flag) main();})()";
+        const identifier = ["vreath", "step", "input", "tx", "Number"];
+        const dependence = {
+            "vreath": ["gas_check", "end", "states", "gas_sum", "flag", "state_roots", "add_states", "change_states", "delete_states", "create_state"],
+            "tx": ["hash", "meta", "raw"],
+            "state": ["hash", "contents"]
+        };
+        const checked = check(esp.parse(code), identifier, dependence);
+        const editted = edit(checked, JSON.parse(ori_states), gas_limit);
+        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath.flag) main();})()";
         console.log(generated);
         const sandbox = {
             vreath,
             step,
-            inputs,
-            req_tx
+            input,
+            tx
         };
         js_vm_1.default.runInNewContext(generated, sandbox);
-        const result = vreath.state_roots;
-        return result;
+        const states = vreath.states;
+        const traced = vreath.state_roots;
+        return {
+            states: states,
+            traced: traced
+        };
     }
     catch (e) {
         console.log(e);
         if ((mode === 1 || mode == 2) && e.split("TraceError:").length == 2) {
             const step = Number(e.split("TraceError:")[1]);
-            return vreath.state_roots.slice(0, -2);
+            return {
+                states: vreath.states,
+                traced: vreath.state_roots.slice(0, -2)
+            };
         }
-        return [_.ObjectHash(states)];
+        return {
+            states: vreath.states,
+            traced: vreath.state_roots
+        };
     }
 };
 (async () => {

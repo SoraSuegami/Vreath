@@ -19,10 +19,12 @@ const merkle_patricia_1 = require("../../core/merkle_patricia");
 const tx_pool_1 = require("../../core/tx_pool");
 const TxSet = __importStar(require("../../core/tx"));
 const BlockSet = __importStar(require("../../core/block"));
+const code_1 = require("../../core/code");
 const Genesis = __importStar(require("../../genesis/index"));
 const vue_1 = __importDefault(require("vue"));
 const at_ui_1 = __importDefault(require("at-ui"));
 const vue_router_1 = __importDefault(require("vue-router"));
+const p_iteration_1 = require("p-iteration");
 //import 'at-ui-style'
 (async () => {
     let db = level_browserify_1.default('./trie');
@@ -31,11 +33,13 @@ const vue_router_1 = __importDefault(require("vue-router"));
         locationroot: _.toHash('')
     };
     localStorage.setItem("candidates", JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }]));
+    localStorage.setItem("codes", JSON.stringify({ "native": "'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};" }));
     const getted = {
         roots: localStorage.getItem('root') || JSON.stringify(empty_root),
         pool: localStorage.getItem("tx_pool") || "{}",
         chain: localStorage.getItem("blockchain") || "[]",
-        candidates: localStorage.getItem("candidates") || JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }])
+        candidates: localStorage.getItem("candidates") || JSON.stringify([{ "address": ["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"], "amount": 100000000000000 }]),
+        codes: localStorage.getItem("codes") || JSON.stringify({ "native": "'use strict';const main = () => {const this_step = step;if (this_step != 0)vreath.end();const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.kind != 'scrap' || state.contents.owner != tx.meta.data.address || amount >= 0)vreath.end();const remited = vreath.create_state(state.contents.nonce + 1, state.contents.owner, state.contents.token, state.contents.amount + amount, state.contents.data, state.contents.product);vreath.change_states([state], [remited]);vreath.end();}};" })
     };
     localStorage.setItem("genesis_state", JSON.stringify(Genesis.state));
     let roots = JSON.parse(getted.roots);
@@ -60,6 +64,7 @@ const vue_router_1 = __importDefault(require("vue-router"));
     let pool = JSON.parse(getted.pool);
     let chain = JSON.parse(getted.chain);
     let candidates = JSON.parse(getted.candidates);
+    let codes = JSON.parse(getted.codes);
     const my_shard_id = 0;
     const port = "57750";
     const ip = "localhost";
@@ -67,13 +72,10 @@ const vue_router_1 = __importDefault(require("vue-router"));
         'force new connection':true,
         port:port
     };*/
-    const socket = socket_io_client_1.default.connect("http://" + ip + ":" + port);
-    socket.on('tx', async (msg) => {
-        const tx = JSON.parse(msg);
-        const new_pool = await tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, StateData, LocationData);
-        pool = new_pool;
-    });
-    socket.on('block', async (msg) => {
+    const pow_target = 100000000000000000000000000000000;
+    const pos_diff = 10000000;
+    let processing = [];
+    const block_accepting = async (msg) => {
         const block = JSON.parse(msg);
         let code = "";
         let pre_StateData = StateData;
@@ -84,7 +86,7 @@ const vue_router_1 = __importDefault(require("vue-router"));
             pre_StateData = new merkle_patricia_1.Trie(db, chain[fraud.index].meta.stateroot);
         }
         const accepted = await BlockSet.AcceptBlock(block, chain, my_shard_id, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, roots.stateroot, roots.locationroot, code, con_1.gas_limit, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, pre_StateData, LocationData);
-        if (chain.length === accepted.chain.length) {
+        if (accepted.chain.length === 0) {
             console.log("receive invalid block");
             return 0;
         }
@@ -92,7 +94,58 @@ const vue_router_1 = __importDefault(require("vue-router"));
         StateData = accepted.state;
         LocationData = accepted.location;
         candidates = accepted.candidates;
-        chain = accepted.chain;
+        chain = chain.concat(accepted.chain);
+        const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+        if (reqs_pure.length > 0) {
+            const reqs_raw = reqs_pure.map((req, i) => block.raws[i]);
+            const reqs = reqs_pure.map((pure, i) => {
+                return {
+                    hash: pure.hash,
+                    meta: pure.meta,
+                    raw: reqs_raw[i]
+                };
+            });
+            await p_iteration_1.forEach(reqs, async (req) => {
+                const my_private = localStorage.getItem('my_secret') || "";
+                const my_public = localStorage.getItem('my_pub') || "";
+                const my_address = localStorage.getItem('my_address') || "";
+                const code = codes[req.meta.data.token];
+                const base_states = await p_iteration_1.map(req.meta.data.base, async (base) => { return await StateData.get(base); });
+                const runed = await code_1.RunVM(0, code, base_states, 0, req.raw.raw, req, [], con_1.gas_limit);
+                const output = runed.states.map(s => JSON.stringify(s));
+                const created = TxSet.CreateRefreshTx(con_1.my_version, 10, [my_public], pow_target, 10, req.hash, block.meta.index, JSON.stringify([my_address]), output, runed.traced, [], chain);
+                const ref = TxSet.SignTx(created, my_private, my_address);
+                console.log(ref);
+                if (!await TxSet.ValidRefreshTx(ref, chain, con_1.my_version, con_1.native, con_1.unit, con_1.token_name_maxsize, StateData, LocationData)) {
+                    console.log("fail to create valid refresh tx");
+                    return 0;
+                }
+                pool[ref.hash] = ref;
+                socket.emit('tx', JSON.stringify(ref));
+            });
+        }
+    };
+    const socket = socket_io_client_1.default.connect("http://" + ip + ":" + port);
+    socket.on('tx', async (msg) => {
+        const tx = JSON.parse(msg);
+        const new_pool = await tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, StateData, LocationData);
+        pool = new_pool;
+    });
+    socket.on('block', async (msg) => {
+        processing.push(msg);
+        if (processing.length === 1) {
+            await block_accepting(msg);
+            processing = processing.filter(p => p != msg);
+        }
+        else {
+            setInterval(async () => {
+                if (processing.length === 1) {
+                    clearInterval();
+                    await block_accepting(msg);
+                    processing = processing.filter(p => p != msg);
+                }
+            }, 5000);
+        }
     });
     const wallet = {
         name: "wallet",
@@ -138,9 +191,9 @@ const vue_router_1 = __importDefault(require("vue-router"));
         data: function () {
             return {
                 from: localStorage.getItem("my_address"),
-                to: "",
-                amount: "0",
-                secret: "",
+                to: "Vr:native:1181567ccfa945016eccca505107ec3b43f9541e158f87d8c9be0a678593995d",
+                amount: "100",
+                secret: "a611b2b5da5da90b280475743675dd36444fde49d3166d614f5d9d7e1763768a",
                 balance: 0
             };
         },
@@ -162,9 +215,8 @@ const vue_router_1 = __importDefault(require("vue-router"));
                     const from = [this.from];
                     const to = this.to.split(',');
                     const amount = this.amount;
-                    console.log(await StateData.filter());
-                    const pre_tx = TxSet.CreateRequestTx(pub_key, JSON.stringify(from), 10, "scrap", con_1.native, [JSON.stringify(from)], ["remit", JSON.stringify(to), amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 10);
-                    const tx = TxSet.SignTx(pre_tx, this.secret, JSON.stringify(from));
+                    const pre_tx = TxSet.CreateRequestTx(pub_key, JSON.stringify(from), 10, "scrap", con_1.native, [JSON.stringify(from)], ["remit", JSON.stringify(to), "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 10);
+                    const tx = TxSet.SignTx(pre_tx, this.secret, this.from);
                     if (!await TxSet.ValidRequestTx(tx, con_1.my_version, con_1.native, con_1.unit, StateData, LocationData))
                         alert("invalid infomations");
                     else {

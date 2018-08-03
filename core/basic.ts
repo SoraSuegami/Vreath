@@ -32,6 +32,12 @@ export const get_unicode = (str:string):number[]=>{
   });
 }
 
+export const reduce_pub = (pubs:string[])=>{
+  return pubs.slice().sort().reduce((res:string,pub:string)=>{
+    return toHash(pub+res);
+  });
+}
+
 export const get_string = (uni:number[]):string=>{
   return String.fromCharCode.apply({},uni);
 }

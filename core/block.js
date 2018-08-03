@@ -189,6 +189,7 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
     const fraudData = block.fraudData;
+    console.log(chain.length);
     const last = chain[chain.length - 1];
     const right_parenthash = (() => {
         if (last != null)
@@ -220,6 +221,9 @@ exports.ValidKeyBlock = async (block, chain, my_shard_id, my_version, right_cand
         return false;
     }
     else if (parenthash != right_parenthash) {
+        console.log(chain);
+        console.log(parenthash);
+        console.log(right_parenthash);
         console.log("invalid parenthash");
         return false;
     }
@@ -395,7 +399,7 @@ exports.ValidMicroBlock = async (block, chain, my_shard_id, my_version, right_ca
         return true;
     }
 };
-exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos_diff, native, validatorPub, candidates, stateroot, locationroot, fraudData, StateData) => {
+exports.CreateKeyBlock = async (version, shard_id, chain, block_time, max_blocks, fraud, pow_target, pos_diff, native, validatorPub, candidates, stateroot, locationroot, fraudData, StateData) => {
     const last = chain[chain.length - 1];
     const parenthash = (() => {
         if (last == null)
@@ -405,7 +409,11 @@ exports.CreateKeyBlock = async (version, shard_id, chain, fraud, pow_target, pos
     })();
     const validator_address = validatorPub.map(pub => CryptoSet.GenereateAddress(native, pub));
     const validator_state = await StateData.get(JSON.stringify(validator_address)) || StateSet.CreateState(0, validator_address, native, 0, {}, []);
-    const timestamp = PoS_mining(parenthash, validator_address, validator_state.contents.amount, pos_diff);
+    const pre_key = search_key_block(chain);
+    const timestamp = (() => {
+        const waited = Wait_block_time(pre_key.meta.timestamp, block_time * max_blocks);
+        return PoS_mining(parenthash, validator_address, validator_state.contents.amount, pos_diff);
+    })();
     const empty = exports.empty_block();
     const meta = {
         version: version,

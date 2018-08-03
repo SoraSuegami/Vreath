@@ -35,6 +35,11 @@ exports.get_unicode = (str) => {
         return val.charCodeAt(0);
     });
 };
+exports.reduce_pub = (pubs) => {
+    return pubs.slice().sort().reduce((res, pub) => {
+        return exports.toHash(pub + res);
+    });
+};
 exports.get_string = (uni) => {
     return String.fromCharCode.apply({}, uni);
 };

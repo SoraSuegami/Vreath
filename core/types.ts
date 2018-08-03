@@ -1,25 +1,18 @@
-export type StateContent = {
+import { Token } from "../core_arc/types";
+
+export type State = {
+  kind:"state" | "token";
   nonce:number;
-  owner: string[];
   token: string;
+  owner: string;
   amount: number;
   data: {[key:string]: string;};
   product: string[];
-};
-
-export type State = {
-  hash: string;
-  contents: StateContent;
-};
-
-export type Token = {
-  nonce:number;
-  token: string;
-  issued: number;
+  issued:number;
   deposited:number;
-  committed: string[];
+  committed:string[];
   code:string;
-  developer: string[];
+  developer:string[];
 };
 
 
@@ -38,16 +31,16 @@ export type Relation = {
 }
 
 export type TxData = {
-  address:string[];
+  address:string;
   pub_key:string[];
   timestamp:number;
-  log_hash:string[];
+  log_hash:string;
   gas:number;
   solvency:string;
   type:TxTypes;
   token:string;
   base:string[];
-  input:string[];
+  input:string;
   request:string;
   index:number;
   payee:string;
@@ -79,6 +72,7 @@ export type Tx = {
 }
 
 export type Location = {
+  address:string;
   state:'yet' | 'already';
   index:number;
   hash:string;

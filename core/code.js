@@ -89,7 +89,7 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = async (mode, code, states, step, input, tx, traced = [], gas_limit) => {
+exports.RunVM = (mode, code, states, step, input, tx, traced = [], gas_limit) => {
     const ori_states = JSON.stringify(states);
     const vreath = (() => {
         switch (mode) {

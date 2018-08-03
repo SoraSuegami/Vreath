@@ -80,7 +80,7 @@ const edit = (editted,states:T.State[],gas_limit:number)=>{
     return editted;
 };
 
-export const RunVM = async (mode:0|1|2,code:string,states:T.State[],step:number,input:string[],tx:T.TxPure,traced:string[]=[],gas_limit:number)=>{
+export const RunVM = (mode:0|1|2,code:string,states:T.State[],step:number,input:string[],tx:T.TxPure,traced:string[]=[],gas_limit:number)=>{
     const ori_states = JSON.stringify(states);
     const vreath = (()=>{
         switch(mode){

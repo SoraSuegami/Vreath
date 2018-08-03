@@ -1,12 +1,9 @@
 import * as _ from './basic'
 import * as CryptoSet from './crypto_set'
 import * as T from './types'
-import {Trie} from './merkle_patricia'
 import * as StateSet from './state'
-import {map,filter,reduce,some} from 'p-iteration'
 import * as TxSet from './tx'
 import {RunVM} from './code'
-import { token_name_maxsize, block_time, max_blocks } from '../server/con';
 
 export const empty_fraud = ():T.FraudInfo=>{
     return {
@@ -65,11 +62,9 @@ const search_key_block = (chain:T.Block[])=>{
     return empty_block();
 }
 
-const search_micro_block = async (chain:T.Block[],key_block:T.Block,native:string,StateData:Trie):Promise<T.Block[]>=>{
-    return await filter(chain.slice(key_block.meta.index),async (block:T.Block)=>{
-        const validator = block.meta.validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
-        const state:T.State = await StateData.get(JSON.stringify(validator));
-        return block.meta.kind==="micro"&&block.meta.validatorPub.some((pub,i)=>_.address_check(state.contents.owner[i],pub,native))
+const search_micro_block = (chain:T.Block[],key_block:T.Block):T.Block[]=>{
+    return chain.slice(key_block.meta.index).filter((block:T.Block)=>{
+        return block.meta.kind==="micro"&&_.reduce_pub(block.meta.validatorPub)===_.reduce_pub(key_block.meta.validatorPub)
     });
 }
 
@@ -94,15 +89,17 @@ export const GetTreeroot = (pre:string[]):string[]=>{
 }
 
 const tx_fee_sum = (pure_txs:T.TxPure[],raws:T.TxRaw[])=>{
-    const txs:T.Tx[] = pure_txs.map((t,i)=>{return {
-        hash:t.hash,
-        meta:t.meta,
-        raw:raws[i]
-    }});
+    const txs:T.Tx[] = pure_txs.map((t,i)=>{
+        return {
+            hash:t.hash,
+            meta:t.meta,
+            raw:raws[i]
+        }
+    });
     return txs.reduce((sum,tx)=>sum+_.tx_fee(tx),0);
 };
 
-const PoS_mining = (parenthash:string,address:string[],balance:number,difficulty:number)=>{
+const PoS_mining = (parenthash:string,address:string,balance:number,difficulty:number)=>{
     let date;
     let timestamp
     let i=0;
@@ -113,7 +110,7 @@ const PoS_mining = (parenthash:string,address:string[],balance:number,difficulty
       if(i>300) break;
       console.log("left:"+_.Hex_to_Num(_.toHash(parenthash+JSON.stringify(address)+timestamp.toString())))
       console.log("right:"+Math.pow(2,256)*balance/difficulty)
-    } while (_.Hex_to_Num(_.toHash(parenthash))+_.Hex_to_Num(_.ObjectHash(address))+timestamp>Math.pow(2,256)*balance/difficulty);
+    } while (_.Hex_to_Num(_.toHash(parenthash))+_.Hex_to_Num(_.toHash(address))+timestamp>Math.pow(2,256)*balance/difficulty);
     return timestamp;
 }
 
@@ -127,7 +124,7 @@ const Wait_block_time = (pre:number,block_time:number)=>{
     return timestamp;
 }
 
-const txs_check = async (block:T.Block,my_version:number,native:string,unit:string,chain:T.Block[],token_name_maxsize:number,StateData:Trie,LocationData:Trie)=>{
+const txs_check = (block:T.Block,my_version:number,native:string,unit:string,chain:T.Block[],token_name_maxsize:number,StateData:T.State[],LocationData:T.Location[])=>{
     const txs = block.txs.map((tx,i):T.Tx=>{
         return {
             hash:tx.hash,
@@ -151,19 +148,18 @@ const txs_check = async (block:T.Block,my_version:number,native:string,unit:stri
     });
 
     const target = txs.concat(natives).concat(units);
-    return await some(target,async (tx:T.Tx)=>{
+    return target.some((tx:T.Tx)=>{
         if(tx.meta.kind==="request"){
-            const validator = block.meta.validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
-            return !await TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData);
+            return !TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData);
         }
         else if(tx.meta.kind==="refresh"){
-            return !await TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,token_name_maxsize,StateData,LocationData);
+            return !TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,token_name_maxsize,StateData,LocationData);
         }
         else return true;
     });
 }
 
-export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,StateData:Trie)=>{
+export const ValidKeyBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,unit:string,StateData:T.State[])=>{
     const hash = block.hash;
     const sign = block.validatorSign;
     const meta = block.meta;
@@ -193,16 +189,16 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
     })();
 
 
-    const validator = JSON.stringify(validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub)));
-    const validator_state:T.State = await StateData.get(validator);
+    const unit_validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(validatorPub));
+    const unit_validator_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===unit_validator})[0] || StateSet.CreateState(0,unit_validator,unit,0,{},[]);
 
     const date = new Date();
 
-    if(_.object_hash_check(hash,meta)||_.Hex_to_Num(_.toHash(parenthash))+_.Hex_to_Num(_.ObjectHash(validator_state.contents.owner))+timestamp>Math.pow(2,256)*validator_state.contents.amount/pos_diff){
+    if(_.object_hash_check(hash,meta)||_.Hex_to_Num(_.toHash(parenthash))+_.Hex_to_Num(_.toHash(unit_validator_state.owner))+timestamp>Math.pow(2,256)*unit_validator_state.amount/pos_diff){
         console.log("invalid hash");
         return false;
     }
-    else if(validator_state==null||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
+    else if(_.ObjectHash(unit_validator_state)===_.ObjectHash(StateSet.CreateState(0,unit_validator,unit,0,{},[]))||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
         console.log("invalid validator signature");
         return false;
     }
@@ -227,10 +223,6 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
     }
     else if(_.time_check(timestamp)){
         console.log("invalid timestamp");
-        return false;
-    }
-    else if(validator_state.contents.owner.length===0||validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
-        console.log("invalid validator addresses");
         return false;
     }
     else if(candidates!=_.ObjectHash(right_candidates)){
@@ -274,10 +266,10 @@ export const ValidKeyBlock = async (block:T.Block,chain:T.Block[],my_shard_id:nu
     }
 }
 
-export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,unit:string,StateData:Trie,LocationData:Trie)=>{
+export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,block_time:number,max_blocks:number,block_size:number,native:string,unit:string,token_name_maxsize:number,StateData:T.State[],LocationData:T.Location[])=>{
     const hash = block.hash;
     const sign = block.validatorSign;
-    const meta:T.BlockMeta = block.meta;
+    const meta = block.meta;
     const version = meta.version;
     const shard_id = meta.shard_id;
     const index = meta.index;
@@ -307,8 +299,8 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     const key_block = search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
 
-    const validator = JSON.stringify(validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub)));
-    const validator_state:T.State = await StateData.get(validator);
+    const validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(validatorPub));
+    const validator_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,unit,0,{},[]);
 
     const tx_roots = txs.map(t=>t.hash).concat(natives.map(n=>n.hash)).concat(units.map(u=>u.hash));
     const pures = txs.map(tx=>{return {hash:tx.hash,meta:tx.meta}}).concat(natives.map(n=>{return {hash:n.hash,meta:n.meta}})).concat(units.map(u=>{return {hash:u.hash,meta:u.meta}}));
@@ -316,13 +308,13 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     const date = new Date();
     const now = date.getTime();
 
-    const already_micro = await search_micro_block(chain,key_block,native,StateData);
+    const already_micro = search_micro_block(chain,key_block);
 
     if(_.object_hash_check(hash,meta)){
         console.log("invalid hash");
         return false;
     }
-    else if(validator_state==null||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
+    else if(_.ObjectHash(validator_state)===_.ObjectHash(StateSet.CreateState(0,validator,unit,0,{},[]))||sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,validatorPub[i]))){
         console.log("invalid validator signature");
         return false;
     }
@@ -344,10 +336,6 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     }
     else if(last==null||_.time_check(timestamp)&&now-last.meta.timestamp<block_time){
         console.log("invalid timestamp");
-        return false;
-    }
-    else if(validator_state.contents.owner.length===0||validator_state.contents.owner.some((add,i)=>_.address_check(add,validatorPub[i],native))){
-        console.log("invalid validator addresses");
         return false;
     }
     else if(_.ObjectHash(validatorPub)!=_.ObjectHash(right_pub)){
@@ -390,7 +378,7 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
         console.log("too many micro blocks");
         return false;
     }
-    else if(await txs_check(block,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData)){
+    else if(txs_check(block,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData)){
         console.log("invalid txs");
         return false;
     }
@@ -403,18 +391,18 @@ export const ValidMicroBlock = async (block:T.Block,chain:T.Block[],my_shard_id:
     }
 }
 
-export const CreateKeyBlock = async (version:number,shard_id:number,chain:T.Block[],block_time:number,max_blocks:number,fraud:T.FraudInfo,pow_target:number,pos_diff:number,native:string,validatorPub:string[],candidates:string,stateroot:string,locationroot:string,fraudData:T.FraudData,StateData:Trie):Promise<T.Block>=>{
+export const CreateKeyBlock = (version:number,shard_id:number,chain:T.Block[],block_time:number,max_blocks:number,fraud:T.FraudInfo,pow_target:number,pos_diff:number,unit:string,validatorPub:string[],candidates:string,stateroot:string,locationroot:string,fraudData:T.FraudData,StateData:T.State[]):T.Block=>{
     const last = chain[chain.length-1];
     const parenthash = (()=>{
         if(last==null) return _.toHash('');
         else return last.hash;
     })();
-    const validator_address = validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
-    const validator_state = await StateData.get(JSON.stringify(validator_address)) || StateSet.CreateState(0,validator_address,native,0,{},[]);
+    const validator_address = CryptoSet.GenereateAddress(unit,_.reduce_pub(validatorPub));
+    const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator_address})[0]|| StateSet.CreateState(0,validator_address,unit,0,{},[]);
     const pre_key = search_key_block(chain);
     const timestamp = (()=>{
         const waited = Wait_block_time(pre_key.meta.timestamp,block_time*max_blocks);
-        return PoS_mining(parenthash,validator_address,validator_state.contents.amount,pos_diff);
+        return PoS_mining(parenthash,validator_address,validator_state.amount,pos_diff);
     })()
     const empty = empty_block();
     const meta:T.BlockMeta = {
@@ -493,65 +481,79 @@ export const SignBlock = async (block:T.Block,my_private:string,my_pub:string)=>
     return block;
 }
 
-const get_units = async (unit:string,StateData:Trie)=>{
-    const getted:{[key:string]:T.State} = await StateData.filter((key:string,val:any)=>{
-        if(val==null) return false;
-        const state:T.State = val;
-        return state.contents!=null&&state.contents.token===unit;
-    });
-    return Object.values(getted);
+const get_units = (unit:string,StateData:T.State[])=>{
+    return StateData.filter(s=>{return s.kind==="state"&&s.token===unit});
 }
 
 const reduce_units = (states:T.State[],rate:number)=>{
     return states.map(state=>{
-        state.contents.amount *= rate;
+        state.amount *= rate;
         return state;
     });
 }
 
 const CandidatesForm = (states:T.State[]):T.Candidates[]=>{
     return states.map(state=>{
-        return {address:state.contents.owner,amount:state.contents.amount}
+        return {address:state.owner,amount:state.amount}
     });
 }
 
-const NewCandidates = async (unit:string,rate:number,StateData:Trie)=>{
-    return CandidatesForm(reduce_units(await get_units(unit,StateData),rate))
+const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
+    return CandidatesForm(reduce_units(get_units(unit,StateData),rate))
 }
 
 
-const check_fraud_proof = async (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:Trie)=>{
+const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
     const tx = _.find_tx(chain,block.meta.fraud.hash);
     const empty_state = StateSet.CreateState()
-    const states:T.State[] = await map(tx.meta.data.base,async (key:string)=>{return await StateData.get(key)||empty_state});
+    const states = tx.meta.data.base.map(key=>{
+        return StateData.filter(s=>{s.kind==="state"&&s.owner===key})[0] || empty_state;
+    });
     if(block.meta.fraud.flag===false||tx===TxSet.empty_tx_pure()||tx.meta.kind!="refresh"||block.meta.fraud.step<0||!Number.isInteger(block.meta.fraud.step)||block.meta.fraud.step>tx.meta.data.trace.length-1||states.indexOf(empty_state)!=-1) return true;
     const this_block = chain[tx.meta.data.index];
     const req = this_block.txs.filter(t=>t.hash===tx.meta.data.request)[0];
     const inputs = this_block.raws[this_block.txs.indexOf(req)].raw;
-    const result = await RunVM(2,code,states,block.meta.fraud.step,inputs,req,tx.meta.data.trace,gas_limit);
+    const result = RunVM(2,code,states,block.meta.fraud.step,inputs,req,tx.meta.data.trace,gas_limit);
     if(result.traced!=tx.meta.data.trace) return true;
     return false;
 }
 
-export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,block_time:number,max_blocks:number,block_size:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,code:string,gas_limit:number,native:string,unit:string,rate:number,token_name_maxsize:number,StateData:Trie,pre_StateData:Trie,LocationData:Trie)=>{
+const change_unit_amounts = (block:T.Block,unit:string,rate:number,StateData:T.State[])=>{
+    const reduced = StateData.map(s=>{
+        if(s.kind!="state"||s.token!=unit) return s;
+        return Object.assign({amount:s.amount*rate},s);
+    });
+    const validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(block.meta.validatorPub));
+    const index = reduced.map(r=>r.owner).indexOf(validator);
+    if(index===-1) return reduced;
+    const validator_state = reduced[index];
+    const share_amount = block.units.reduce((sum,tx,i)=>{
+        if(tx.meta.data.address!=validator) return sum+block.raws[block.txs.length+block.natives.length+i].raw[2].length;
+        else return sum;
+    },0);
+    const shared = Object.assign({amount:validator_state.amount-share_amount*(1-rate)},validator_state);
+    return StateData.slice().splice(index,0,shared);
+}
+
+export const AcceptBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,block_time:number,max_blocks:number,block_size:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,code:string,gas_limit:number,native:string,unit:string,rate:number,token_name_maxsize:number,StateData:T.State[],pre_StateData:T.State[],LocationData:T.Location[])=>{
     let index = block.meta.index;
     if(block.meta.fraud.flag){
         index = block.meta.fraud.index-1;
         StateData = pre_StateData;
         right_stateroot = chain[block.meta.fraud.index].meta.stateroot;
         right_locationroot = chain[block.meta.fraud.index].meta.locationroot;
-        right_candidates = await NewCandidates(unit,rate,pre_StateData);
+        right_candidates = NewCandidates(unit,rate,pre_StateData);
     }
-    if(block.meta.kind==="key"&&await ValidKeyBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,StateData)&&(block.meta.fraud.flag===false||await check_fraud_proof(block,chain,code,gas_limit,StateData))){
-        const new_candidates = await NewCandidates(unit,rate,StateData);
+    if(block.meta.kind==="key"&&ValidKeyBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,StateData)&&(block.meta.fraud.flag===false||check_fraud_proof(block,chain,code,gas_limit,StateData))){
+        const new_candidates = NewCandidates(unit,rate,StateData);
         return {
             state:StateData,
             location:LocationData,
             candidates:new_candidates,
-            chain:[block]
+            block:[block]
         }
     }
-    else if(block.meta.kind==="micro"&&await ValidMicroBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,unit,StateData,LocationData)&&(block.meta.fraud.flag===false||await check_fraud_proof(block,chain,code,gas_limit,StateData))){
+    else if(block.meta.kind==="micro"&&ValidMicroBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData)&&(block.meta.fraud.flag===false||check_fraud_proof(block,chain,code,gas_limit,StateData))){
         const txs = block.txs.map((tx,i):T.Tx=>{
             return {
                 hash:tx.hash,
@@ -563,34 +565,38 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
             return {
                 hash:n.hash,
                 meta:n.meta,
-                raw:block.raws[i]
+                raw:block.raws[txs.length+i]
             }
         });
         const units:T.Tx[] = block.units.map((u,i)=>{
             return {
                 hash:u.hash,
                 meta:u.meta,
-                raw:block.raws[i]
+                raw:block.raws[txs.length+natives.length+i]
             }
         });
 
         const target = txs.concat(natives).concat(units);
-        const refreshed:Trie[] = await reduce(target, async (result:Trie[],tx:T.Tx)=>{
+        const sets:[T.State[],T.Location[]] = [StateData,LocationData]
+        const refreshed = target.reduce((result,tx)=>{
             if(tx.meta.kind==="request"){
-                const validator = block.meta.validatorPub.map(pub=>CryptoSet.GenereateAddress(native,pub));
-                return await TxSet.AcceptRequestTx(tx,validator,index,result[0],result[1]);
+                const validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(block.meta.validatorPub));
+                return TxSet.AcceptRequestTx(tx,validator,index,result[0],result[1]);
             }
             else if(tx.meta.kind==="refresh"){
-                return await TxSet.AcceptRefreshTx(tx,chain,native,unit,result[0],result[1]);
+                return TxSet.AcceptRefreshTx(tx,chain,native,unit,result[0],result[1]);
             }
             else return result;
-        },[StateData,LocationData]);
-        const new_candidates = await NewCandidates(unit,rate,StateData);
+        },sets);
+
+        const unit_changed = change_unit_amounts(block,unit,rate,refreshed[0]);
+
+        const new_candidates = NewCandidates(unit,rate,StateData);
         return {
-            state:refreshed[0],
+            state:unit_changed,
             location:refreshed[1],
             candidates:new_candidates,
-            chain:[block]
+            block:[block]
         }
     }
     else{
@@ -598,7 +604,7 @@ export const AcceptBlock = async (block:T.Block,chain:T.Block[],my_shard_id:numb
             state:StateData,
             location:LocationData,
             candidates:right_candidates,
-            chain:[]
+            block:[]
         }
     }
 }

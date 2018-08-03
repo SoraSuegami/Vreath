@@ -111,7 +111,7 @@ const state_check = (state:T.State,token_name_maxsize:number)=>{
 }
 
 const base_declaration_check = (target:T.State,bases:string[],StateData:T.State[])=>{
-  const getted = StateData.filter(s=>s.owner===target.owner)[0];
+  const getted = StateData.filter(s=>{return s.kind==="state"&&s.owner===target.owner})[0];
   return getted!=null && bases.indexOf(target.owner)===-1;
 }
 
@@ -209,7 +209,7 @@ const search_related_raw = (chain:T.Block[],hash:string,order:'pre'|'next',calle
 
 const ValidNative = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=>{
   try{
-    const base_state = StateData.filter(s=>s.owner===req_tx.meta.data.base[0])[0] || StateSet.CreateState();
+    const base_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.base[0]})[0] || StateSet.CreateState();
     const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
     if(_.ObjectHash(base_state)!=_.ObjectHash(StateSet.CreateState())||_.ObjectHash(new_state)!=_.ObjectHash(StateSet.CreateState())) return true;
     const inputs = req_tx.raw.raw;
@@ -238,7 +238,7 @@ const ValidNative = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[]
         const with_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
         const with_raw= search_related_raw(chain,req_tx.meta.next.hash,'next',req_tx.meta.purehash);
         const with_token_info:T.State = JSON.parse(with_raw.raw[0]) || empty_token;
-        const pre_token_info:T.State = StateData.filter(s=>s.token===with_token_info.token)[0] || empty_token;
+        const pre_token_info:T.State = StateData.filter(s=>{return s.kind==="token"&&s.token===with_token_info.token})[0] || empty_token;
         return !(with_meta.data.type==="update"&&with_token_info!=empty_token&&pre_token_info!=empty_token&&with_token_info.token===req_tx.meta.data.token&&amount+with_token_info.deposited===0&&other===with_token_info.token&&valid_state.amount>0&&pre_token_info.deposited-amount>0);
 
       default:
@@ -253,7 +253,7 @@ const ValidNative = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[]
 
 const ValidUnit = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=>{
   try{
-    const base_state:T.State = StateData.filter(s=>s.owner===req_tx.meta.data.base[0])[0] || StateSet.CreateState();
+    const base_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.base[0]})[0] || StateSet.CreateState();
     const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
     if(_.ObjectHash(base_state)!=_.ObjectHash(StateSet.CreateState())||_.ObjectHash(new_state)!=_.ObjectHash(StateSet.CreateState())) return true;
     const inputs = req_tx.raw.raw;
@@ -280,8 +280,8 @@ const ValidUnit = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=
 
     switch(type){
       case "buy":
-        const remit_state:T.State = StateData.filter(s=>s.owner===remiter)[0] || empty_state;
-        const commit_token:T.State = StateData.filter(s=>s.token===req_tx.meta.data.token)[0] || empty_token;
+        const remit_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===remiter})[0] || empty_state;
+        const commit_token:T.State = StateData.filter(s=>{return s.kind==="token"&&s.token===req_tx.meta.data.token})[0] || empty_token;
         const committed = item_refs.map(item=>item.hash).some(key=>{
           return commit_token.committed.indexOf(key)!=-1;
         });
@@ -373,7 +373,7 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   })[0];
 
   const base_states = base.map(key=>{
-    return StateData.filter(s=>s.owner===key)[0] || StateSet.CreateState();
+    return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
   });
 
   if(!ValidTxBasic(tx,my_version)){
@@ -444,11 +444,11 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
   const token = req_tx.meta.data.token;
 
   const payee_state:T.State = StateData.filter(s=>{
-    s.owner===payee&&s.amount+req_tx.meta.data.gas<_.tx_fee(tx)&&s.token===native
+    return s.kind==="state"&&s.owner===payee&&s.amount+req_tx.meta.data.gas<_.tx_fee(tx)&&s.token===native
   })[0];
 
   const base_states:T.State[] = req_tx.meta.data.base.map(key=>{
-    return StateData.filter(s=>s.owner===key)[0] || StateSet.CreateState();
+    return StateData.filter(s=>{s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
   });
 
 
@@ -658,7 +658,7 @@ export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_s
   return [after_gas[0],after_fee[1],after_fee[2]];
 }
 
-export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:T.State[],LocationData:T.Location[])=>{
+export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:T.State[],LocationData:T.Location[]):[T.State[],T.Location[]]=>{
   const solvency_state:T.State = StateData.filter(s=>s.owner===tx.meta.data.solvency)[0];
   const validator_state:T.State = StateData.filter(s=>s.owner===validator)[0];
   const fee = _.tx_fee(tx);
@@ -685,7 +685,7 @@ export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:
   return [StateData_added,LocationData_added];
 }
 
-export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],native:string,unit:string,StateData:T.State[],LocationData:T.Location[])=>{
+export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],native:string,unit:string,StateData:T.State[],LocationData:T.Location[]):[T.State[],T.Location[]]=>{
   const req_tx = find_req_tx(ref_tx,chain)
   if(req_tx.meta.data.type==="create"){
     const token_info:T.State = JSON.parse(req_tx.raw.raw[0]);

@@ -111,7 +111,7 @@ const state_check = (state, token_name_maxsize) => {
         state.product.some(pro => Buffer.from(pro).length > token_name_maxsize);
 };
 const base_declaration_check = (target, bases, StateData) => {
-    const getted = StateData.filter(s => s.owner === target.owner)[0];
+    const getted = StateData.filter(s => { return s.kind === "state" && s.owner === target.owner; })[0];
     return getted != null && bases.indexOf(target.owner) === -1;
 };
 const output_check = (type, base_states, output_raw, token_name_maxsize, StateData) => {
@@ -216,7 +216,7 @@ const search_related_raw = (chain, hash, order, caller_hash) => {
 };
 const ValidNative = (req_tx, ref_tx, chain, StateData) => {
     try {
-        const base_state = StateData.filter(s => s.owner === req_tx.meta.data.base[0])[0] || StateSet.CreateState();
+        const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
         const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
         if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
             return true;
@@ -246,7 +246,7 @@ const ValidNative = (req_tx, ref_tx, chain, StateData) => {
                 const with_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
                 const with_raw = search_related_raw(chain, req_tx.meta.next.hash, 'next', req_tx.meta.purehash);
                 const with_token_info = JSON.parse(with_raw.raw[0]) || empty_token;
-                const pre_token_info = StateData.filter(s => s.token === with_token_info.token)[0] || empty_token;
+                const pre_token_info = StateData.filter(s => { return s.kind === "token" && s.token === with_token_info.token; })[0] || empty_token;
                 return !(with_meta.data.type === "update" && with_token_info != empty_token && pre_token_info != empty_token && with_token_info.token === req_tx.meta.data.token && amount + with_token_info.deposited === 0 && other === with_token_info.token && valid_state.amount > 0 && pre_token_info.deposited - amount > 0);
             default:
                 return true;
@@ -259,7 +259,7 @@ const ValidNative = (req_tx, ref_tx, chain, StateData) => {
 };
 const ValidUnit = (req_tx, ref_tx, chain, StateData) => {
     try {
-        const base_state = StateData.filter(s => s.owner === req_tx.meta.data.base[0])[0] || StateSet.CreateState();
+        const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
         const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
         if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
             return true;
@@ -286,8 +286,8 @@ const ValidUnit = (req_tx, ref_tx, chain, StateData) => {
         const empty_token = StateSet.CreateToken();
         switch (type) {
             case "buy":
-                const remit_state = StateData.filter(s => s.owner === remiter)[0] || empty_state;
-                const commit_token = StateData.filter(s => s.token === req_tx.meta.data.token)[0] || empty_token;
+                const remit_state = StateData.filter(s => { return s.kind === "state" && s.owner === remiter; })[0] || empty_state;
+                const commit_token = StateData.filter(s => { return s.kind === "token" && s.token === req_tx.meta.data.token; })[0] || empty_token;
                 const committed = item_refs.map(item => item.hash).some(key => {
                     return commit_token.committed.indexOf(key) != -1;
                 });
@@ -373,7 +373,7 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         return s.kind === "state" && s.token === native && s.owner === solvency && s.amount < _.tx_fee(tx) + gas;
     })[0];
     const base_states = base.map(key => {
-        return StateData.filter(s => s.owner === key)[0] || StateSet.CreateState();
+        return StateData.filter(s => { return s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
     });
     if (!exports.ValidTxBasic(tx, my_version)) {
         return false;
@@ -439,10 +439,10 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     };
     const token = req_tx.meta.data.token;
     const payee_state = StateData.filter(s => {
-        s.owner === payee && s.amount + req_tx.meta.data.gas < _.tx_fee(tx) && s.token === native;
+        return s.kind === "state" && s.owner === payee && s.amount + req_tx.meta.data.gas < _.tx_fee(tx) && s.token === native;
     })[0];
     const base_states = req_tx.meta.data.base.map(key => {
-        return StateData.filter(s => s.owner === key)[0] || StateSet.CreateState();
+        return StateData.filter(s => { s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
     });
     const pres = list_up_related(chain, req_tx.meta, "pre", []);
     const nexts = list_up_related(chain, req_tx.meta, "next", []);

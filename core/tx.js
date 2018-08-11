@@ -710,9 +710,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
         const new_states = ref_tx.raw.raw.map(obj => JSON.parse(obj));
         const pre_amount_sum = base_states.reduce((sum, state) => sum + state.amount, 0);
         const new_amount_sum = new_states.reduce((sum, state) => sum + state.amount, 0);
-        const new_token_info = Object.assign({ nonce: token_info.nonce, issued: token_info.issued + new_amount_sum - pre_amount_sum }, token_info);
-        const StateData_deleted = StateData.filter(s => { return s.kind === "token" || req_tx.meta.data.base.indexOf(s.owner) === -1; });
-        const owners = StateData.map(s => s.owner);
+        const new_token_info = Object.assign({ nonce: token_info.nonce + 1, issued: token_info.issued + new_amount_sum - pre_amount_sum }, token_info);
+        const StateData_deleted = StateData.filter(s => {
+            return s.kind === "token" || req_tx.meta.data.base.indexOf(s.owner) === -1;
+        }).map(s => {
+            if (s.kind === "token" && s.token === req_tx.meta.data.token)
+                return new_token_info;
+            else
+                return s;
+        });
+        const owners = StateData_deleted.map(s => s.owner);
         const StateData_added = ref_tx.raw.raw.reduce((states, val) => {
             const state = JSON.parse(val);
             if (state == null)
@@ -723,7 +730,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
             }
             else
                 return states.concat(state);
-        }, StateData);
+        }, StateData_deleted);
         const loc_addresses = LocationData.map(l => l.address);
         const LocationData_added = req_tx.meta.data.base.reduce((locs, key) => {
             const index = loc_addresses.indexOf(key);

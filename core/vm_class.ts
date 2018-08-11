@@ -1,5 +1,6 @@
 import * as _ from './basic';
 import * as T from './types';
+import {CreateState} from './state'
 
 export class vreath_vm_state{
     private _gas_sum:number = 0;
@@ -51,13 +52,11 @@ export class vreath_vm_state{
     }
 
     public add_states(news:T.State[]){
-        if(news.some(s=>s.hash!=_.ObjectHash(s.contents))) throw new Error("invalid state hash");
         this._states = this._states.concat(news);
         this._refresh_roots();
     }
 
     public change_states(pres:T.State[],news:T.State[]){
-        if(news.some(s=>s.hash!=_.ObjectHash(s.contents))) throw new Error("invalid state hash");
         pres.forEach((p,i)=>{
             const index = this._states.indexOf(p);
             this._states[index] = news[i];
@@ -73,19 +72,7 @@ export class vreath_vm_state{
         this._refresh_roots();
     }
 
-    public create_state(nonce:number,owner:string[],token:string,amount:number,data:{[key:string]: string;},product:string[]):T.State{
-        const contents:T.StateContent = {
-            nonce:nonce,
-            owner:owner,
-            token:token,
-            amount:amount,
-            data:data,
-            product:product
-        }
-        const hash = _.ObjectHash(contents);
-        return {
-            hash:hash,
-            contents:contents
-        }
+    public create_state(nonce:number,owner:string,token:string,amount:number,data:{[key:string]: string;},product:string[]):T.State{
+        return CreateState(nonce,owner,token,amount,data,product);
     }
 }

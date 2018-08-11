@@ -1,5 +1,3 @@
-import { Token } from "../core_arc/types";
-
 export type State = {
   kind:"state" | "token";
   nonce:number;
@@ -83,19 +81,6 @@ export type Candidates = {
   amount: number;
 }
 
-export type FraudInfo = {
-  flag:boolean;
-  index: number;
-  hash: string;
-  step: number;
-  data: string;
-}
-
-export type FraudData = {
-  states:State[],
-  inputs:any[]
-}
-
 export type BlockKind = "key" | "micro"
 
 export type BlockMeta = {
@@ -105,7 +90,6 @@ export type BlockMeta = {
   index:number;
   parenthash:string;
   timestamp: number;
-  fraud:FraudInfo;
   pow_target:number;
   pos_diff:number;
   validatorPub: string[];
@@ -132,7 +116,6 @@ export type Block = {
   natives:TxPure[];
   units:TxPure[];
   raws:TxRaw[];
-  fraudData:FraudData;
 }
 
 export type Pool = {

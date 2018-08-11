@@ -8,23 +8,22 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const TxSet = __importStar(require("./tx"));
-const check_tx = async (tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
+const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     if (tx.meta.kind == "request") {
-        return await TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
+        return TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
     }
     else if (tx.meta.kind == "refresh") {
-        return await TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData);
+        return TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData);
     }
     else
         return false;
 };
-async function Tx_to_Pool(pool, tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) {
-    if (!await check_tx(tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData))
+exports.Tx_to_Pool = (pool, tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
+    if (!check_tx(tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData))
         return pool;
     const new_pool = ((pool) => {
         pool[tx.hash] = tx;
         return pool;
     })(pool);
     return new_pool;
-}
-exports.Tx_to_Pool = Tx_to_Pool;
+};

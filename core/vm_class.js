@@ -8,6 +8,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const _ = __importStar(require("./basic"));
+const state_1 = require("./state");
 class vreath_vm_state {
     constructor(_states, _gas_limit, _finish_flag = false, _traced = []) {
         this._states = _states;
@@ -54,14 +55,10 @@ class vreath_vm_state {
         return this._state_roots;
     }
     add_states(news) {
-        if (news.some(s => s.hash != _.ObjectHash(s.contents)))
-            throw new Error("invalid state hash");
         this._states = this._states.concat(news);
         this._refresh_roots();
     }
     change_states(pres, news) {
-        if (news.some(s => s.hash != _.ObjectHash(s.contents)))
-            throw new Error("invalid state hash");
         pres.forEach((p, i) => {
             const index = this._states.indexOf(p);
             this._states[index] = news[i];
@@ -77,19 +74,7 @@ class vreath_vm_state {
         this._refresh_roots();
     }
     create_state(nonce, owner, token, amount, data, product) {
-        const contents = {
-            nonce: nonce,
-            owner: owner,
-            token: token,
-            amount: amount,
-            data: data,
-            product: product
-        };
-        const hash = _.ObjectHash(contents);
-        return {
-            hash: hash,
-            contents: contents
-        };
+        return state_1.CreateState(nonce, owner, token, amount, data, product);
     }
 }
 exports.vreath_vm_state = vreath_vm_state;

@@ -8,7 +8,7 @@ const en_key = (key:string):string=>{
 }
 
 const de_key = (key:string):string=>{
-  return rlp.decode(key);
+  return rlp.decode(key).toString();
 }
 
 const en_value = (value:any):string=>{

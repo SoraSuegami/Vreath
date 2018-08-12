@@ -1,20 +1,30 @@
 import * as rx from 'rxjs'
-import {IO, ioEvent} from 'rxjs-socket.io'
+import socket from 'socket.io'
+import * as http from 'http'
+import express from 'express'
 import {tx_accept,block_accept} from './index'
 import * as T from '../core/types'
 
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
 
-const socket = new IO();
-socket.connect('http://'+ip+':'+port);
-const onTx: ioEvent = new ioEvent('tx');
-const onBlock: ioEvent = new ioEvent('block');
+const app = express();
+const server = new http.Server(app);
+const io = socket(server);
 
-const tx$: rx.Subscription = socket.listenToEvent(onTx).event$.subscribe(async (tx:T.Tx)=>{
-    await tx_accept(tx);
+server.listen(port);
+app.use(express.static(__dirname+'/client'));
+app.get('/',(req, res) => {
+    res.sendFile(__dirname + '/client/index.html');
 });
 
-const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(async (block:T.Block)=>{
-    await block_accept(block);
+io.on('connect',(socket)=>{
+    socket.on('tx', async (msg:string)=>{
+        const tx:T.Tx = JSON.parse(msg);
+        await tx_accept(tx);
+    });
+    socket.on('block', async (msg:string)=>{
+        const block:T.Block = JSON.parse(msg);
+        await block_accept(block);
+    });
 });

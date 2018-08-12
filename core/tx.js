@@ -89,7 +89,7 @@ const requested_check = (base, LocationData) => {
     });
 };
 const hashed_pub_check = (state, pubs) => {
-    return state.owner.split(':')[2] != _.reduce_pub(pubs);
+    return state.owner.split(':')[2] != _.toHash(_.reduce_pub(pubs));
 };
 const refreshed_check = (base, index, tx_hash, LocationData) => {
     const addresses = LocationData.map(l => l.address);
@@ -370,7 +370,7 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
     const token = tx_data.token;
     const base = tx_data.base;
     const solvency_state = StateData.filter(s => {
-        return s.kind === "state" && s.token === native && s.owner === solvency && s.amount < _.tx_fee(tx) + gas;
+        return s.kind === "state" && s.token === native && s.owner === solvency && s.amount >= _.tx_fee(tx) + gas;
     })[0];
     const base_states = base.map(key => {
         return StateData.filter(s => { return s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();

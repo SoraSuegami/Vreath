@@ -1,0 +1,17 @@
+#vreath_title{
+    color: black;
+}
+
+#vreath_home_apps{
+    width: 450px;
+}
+
+.vreath_app_unit{
+    margin: 5px;
+	float: left;
+	list-style: none;
+}
+
+.vreath_app_name{
+    text-align:center
+}

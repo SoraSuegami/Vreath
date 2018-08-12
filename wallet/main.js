@@ -1,16 +1,36 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const rxjs_socket_io_1 = require("rxjs-socket.io");
+const socket_io_1 = __importDefault(require("socket.io"));
+const http = __importStar(require("http"));
+const express_1 = __importDefault(require("express"));
 const index_1 = require("./index");
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
-const socket = new rxjs_socket_io_1.IO();
-socket.connect('http://' + ip + ':' + port);
-const onTx = new rxjs_socket_io_1.ioEvent('tx');
-const onBlock = new rxjs_socket_io_1.ioEvent('block');
-const tx$ = socket.listenToEvent(onTx).event$.subscribe(async (tx) => {
-    await index_1.tx_accept(tx);
+const app = express_1.default();
+const server = new http.Server(app);
+const io = socket_io_1.default(server);
+server.listen(port);
+app.use(express_1.default.static(__dirname + '/client'));
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/client/index.html');
 });
-const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (block) => {
-    await index_1.block_accept(block);
+io.on('connect', (socket) => {
+    socket.on('tx', async (msg) => {
+        const tx = JSON.parse(msg);
+        await index_1.tx_accept(tx);
+    });
+    socket.on('block', async (msg) => {
+        const block = JSON.parse(msg);
+        await index_1.block_accept(block);
+    });
 });

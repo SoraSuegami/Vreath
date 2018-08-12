@@ -11,7 +11,7 @@ const en_key = (key) => {
     return rlp_1.default.encode(key);
 };
 const de_key = (key) => {
-    return rlp_1.default.decode(key);
+    return rlp_1.default.decode(key).toString();
 };
 const en_value = (value) => {
     return rlp_1.default.encode(JSON.stringify(value));

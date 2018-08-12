@@ -6,16 +6,30 @@ var __importStar = (this && this.__importStar) || function (mod) {
     result["default"] = mod;
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const _ = __importStar(require("../core/basic"));
-const CryptoSet = __importStar(require("../core/crypto_set"));
-const TxSet = __importStar(require("../core/tx"));
-const BlockSet = __importStar(require("../core/block"));
+const _ = __importStar(require("../../core/basic"));
+const CryptoSet = __importStar(require("../../core/crypto_set"));
+const merkle_patricia_1 = require("../../core/merkle_patricia");
+const TxSet = __importStar(require("../../core/tx"));
+const BlockSet = __importStar(require("../../core/block"));
 const P = __importStar(require("p-iteration"));
-const gen = __importStar(require("../genesis/index"));
-const con_1 = require("./con");
-const tx_pool_1 = require("../core/tx_pool");
-const db = __importStar(require("./db"));
+const con_1 = require("../con");
+const tx_pool_1 = require("../../core/tx_pool");
+const script_1 = require("./script");
+const level_browserify_1 = __importDefault(require("level-browserify"));
+const db = level_browserify_1.default('./db');
+exports.trie_ins = (root) => {
+    try {
+        return new merkle_patricia_1.Trie(db, root);
+    }
+    catch (e) {
+        console.log(e);
+        return new merkle_patricia_1.Trie(db);
+    }
+};
 const output_keys = (tx) => {
     if (tx.meta.kind === "request")
         return [];
@@ -41,7 +55,13 @@ exports.states_for_tx = async (tx, chain, S_Trie) => {
     const base = tx.meta.data.base;
     const outputs = output_keys(tx);
     const payes = pays(tx, chain);
-    const target = base.concat(outputs).concat(payes);
+    const concated = base.concat(outputs).concat(payes);
+    const target = concated.reduce((result, key, i) => {
+        if (result.filter(val => val === key).length >= 2)
+            return result.splice(i, 1);
+        else
+            return result;
+    }, concated);
     const states = Object.values(await S_Trie.filter((key) => {
         const i = target.indexOf(key);
         if (i != -1)
@@ -85,12 +105,12 @@ exports.states_for_block = async (block, chain, S_Trie) => {
     const native_token = await S_Trie.get(con_1.native);
     const unit_token = await S_Trie.get(con_1.unit);
     const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(unit_states).concat(native_token).concat(unit_token);
-    return concated.reduce((result, state) => {
-        if (concated.indexOf(state) != -1)
-            return result.concat(state);
+    return concated.reduce((result, state, i) => {
+        if (result.filter(val => val === state).length >= 2)
+            return result.splice(i, 1);
         else
             return result;
-    }, []);
+    }, concated);
 };
 exports.locations_for_block = async (block, chain, L_Trie) => {
     const targets = block.txs.concat(block.natives).concat(block.units);
@@ -98,26 +118,26 @@ exports.locations_for_block = async (block, chain, L_Trie) => {
     return result;
 };
 exports.tx_accept = async (tx) => {
-    const chain = await db.get('chain') || [];
-    const roots = await db.get('roots') || gen.roots;
+    const chain = script_1.store.state.chain;
+    const roots = script_1.store.state.roots;
     const stateroot = roots.stateroot;
-    const S_Trie = db.trie_ins(stateroot);
+    const S_Trie = exports.trie_ins(stateroot);
     const locationroot = roots.locationroot;
-    const L_Trie = db.trie_ins(locationroot);
-    const pool = await db.get('pool');
+    const L_Trie = exports.trie_ins(locationroot);
+    const pool = script_1.store.state.pool;
     const states = await exports.states_for_tx(tx, chain, S_Trie);
     const locations = await exports.locations_for_tx(tx, chain, L_Trie);
     const new_pool = tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, states, locations);
-    await db.put('pool', new_pool);
+    script_1.store.commit("pool", new_pool);
 };
 exports.block_accept = async (block) => {
-    const chain = await db.get('chain') || [];
-    const candidates = await db.get('candidates');
-    const roots = await db.get('roots') || gen.roots;
+    const chain = script_1.store.state.chain;
+    const candidates = script_1.store.state.candidates;
+    const roots = script_1.store.state.roots;
     const stateroot = roots.stateroot;
-    const S_Trie = db.trie_ins(stateroot);
+    const S_Trie = exports.trie_ins(stateroot);
     const locationroot = roots.locationroot;
-    const L_Trie = db.trie_ins(locationroot);
+    const L_Trie = exports.trie_ins(locationroot);
     const StateData = await exports.states_for_block(block, chain, S_Trie);
     const LocationData = await exports.locations_for_block(block, chain, L_Trie);
     const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
@@ -134,7 +154,40 @@ exports.block_accept = async (block) => {
         stateroot: S_Trie.now_root(),
         locationroot: L_Trie.now_root()
     };
-    await db.put('roots', new_roots);
-    await db.put('candidates', accepted.candidates);
-    await db.put('chain', chain.concat(accepted.block));
+    script_1.store.commit("roots", new_roots);
+    script_1.store.commit("candidates", accepted.candidates);
+    script_1.store.commit("chain", chain.concat(accepted.block));
+};
+exports.get_balance = async (address) => {
+    const S_Trie = exports.trie_ins(script_1.store.state.roots.stateroot || "");
+    const state = await S_Trie.get(address);
+    if (state == null)
+        return 0;
+    return state.amount;
+};
+exports.send_request_tx = async (to, amount, socket) => {
+    try {
+        const pub_key = [CryptoSet.PublicFromPrivate(script_1.store.state.secret)];
+        const from = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(pub_key));
+        const pre_tx = TxSet.CreateRequestTx(pub_key, from, 10, "scrap", con_1.native, [from], ["remit", to, "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 10);
+        const tx = TxSet.SignTx(pre_tx, script_1.store.state.secret, from);
+        console.log(tx);
+        const roots = script_1.store.state.roots;
+        const stateroot = roots.stateroot;
+        const S_Trie = exports.trie_ins(stateroot);
+        const locationroot = roots.locationroot;
+        const L_Trie = exports.trie_ins(locationroot);
+        const StateData = await exports.states_for_tx(tx, script_1.store.state.chain, S_Trie);
+        const LocationData = await exports.locations_for_tx(tx, script_1.store.state.chain, L_Trie);
+        if (!TxSet.ValidRequestTx(tx, con_1.my_version, con_1.native, con_1.unit, StateData, LocationData))
+            alert("invalid infomations");
+        else {
+            alert("remit!");
+            script_1.store.commit('refresh_pool', tx);
+            socket.emit('tx', JSON.stringify(tx));
+        }
+    }
+    catch (e) {
+        console.log(e);
+    }
 };

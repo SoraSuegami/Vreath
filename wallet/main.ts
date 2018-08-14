@@ -21,10 +21,10 @@ app.get('/',(req, res) => {
 io.on('connect',(socket)=>{
     socket.on('tx', async (msg:string)=>{
         const tx:T.Tx = JSON.parse(msg);
-        await tx_accept(tx);
+        await tx_accept(tx,socket);
     });
     socket.on('block', async (msg:string)=>{
         const block:T.Block = JSON.parse(msg);
-        await block_accept(block);
+        await block_accept(block,socket);
     });
 });

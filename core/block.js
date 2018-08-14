@@ -161,7 +161,6 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     const tx_root = meta.tx_root;
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
-    console.log(chain.length);
     const last = chain[chain.length - 1];
     const right_parenthash = (() => {
         if (last != null)
@@ -193,9 +192,6 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
         return false;
     }
     else if (parenthash != right_parenthash) {
-        console.log(chain);
-        console.log(parenthash);
-        console.log(right_parenthash);
         console.log("invalid parenthash");
         return false;
     }
@@ -426,7 +422,7 @@ exports.CreateMicroBlock = (version, shard_id, chain, pow_target, pos_diff, vali
         raws: raws
     };
 };
-exports.SignBlock = async (block, my_private, my_pub) => {
+exports.SignBlock = (block, my_private, my_pub) => {
     const index = block.meta.validatorPub.indexOf(my_pub);
     if (index === -1)
         return block;
@@ -483,7 +479,10 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
             return sum;
     }, 0);
     const shared = Object.assign({ amount: validator_state.amount - share_amount * (1 - rate) }, validator_state);
-    return StateData.slice().splice(index, 0, shared);
+    return StateData.map((val, i) => { if (i === index)
+        return shared;
+    else
+        return val; });
 };
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, StateData, LocationData) => {
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, StateData)) {
@@ -519,13 +518,13 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
         });
         const target = txs.concat(natives).concat(units);
         const sets = [StateData, LocationData];
+        const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
         const refreshed = target.reduce((result, tx) => {
             if (tx.meta.kind === "request") {
-                const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(block.meta.validatorPub));
                 return TxSet.AcceptRequestTx(tx, validator, block.meta.index, result[0], result[1]);
             }
             else if (tx.meta.kind === "refresh") {
-                return TxSet.AcceptRefreshTx(tx, chain, native, unit, result[0], result[1]);
+                return TxSet.AcceptRefreshTx(tx, chain, validator, native, unit, result[0], result[1]);
             }
             else
                 return result;

@@ -9,13 +9,19 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const _ = __importStar(require("../core/basic"));
 const CryptoSet = __importStar(require("../core/crypto_set"));
+const StateSet = __importStar(require("../core/state"));
 const TxSet = __importStar(require("../core/tx"));
 const BlockSet = __importStar(require("../core/block"));
 const P = __importStar(require("p-iteration"));
 const gen = __importStar(require("../genesis/index"));
 const con_1 = require("./con");
 const tx_pool_1 = require("../core/tx_pool");
+const fs = __importStar(require("fs"));
 const db = __importStar(require("./db"));
+fs.writeFileSync('./json/tx_pool.json', "{}");
+fs.writeFileSync('./json/root.json', JSON.stringify(gen.roots, null, '    '));
+fs.writeFileSync('./json/candidates.json', JSON.stringify(gen.candidates, null, '    '));
+fs.writeFileSync('./json/blockchain.json', JSON.stringify([gen.block], null, '    '));
 const output_keys = (tx) => {
     if (tx.meta.kind === "request")
         return [];
@@ -41,7 +47,13 @@ exports.states_for_tx = async (tx, chain, S_Trie) => {
     const base = tx.meta.data.base;
     const outputs = output_keys(tx);
     const payes = pays(tx, chain);
-    const target = base.concat(outputs).concat(payes);
+    const concated = base.concat(outputs).concat(payes);
+    const target = concated.reduce((result, key, index) => {
+        if (result.filter(val => val === key).length >= 2)
+            return result.filter((key, i) => index != i);
+        else
+            return result;
+    }, concated);
     const states = Object.values(await S_Trie.filter((key) => {
         const i = target.indexOf(key);
         if (i != -1)
@@ -70,50 +82,54 @@ exports.locations_for_tx = async (tx, chain, L_Trie) => {
 };
 exports.states_for_block = async (block, chain, S_Trie) => {
     const native_validator = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(block.meta.validatorPub));
-    const native_validator_state = await S_Trie.get(native_validator);
+    const native_validator_state = await S_Trie.get(native_validator) || [];
     const unit_validator = CryptoSet.GenereateAddress(con_1.unit, _.reduce_pub(block.meta.validatorPub));
-    const unit_validator_state = await S_Trie.get(unit_validator);
+    const unit_validator_state = await S_Trie.get(unit_validator) || [];
     const targets = block.txs.concat(block.natives).concat(block.units);
-    const tx_states = P.map(targets, async (tx) => await exports.states_for_tx(tx, chain, S_Trie));
-    const native_states = P.map(block.natives, async (tx) => await S_Trie.get(tx.raw.raw[1]));
-    const unit_states = P.map(block.units, async (tx) => {
-        const remiter = await S_Trie.get(tx.raw.raw[1]);
-        const items = JSON.parse(tx.raw.raw[2]) || [TxSet.empty_tx()];
-        const sellers = P.map(items, async (it) => await S_Trie.get(it.meta.data.payee));
+    const tx_states = await P.reduce(targets, async (result, tx) => result.concat(await exports.states_for_tx(tx, chain, S_Trie)), []);
+    const native_states = await P.map(block.natives, async (tx, i) => await S_Trie.get(block.raws[block.txs.length + i].raw[1]) || StateSet.CreateState(0, block.raws[block.txs.length + i].raw[1], con_1.native, 0));
+    const unit_states = await P.map(block.units, async (tx, i) => {
+        const remiter = await S_Trie.get(block.raws[block.txs.length + block.natives.length + i].raw[1]) || StateSet.CreateState(0, block.raws[block.txs.length + block.natives.length + i].raw[1], con_1.unit, 0);
+        const items = JSON.parse(block.raws[block.txs.length + block.natives.length + i].raw[2]) || [TxSet.empty_tx()];
+        const sellers = await P.map(items, async (it) => await S_Trie.get(it.meta.data.payee) || StateSet.CreateState(0, it.meta.data.payee, con_1.unit, 0));
         return sellers.concat(remiter);
-    });
+    }) || [];
     const native_token = await S_Trie.get(con_1.native);
     const unit_token = await S_Trie.get(con_1.unit);
     const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(unit_states).concat(native_token).concat(unit_token);
-    return concated.reduce((result, state) => {
-        if (concated.indexOf(state) != -1)
-            return result.concat(state);
+    return concated.reduce((result, state, index) => {
+        if (result.filter(val => _.ObjectHash(val) === _.ObjectHash(state)).length >= 2)
+            return result.filter((val, i) => index != i);
         else
             return result;
-    }, []);
+    }, concated);
 };
 exports.locations_for_block = async (block, chain, L_Trie) => {
     const targets = block.txs.concat(block.natives).concat(block.units);
-    const result = P.map(targets, async (tx) => await exports.locations_for_tx(tx, chain, L_Trie));
+    const result = await P.reduce(targets, async (result, tx) => result.concat(await exports.locations_for_tx(tx, chain, L_Trie)), []);
     return result;
 };
-exports.tx_accept = async (tx) => {
-    const chain = await db.get('chain') || [];
-    const roots = await db.get('roots') || gen.roots;
+exports.tx_accept = async (tx, socket) => {
+    const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
+    const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
     const stateroot = roots.stateroot;
     const S_Trie = db.trie_ins(stateroot);
     const locationroot = roots.locationroot;
     const L_Trie = db.trie_ins(locationroot);
-    const pool = await db.get('pool');
+    const pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8')) || {};
     const states = await exports.states_for_tx(tx, chain, S_Trie);
     const locations = await exports.locations_for_tx(tx, chain, L_Trie);
     const new_pool = tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, states, locations);
-    await db.put('pool', new_pool);
+    if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
+        fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
+        socket.emit('tx', JSON.stringify(tx));
+    }
 };
-exports.block_accept = async (block) => {
-    const chain = await db.get('chain') || [];
-    const candidates = await db.get('candidates');
-    const roots = await db.get('roots') || gen.roots;
+exports.block_accept = async (block, socket) => {
+    const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
+    console.log(block);
+    const candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8')) || gen.candidates;
+    const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
     const stateroot = roots.stateroot;
     const S_Trie = db.trie_ins(stateroot);
     const locationroot = roots.locationroot;
@@ -121,20 +137,26 @@ exports.block_accept = async (block) => {
     const StateData = await exports.states_for_block(block, chain, S_Trie);
     const LocationData = await exports.locations_for_block(block, chain, L_Trie);
     const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
-    P.forEach(accepted.state, async (state) => {
-        if (state.kind === "state")
-            await S_Trie.put(state.owner, state);
-        else
-            await S_Trie.put(state.token, state);
-    });
-    P.forEach(accepted.location, async (loc) => {
-        await L_Trie.put(loc.address, loc);
-    });
-    const new_roots = {
-        stateroot: S_Trie.now_root(),
-        locationroot: L_Trie.now_root()
-    };
-    await db.put('roots', new_roots);
-    await db.put('candidates', accepted.candidates);
-    await db.put('chain', chain.concat(accepted.block));
+    if (accepted.block.length > 0) {
+        await P.forEach(accepted.state, async (state) => {
+            if (state.kind === "state")
+                await S_Trie.put(state.owner, state);
+            else
+                await S_Trie.put(state.token, state);
+        });
+        await P.forEach(accepted.location, async (loc) => {
+            await L_Trie.put(loc.address, loc);
+        });
+        const new_roots = {
+            stateroot: S_Trie.now_root(),
+            locationroot: L_Trie.now_root()
+        };
+        fs.writeFileSync('./json/root.json', JSON.stringify(new_roots, null, '    '));
+        fs.writeFileSync('./json/candidates.json', JSON.stringify(accepted.candidates, null, '    '));
+        fs.writeFileSync('./json/blockchain.json', JSON.stringify(chain.concat(accepted.block), null, '    '));
+        console.log("received valid block");
+        socket.emit('block', JSON.stringify(block));
+    }
+    else
+        console.log("receive invalid block");
 };

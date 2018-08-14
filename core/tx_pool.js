@@ -21,9 +21,6 @@ const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, State
 exports.Tx_to_Pool = (pool, tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     if (!check_tx(tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData))
         return pool;
-    const new_pool = ((pool) => {
-        pool[tx.hash] = tx;
-        return pool;
-    })(pool);
+    const new_pool = Object.assign({ [tx.hash]: tx }, pool);
     return new_pool;
 };

@@ -19,6 +19,7 @@ const vuex_1 = __importDefault(require("vuex"));
 const at_ui_1 = __importDefault(require("at-ui"));
 const vue_router_1 = __importDefault(require("vue-router"));
 const gen = __importStar(require("../../genesis/index"));
+const P = __importStar(require("p-iteration"));
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
 const socket = new rxjs_socket_io_1.IO();
@@ -27,11 +28,13 @@ const onTx = new rxjs_socket_io_1.ioEvent('tx');
 const onBlock = new rxjs_socket_io_1.ioEvent('block');
 const tx$ = socket.listenToEvent(onTx).event$.subscribe(async (data) => {
     const tx = JSON.parse(data);
+    console.log(tx);
     exports.store.dispatch("tx_accept", tx);
 });
 const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
     const block = JSON.parse(data);
     exports.store.dispatch("block_accept", block);
+    console.log(exports.store.state.chain);
 });
 vue_1.default.use(vuex_1.default);
 vue_1.default.use(vue_router_1.default);
@@ -52,20 +55,35 @@ const def_apps = {
     wallet: wallet,
     setting: setting
 };
+const codes = {
+    "native": "function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0) return 0; const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}"
+};
 localStorage.removeItem("data");
 localStorage.removeItem("apps");
+localStorage.removeItem("code");
 localStorage.removeItem("pool");
 localStorage.removeItem("chain");
 localStorage.removeItem("roots");
 localStorage.removeItem("candidates");
+(async () => {
+    const S_Trie = index_1.trie_ins("");
+    await P.forEach(gen.state, async (s) => {
+        if (s.kind === "state")
+            await S_Trie.put(s.owner, s);
+        else
+            await S_Trie.put(s.token, s);
+    });
+    console.log(S_Trie.now_root());
+})();
 exports.store = new vuex_1.default.Store({
     state: {
         data: JSON.parse(localStorage.getItem("data") || "{}"),
         apps: JSON.parse(localStorage.getItem("apps") || JSON.stringify(def_apps)),
+        code: JSON.parse(localStorage.getItem("code") || JSON.stringify(codes)),
         pool: JSON.parse(localStorage.getItem("pool") || "{}"),
-        chain: JSON.parse(localStorage.getItem("chain") || "[]"),
+        chain: JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])),
         roots: JSON.parse(localStorage.getItem("roots") || JSON.stringify(gen.roots)),
-        candidates: JSON.parse(localStorage.getItem("candidates") || "[]"),
+        candidates: JSON.parse(localStorage.getItem("candidates") || JSON.stringify(gen.candidates)),
         secret: "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
     },
     mutations: {
@@ -82,7 +100,9 @@ exports.store = new vuex_1.default.Store({
             localStorage.setItem("pool", JSON.stringify(state.pool));
         },
         add_block(state, block) {
-            state.chain.concat(block);
+            state.chain = state.chain.concat(block).slice().sort((a, b) => {
+                return a.meta.index - b.meta.index;
+            });
             localStorage.setItem("chain", state.chain);
         },
         refresh_roots(state, roots) {
@@ -102,10 +122,28 @@ exports.store = new vuex_1.default.Store({
     },
     actions: {
         tx_accept(commit, tx) {
-            index_1.tx_accept(tx);
+            index_1.tx_accept(tx, socket);
+            index_1.send_key_block(socket);
         },
         block_accept(commit, block) {
-            index_1.block_accept(block);
+            index_1.block_accept(block, socket).then(() => {
+                const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+                console.log(reqs_pure);
+                if (reqs_pure.length > 0) {
+                    P.forEach(reqs_pure, async (pure) => {
+                        console.log("refresh!");
+                        const req_tx = index_1.pure_to_tx(pure, block);
+                        console.log(req_tx);
+                        const code = exports.store.state.code[req_tx.meta.data.token];
+                        index_1.send_refresh_tx(req_tx, block.meta.index, code, socket).then(() => {
+                            console.log(exports.store.state.chain);
+                            index_1.send_micro_block(socket);
+                        });
+                    });
+                }
+                else
+                    index_1.send_micro_block(socket);
+            });
         }
     }
 });
@@ -139,7 +177,7 @@ const Wallet = {
     data: function () {
         return {
             from: this.$store.getters.my_address,
-            to: "Vr:native:1181567ccfa945016eccca505107ec3b43f9541e158f87d8c9be0a678593995d",
+            to: "Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
             amount: "100",
             secret: this.$store.state.secret,
             balance: 0

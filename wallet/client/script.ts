@@ -1,6 +1,6 @@
 import * as rx from 'rxjs'
 import {IO, ioEvent} from 'rxjs-socket.io'
-import {tx_accept,block_accept,get_balance,send_request_tx} from './index'
+import {tx_accept,block_accept,get_balance,send_request_tx,send_refresh_tx,send_key_block,send_micro_block,pure_to_tx, trie_ins} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate} from '../con'
@@ -10,6 +10,8 @@ import AtComponents from 'at-ui'
 import VueRouter from 'vue-router'
 import * as gen from '../../genesis/index';
 import vm from 'js-vm';
+import * as P from 'p-iteration'
+
 
 
 const port = process.env.vreath_port || "57750";
@@ -23,12 +25,14 @@ const onBlock: ioEvent = new ioEvent('block');
 
 const tx$: rx.Subscription = socket.listenToEvent(onTx).event$.subscribe(async (data:string)=>{
     const tx:T.Tx = JSON.parse(data);
+    console.log(tx)
     store.dispatch("tx_accept",tx);
 });
 
 const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(async (data:string)=>{
     const block:T.Block = JSON.parse(data);
     store.dispatch("block_accept",block);
+    console.log(store.state.chain)
 });
 
 Vue.use(Vuex)
@@ -59,21 +63,37 @@ const def_apps:{[key:string]:Installed} = {
     wallet:wallet,
     setting:setting
 }
-localStorage.removeItem("data")
-localStorage.removeItem("apps")
-localStorage.removeItem("pool")
-localStorage.removeItem("chain")
-localStorage.removeItem("roots")
-localStorage.removeItem("candidates")
+
+const codes = {
+    "native":"function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0) return 0; const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}"
+}
+
+localStorage.removeItem("data");
+localStorage.removeItem("apps");
+localStorage.removeItem("code");
+localStorage.removeItem("pool");
+localStorage.removeItem("chain");
+localStorage.removeItem("roots");
+localStorage.removeItem("candidates");
+
+(async ()=>{
+    const S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        if(s.kind==="state") await S_Trie.put(s.owner,s);
+        else await S_Trie.put(s.token,s);
+    });
+    console.log(S_Trie.now_root());
+})();
 
 export const store = new Vuex.Store({
     state:{
         data:JSON.parse(localStorage.getItem("data")||"{}"),
         apps:JSON.parse(localStorage.getItem("apps")||JSON.stringify(def_apps)),
+        code:JSON.parse(localStorage.getItem("code")||JSON.stringify(codes)),
         pool:JSON.parse(localStorage.getItem("pool")||"{}"),
-        chain:JSON.parse(localStorage.getItem("chain")||"[]"),
+        chain:JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),
         roots:JSON.parse(localStorage.getItem("roots")||JSON.stringify(gen.roots)),
-        candidates:JSON.parse(localStorage.getItem("candidates")||"[]"),
+        candidates:JSON.parse(localStorage.getItem("candidates")||JSON.stringify(gen.candidates)),
         secret:"f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
     },
     mutations:{
@@ -90,7 +110,9 @@ export const store = new Vuex.Store({
             localStorage.setItem("pool",JSON.stringify(state.pool));
         },
         add_block(state,block:T.Block){
-            state.chain.concat(block);
+            state.chain = state.chain.concat(block).slice().sort((a:T.Block,b:T.Block)=>{
+                return a.meta.index - b.meta.index;
+            });
             localStorage.setItem("chain",state.chain);
         },
         refresh_roots(state,roots:{[key:string]:string}){
@@ -110,10 +132,27 @@ export const store = new Vuex.Store({
     },
     actions:{
         tx_accept(commit,tx:T.Tx){
-            tx_accept(tx);
+            tx_accept(tx,socket);
+            send_key_block(socket);
         },
         block_accept(commit,block:T.Block){
-            block_accept(block);
+            block_accept(block,socket).then(()=>{
+                const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
+                console.log(reqs_pure);
+                if(reqs_pure.length>0){
+                    P.forEach(reqs_pure,async (pure:T.TxPure)=>{
+                        console.log("refresh!")
+                        const req_tx = pure_to_tx(pure,block);
+                        console.log(req_tx);
+                        const code:string = store.state.code[req_tx.meta.data.token]
+                        send_refresh_tx(req_tx,block.meta.index,code,socket).then(()=>{
+                            console.log(store.state.chain);
+                            send_micro_block(socket);
+                        });
+                    })
+                }
+                else send_micro_block(socket);
+            });
         }
     }
 })
@@ -149,7 +188,7 @@ const Wallet = {
     data:function(){
         return{
             from:this.$store.getters.my_address,
-            to:"Vr:native:1181567ccfa945016eccca505107ec3b43f9541e158f87d8c9be0a678593995d",
+            to:"Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
             amount:"100",
             secret:this.$store.state.secret,
             balance:0

@@ -9,3 +9,5 @@ exports.max_blocks = 5;
 exports.block_size = 100000;
 exports.gas_limit = 25;
 exports.rate = 0.8;
+exports.pow_target = 100000000000000000000000000000000;
+exports.pos_diff = 10000000;

@@ -5,7 +5,7 @@ const db = level('./db');
 
 export const get = async (key:string)=>{
     try{
-        return await db.get(key);
+        return await db.get(key,{asBuffer:false});
     }
     catch(e){
         console.log(e);
@@ -15,7 +15,7 @@ export const get = async (key:string)=>{
 
 export const put = async (key:string,val:any)=>{
     try{
-        await db.put(key,val);
+        await db.put(key,JSON.stringify(val));
     }
     catch(e){
         console.log(e);

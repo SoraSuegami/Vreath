@@ -42,8 +42,7 @@ export type TxData = {
   request:string;
   index:number;
   payee:string;
-  output:string[];
-  trace:string[];
+  output:string;
 }
 
 export type TxMeta = {

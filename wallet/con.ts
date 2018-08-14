@@ -7,3 +7,5 @@ export const max_blocks = 5
 export const block_size = 100000;
 export const gas_limit = 25;
 export const rate  = 0.8;
+export const pow_target = 100000000000000000000000000000000;
+export const pos_diff = 10000000

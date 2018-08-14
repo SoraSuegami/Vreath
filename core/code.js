@@ -89,56 +89,32 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = (mode, code, states, step, input, tx, traced = [], gas_limit) => {
-    const ori_states = JSON.stringify(states);
-    const vreath = (() => {
-        switch (mode) {
-            case 0:
-                return new vm_class_1.vreath_vm_state(states, gas_limit, false, []);
-            case 1:
-                return new vm_class_1.vreath_vm_state(states, gas_limit, false, traced);
-            case 2:
-                return new vm_class_1.vreath_vm_state(states, gas_limit, true, traced);
-        }
-    })();
+exports.RunVM = (code, states, input, tx, gas_limit) => {
+    const vreath = new vm_class_1.vreath_vm_state(states.map(s => Object.assign({}, s)), gas_limit);
     try {
-        const identifier = ["vreath", "step", "input", "tx", "Number"];
+        const identifier = ["vreath", "input", "tx", "Number", "console"];
         const dependence = {
-            "vreath": ["gas_check", "end", "states", "gas_sum", "flag", "state_roots", "add_states", "change_states", "delete_states", "create_state"],
+            "vreath": ["gas_check", "states", "gas_sum", "state_roots", "add_states", "change_states", "delete_states", "create_state"],
             "tx": ["hash", "meta", "raw"],
-            "state": ["hash", "contents"]
+            "state": ["nonce", "owner", "token", "amount", "data", "product"],
+            "console": ["log"]
         };
         const checked = check(esp.parse(code), identifier, dependence);
-        const editted = edit(checked, JSON.parse(ori_states), gas_limit);
-        const generated = "(async ()=>{" + esc.generate(editted) + "if(!vreath.flag) main();})()";
-        console.log(generated);
+        const generated = esc.generate(checked) + "main();";
         const sandbox = {
             vreath,
-            step,
             input,
-            tx
+            tx,
+            console
         };
         js_vm_1.default.runInNewContext(generated, sandbox);
         const states = vreath.states;
-        const traced = vreath.state_roots;
-        return {
-            states: states,
-            traced: traced
-        };
+        console.log(states);
+        return states;
     }
     catch (e) {
         console.log(e);
-        if ((mode === 1 || mode == 2) && e.split("TraceError:").length == 2) {
-            const step = Number(e.split("TraceError:")[1]);
-            return {
-                states: vreath.states,
-                traced: vreath.state_roots.slice(0, -2)
-            };
-        }
-        return {
-            states: vreath.states,
-            traced: vreath.state_roots
-        };
+        return vreath.states;
     }
 };
 (async () => {

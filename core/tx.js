@@ -25,8 +25,7 @@ exports.empty_tx = () => {
         request: _.toHash(""),
         index: 0,
         payee: "[]",
-        output: [],
-        trace: []
+        output: ""
     };
     const meta = {
         kind: "request",
@@ -98,10 +97,10 @@ const refreshed_check = (base, index, tx_hash, LocationData) => {
         const val = LocationData[i];
         if (i === -1)
             return true;
-        else if (val.state === "already" && val.index === index && val.hash === tx_hash)
-            return false;
-        else
+        else if (val.state === "yet" && val.index === index && val.hash === tx_hash)
             return true;
+        else
+            return false;
     });
 };
 const state_check = (state, token_name_maxsize) => {
@@ -144,9 +143,9 @@ const output_check = (type, base_states, output_raw, token_name_maxsize, StateDa
             return false;
     }
     else {
-        const new_states = output_raw.map((o) => {
-            return JSON.parse(o);
-        });
+        const new_states = output_raw.reduce((arr, o) => {
+            return arr.concat(JSON.parse(o));
+        }, []);
         const bases = base_states.map(s => s.owner);
         const nonce_check = base_states.some((b, i) => b.nonce + 1 != new_states[i].nonce);
         if (new_states.some((s) => { return state_check(s, token_name_maxsize) || base_declaration_check(s, bases, StateData); }) || nonce_check)
@@ -186,13 +185,13 @@ const mining = (request, refresher, output, target) => {
     let num;
     do {
         nonce++;
-        num = _.Hex_to_Num(request) + nonce + _.Hex_to_Num(refresher) + _.Hex_to_Num(_.ObjectHash(output));
+        num = _.Hex_to_Num(request) + nonce + _.Hex_to_Num(refresher) + _.Hex_to_Num(output);
     } while (num > target);
     return nonce;
 };
 exports.find_req_tx = (ref_tx, chain) => {
     const index = ref_tx.meta.data.index || 0;
-    const req_pure = chain[index].txs.filter(tx => tx.hash === ref_tx.meta.data.request)[0];
+    const req_pure = chain[index].txs.filter(tx => tx.hash === ref_tx.meta.data.request).concat(chain[index].natives.filter(tx => tx.hash === ref_tx.meta.data.request)).concat(chain[index].units.filter(tx => tx.hash === ref_tx.meta.data.request))[0];
     if (req_pure == null)
         return exports.empty_tx();
     const req_raw = chain[index].raws[chain[index].txs.indexOf(req_pure)];
@@ -218,7 +217,7 @@ const ValidNative = (req_tx, ref_tx, chain, StateData) => {
     try {
         const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
         const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
-        if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
+        if (_.ObjectHash(base_state) === _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) === _.ObjectHash(StateSet.CreateState()))
             return true;
         const inputs = req_tx.raw.raw;
         const type = inputs[0];
@@ -229,7 +228,7 @@ const ValidNative = (req_tx, ref_tx, chain, StateData) => {
             state.nonce++;
             state.amount += amount;
             return state;
-        })(base_state);
+        })(Object.assign({}, base_state));
         switch (type) {
             case "remit":
                 return req_tx.meta.data.type != "scrap" || base_state.owner != req_tx.meta.data.address || new_state.amount - base_state.amount != amount || _.ObjectHash(valid_state) != _.ObjectHash(new_state) || amount >= 0;
@@ -280,7 +279,7 @@ const ValidUnit = (req_tx, ref_tx, chain, StateData) => {
             const payee = ref.meta.data.payee;
             const output = ref.meta.data.output;
             const pow_target = chain[ref.meta.data.index].meta.pow_target;
-            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target;
+            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target;
         });
         const empty_state = StateSet.CreateState();
         const empty_token = StateSet.CreateToken();
@@ -347,10 +346,6 @@ exports.ValidTxBasic = (tx, my_version) => {
         console.log("invalid signature");
         return false;
     }
-    else if (input != _.ObjectHash(raw_data)) {
-        console.log("invalid input hash");
-        return false;
-    }
     else if (log_hash != _.ObjectHash(log_raw)) {
         console.log("invalid log hash");
         return false;
@@ -369,6 +364,8 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
     const solvency = tx_data.solvency;
     const token = tx_data.token;
     const base = tx_data.base;
+    const input = tx_data.input;
+    const raw_data = tx.raw.raw;
     const solvency_state = StateData.filter(s => {
         return s.kind === "state" && s.token === native && s.owner === solvency && s.amount >= _.tx_fee(tx) + gas;
     })[0];
@@ -394,6 +391,10 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         console.log("base states are already requested");
         return false;
     }
+    else if (input != _.ObjectHash(raw_data)) {
+        console.log("invalid input hash");
+        return false;
+    }
     else if ((token === native || token === unit) && base.length != 1) {
         console.log("invalid natives txs");
         return false;
@@ -415,7 +416,6 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     const index = tx_data.index;
     const payee = tx_data.payee;
     const output = tx_data.output;
-    const trace = tx_data.trace;
     const raw = tx.raw;
     const output_raw = raw.raw;
     const pow_target = chain[index].meta.pow_target;
@@ -439,10 +439,10 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     };
     const token = req_tx.meta.data.token;
     const payee_state = StateData.filter(s => {
-        return s.kind === "state" && s.owner === payee && s.amount + req_tx.meta.data.gas < _.tx_fee(tx) && s.token === native;
+        return s.kind === "state" && s.owner === payee && s.amount + req_tx.meta.data.gas >= _.tx_fee(tx) && s.token === native;
     })[0];
     const base_states = req_tx.meta.data.base.map(key => {
-        return StateData.filter(s => { s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
+        return StateData.filter(s => { return s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
     });
     const pres = list_up_related(chain, req_tx.meta, "pre", []);
     const nexts = list_up_related(chain, req_tx.meta, "next", []);
@@ -453,7 +453,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid kind");
         return false;
     }
-    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(_.ObjectHash(output)) > pow_target) {
+    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target) {
         console.log("invalid nonce");
         return false;
     }
@@ -481,8 +481,8 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid payee");
         return false;
     }
-    else if (trace[0] != _.ObjectHash(base_states.map(b => _.ObjectHash(b))) || trace[trace.length - 1] != _.ObjectHash(output)) {
-        console.log("invalid trace");
+    else if (output != _.ObjectHash(output_raw)) {
+        console.log("invalid output hash");
         return false;
     }
     else if (output_check(req_tx.meta.data.type, base_states, output_raw, token_name_maxsize, StateData)) {
@@ -530,8 +530,7 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, input_raw,
         request: empty.meta.data.request,
         index: empty.meta.data.index,
         payee: empty.meta.data.payee,
-        output: empty.meta.data.output,
-        trace: empty.meta.data.trace
+        output: empty.meta.data.output
     };
     const purehash = _.ObjectHash(data);
     const meta = {
@@ -557,14 +556,14 @@ exports.CreateRequestTx = (pub_key, solvency, gas, type, token, base, input_raw,
     };
     return tx;
 };
-exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, request, index, payee, output_raw, trace, log_raw, chain) => {
+exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, request, index, payee, output_raw, log_raw, chain) => {
     const req_tx = _.find_tx(chain, request).meta;
     const token = req_tx.data.token;
     const address = CryptoSet.GenereateAddress(token, _.reduce_pub(pub_key));
     const date = new Date();
     const timestamp = date.getTime();
-    const output = output_raw.map(o => _.ObjectHash(JSON.parse(o)));
-    const log_hash = _.ObjectHash(log);
+    const output = _.ObjectHash(output_raw);
+    const log_hash = _.ObjectHash(log_raw);
     const empty = exports.empty_tx_pure();
     const data = {
         address: address,
@@ -580,8 +579,7 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
         request: request,
         index: index,
         payee: payee,
-        output: output,
-        trace: trace
+        output: output
     };
     const nonce = mining(request, JSON.stringify(payee), output, target);
     const meta = {
@@ -664,16 +662,20 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
             index: index,
             hash: tx.hash
         };
-        return LocationData.map(l => {
+        const mapped = LocationData.map(l => {
             if (l.address === key)
                 return new_loc;
             else
                 return l;
         });
+        if (_.ObjectHash(mapped) === _.ObjectHash(LocationData))
+            return LocationData.concat(new_loc);
+        else
+            return mapped;
     }, LocationData);
     return [StateData_added, LocationData_added];
 };
-exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData) => {
+exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, LocationData) => {
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {
         const token_info = JSON.parse(req_tx.raw.raw[0]);
@@ -711,7 +713,19 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
         const pre_amount_sum = base_states.reduce((sum, state) => sum + state.amount, 0);
         const new_amount_sum = new_states.reduce((sum, state) => sum + state.amount, 0);
         const new_token_info = Object.assign({ nonce: token_info.nonce + 1, issued: token_info.issued + new_amount_sum - pre_amount_sum }, token_info);
-        const StateData_deleted = StateData.filter(s => {
+        const solvency_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.solvency; })[0] || StateSet.CreateState(0, req_tx.meta.data.solvency, native, 0, {}, []);
+        const payee_state = StateData.filter(s => { return s.kind === "state" && s.owner === ref_tx.meta.data.payee; })[0] || StateSet.CreateState(0, ref_tx.meta.data.payee, native, 0, {}, []);
+        const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator; })[0] || StateSet.CreateState(0, validator, native, 0, {}, []);
+        const tx_fee = _.tx_fee(ref_tx);
+        const payed = exports.PayStates(solvency_state, payee_state, validator_state, ref_tx.meta.data.gas, tx_fee);
+        const payed_owners = payed.map(s => s.owner);
+        const StateData_payed = StateData.map(s => {
+            const index = payed_owners.indexOf(s.owner);
+            if (index === -1)
+                return s;
+            return payed[index];
+        });
+        const StateData_deleted = StateData_payed.filter(s => {
             return s.kind === "token" || req_tx.meta.data.base.indexOf(s.owner) === -1;
         }).map(s => {
             if (s.kind === "token" && s.token === req_tx.meta.data.token)
@@ -726,7 +740,10 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
                 return states;
             const index = owners.indexOf(state.owner);
             if (index != -1) {
-                return states.slice().splice(index, 0, state);
+                return states.map((val, i) => { if (index === i)
+                    return state;
+                else
+                    return val; });
             }
             else
                 return states.concat(state);
@@ -736,7 +753,10 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
             const index = loc_addresses.indexOf(key);
             const pre_loc = locs[index];
             const new_loc = Object.assign({ state: "yet" }, pre_loc);
-            return locs.slice().splice(index, 0, new_loc);
+            return locs.map((val, i) => { if (index === i)
+                return new_loc;
+            else
+                return val; });
         }, LocationData);
         if (req_tx.meta.data.token === native && req_tx.meta.data.type === "scrap" && req_tx.raw.raw[0] === "remit") {
             const receiver = req_tx.raw.raw[1];
@@ -781,10 +801,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
             const StateData_unit_remit = ((states) => {
                 const index = owners.indexOf(unit_address);
                 if (index != -1)
-                    return states.slice().splice(index, 0, new_unit_state);
+                    return states.map((val, i) => { if (index === i)
+                        return new_unit_state;
+                    else
+                        return val; });
                 else
                     return states.concat(new_unit_state);
-            })(StateData.slice().splice(owners.indexOf(remiter), 0, new_remiter));
+            })(StateData.map((val, i) => { if (i === owners.indexOf(remiter))
+                return new_remiter;
+            else
+                return val; }));
             const StateData_unit_recieve = sellers.reduce((states, seller) => {
                 const index = owners.indexOf(seller);
                 const amount = item_refs[index].meta.unit_price;
@@ -795,13 +821,22 @@ exports.AcceptRefreshTx = (ref_tx, chain, native, unit, StateData, LocationData)
                     nonce: pre.nonce,
                     amount: pre.amount + amount
                 };
-                return states.slice().splice(index, 0, Object.assign(recieved, pre));
+                return states.map((val, i) => { if (index === i)
+                    return Object.assign(recieved, pre);
+                else
+                    return val; });
             }, StateData_unit_remit);
             const pre_native = StateData.filter(s => { return s.kind === "token" && s.token === native; })[0];
             const new_native = Object.assign({ nonce: pre_native.nonce + item_refs.length }, pre_native);
             const pre_unit = StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0];
             const new_unit = Object.assign({ nonce: pre_unit.nonce + 1, issued: pre_unit.issued + item_refs.length }, pre_native);
-            const StateData_unit = StateData_unit_recieve.slice().splice(owners.indexOf(native), 0, new_native).splice(owners.indexOf(unit), 0, new_unit);
+            const StateData_unit = StateData_unit_recieve.map((val, i) => { if (i === owners.indexOf(native))
+                return new_native;
+            else
+                return val; }).map((val, i) => { if (i === owners.indexOf(unit))
+                return new_unit;
+            else
+                return val; });
             return [StateData_unit, LocationData_added];
         }
         return [StateData_added, LocationData_added];

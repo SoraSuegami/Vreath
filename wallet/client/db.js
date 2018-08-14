@@ -8,7 +8,7 @@ const merkle_patricia_1 = require("../../core/merkle_patricia");
 const db = level_browserify_1.default('./db');
 exports.get = async (key) => {
     try {
-        return await db.get(key);
+        return await db.get(key, { asBuffer: false });
     }
     catch (e) {
         console.log(e);
@@ -17,7 +17,7 @@ exports.get = async (key) => {
 };
 exports.put = async (key, val) => {
     try {
-        await db.put(key, val);
+        await db.put(key, JSON.stringify(val));
     }
     catch (e) {
         console.log(e);

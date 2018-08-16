@@ -1,1 +1,6 @@
-[{"address":["Vr:native:bb8461713e14cc28126de8d0d42139a7984e8ceea0d560a4e0caa6d1a6fe66bb"],"amount":100000000000000}]
+[
+    {
+        "address": "Vr:native:35bb582aaadec913443bf0370dd17c22fd53c7096538951bf58cd20dae460f75",
+        "amount": 100000000000000
+    }
+]

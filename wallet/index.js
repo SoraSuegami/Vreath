@@ -43,6 +43,17 @@ const pays = (tx, chain) => {
     else
         return [];
 };
+exports.pure_to_tx = (pure, block) => {
+    const index = block.txs.concat(block.natives).concat(block.units).indexOf(pure);
+    if (index === -1)
+        return TxSet.empty_tx();
+    const raw = block.raws[index];
+    return {
+        hash: pure.hash,
+        meta: pure.meta,
+        raw: raw
+    };
+};
 exports.states_for_tx = async (tx, chain, S_Trie) => {
     const base = tx.meta.data.base;
     const outputs = output_keys(tx);
@@ -85,12 +96,26 @@ exports.states_for_block = async (block, chain, S_Trie) => {
     const native_validator_state = await S_Trie.get(native_validator) || [];
     const unit_validator = CryptoSet.GenereateAddress(con_1.unit, _.reduce_pub(block.meta.validatorPub));
     const unit_validator_state = await S_Trie.get(unit_validator) || [];
-    const targets = block.txs.concat(block.natives).concat(block.units);
+    const targets = block.txs.concat(block.natives).concat(block.units).map(pure => exports.pure_to_tx(pure, block));
     const tx_states = await P.reduce(targets, async (result, tx) => result.concat(await exports.states_for_tx(tx, chain, S_Trie)), []);
-    const native_states = await P.map(block.natives, async (tx, i) => await S_Trie.get(block.raws[block.txs.length + i].raw[1]) || StateSet.CreateState(0, block.raws[block.txs.length + i].raw[1], con_1.native, 0));
+    const native_states = await P.map(block.natives, async (tx, i) => {
+        const b = (() => {
+            if (tx.meta.kind === "request")
+                return block;
+            else
+                return chain[tx.meta.data.index];
+        })();
+        return await S_Trie.get(b.raws[b.txs.length + i].raw[1]) || StateSet.CreateState(0, b.raws[b.txs.length + i].raw[1], con_1.native, 0);
+    });
     const unit_states = await P.map(block.units, async (tx, i) => {
-        const remiter = await S_Trie.get(block.raws[block.txs.length + block.natives.length + i].raw[1]) || StateSet.CreateState(0, block.raws[block.txs.length + block.natives.length + i].raw[1], con_1.unit, 0);
-        const items = JSON.parse(block.raws[block.txs.length + block.natives.length + i].raw[2]) || [TxSet.empty_tx()];
+        const b = (() => {
+            if (tx.meta.kind === "request")
+                return block;
+            else
+                return chain[tx.meta.data.index];
+        })();
+        const remiter = await S_Trie.get(b.raws[b.txs.length + b.natives.length + i].raw[1]) || StateSet.CreateState(0, b.raws[b.txs.length + b.natives.length + i].raw[1], con_1.unit, 0);
+        const items = JSON.parse(b.raws[b.txs.length + b.natives.length + i].raw[2]) || [TxSet.empty_tx()];
         const sellers = await P.map(items, async (it) => await S_Trie.get(it.meta.data.payee) || StateSet.CreateState(0, it.meta.data.payee, con_1.unit, 0));
         return sellers.concat(remiter);
     }) || [];
@@ -109,7 +134,8 @@ exports.locations_for_block = async (block, chain, L_Trie) => {
     const result = await P.reduce(targets, async (result, tx) => result.concat(await exports.locations_for_tx(tx, chain, L_Trie)), []);
     return result;
 };
-exports.tx_accept = async (tx, socket) => {
+exports.tx_accept = async (tx, io) => {
+    console.log(tx);
     const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
     const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
     const stateroot = roots.stateroot;
@@ -122,10 +148,11 @@ exports.tx_accept = async (tx, socket) => {
     const new_pool = tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, states, locations);
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
         fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
-        socket.emit('tx', JSON.stringify(tx));
+        console.log("receive valid tx");
+        io.emit('tx', JSON.stringify(tx));
     }
 };
-exports.block_accept = async (block, socket) => {
+exports.block_accept = async (block, io) => {
     const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
     console.log(block);
     const candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8')) || gen.candidates;
@@ -136,7 +163,7 @@ exports.block_accept = async (block, socket) => {
     const L_Trie = db.trie_ins(locationroot);
     const StateData = await exports.states_for_block(block, chain, S_Trie);
     const LocationData = await exports.locations_for_block(block, chain, L_Trie);
-    const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+    const accepted = BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
     if (accepted.block.length > 0) {
         await P.forEach(accepted.state, async (state) => {
             if (state.kind === "state")
@@ -151,12 +178,42 @@ exports.block_accept = async (block, socket) => {
             stateroot: S_Trie.now_root(),
             locationroot: L_Trie.now_root()
         };
+        const pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8')) || {};
+        const new_pool = ((p) => {
+            block.txs.concat(block.natives).concat(block.units).forEach(tx => {
+                delete p[tx.hash];
+            });
+            return p;
+        })(pool);
+        fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
         fs.writeFileSync('./json/root.json', JSON.stringify(new_roots, null, '    '));
         fs.writeFileSync('./json/candidates.json', JSON.stringify(accepted.candidates, null, '    '));
         fs.writeFileSync('./json/blockchain.json', JSON.stringify(chain.concat(accepted.block), null, '    '));
         console.log("received valid block");
-        socket.emit('block', JSON.stringify(block));
+        io.emit('block', JSON.stringify(block));
     }
     else
         console.log("receive invalid block");
+};
+exports.check_chain = async (new_chain, chain, io) => {
+    if (new_chain.length > chain.length) {
+        const pres = chain.slice().reverse();
+        const news = new_chain.slice().reverse();
+        let target = [];
+        for (let index in news) {
+            let i = Number(index);
+            if (pres[i] != null && pres[i] === news[i])
+                break;
+            else if (news[i].meta.kind === "key")
+                target.push(news[i]);
+            else if (news[i].meta.kind === "micro")
+                target.push(news[i]);
+        }
+        const add_blocks = target.slice().reverse();
+        const back_chain = chain.slice(0, add_blocks[0].meta.index - 1);
+        fs.writeFileSync('./json/blockchain.json', JSON.stringify(back_chain, null, '    '));
+        await P.forEach(add_blocks, async (block) => {
+            await exports.block_accept(block, io);
+        });
+    }
 };

@@ -39,14 +39,14 @@ exports.empty_block = () => {
         units: []
     };
 };
-const search_key_block = (chain) => {
+exports.search_key_block = (chain) => {
     for (let block of chain.reverse()) {
         if (block.meta.kind === "key")
             return block;
     }
     return exports.empty_block();
 };
-const search_micro_block = (chain, key_block) => {
+exports.search_micro_block = (chain, key_block) => {
     return chain.slice(key_block.meta.index).filter((block) => {
         return block.meta.kind === "micro" && _.reduce_pub(block.meta.validatorPub) === _.reduce_pub(key_block.meta.validatorPub);
     });
@@ -109,7 +109,7 @@ const Wait_block_time = (pre, block_time) => {
     } while (timestamp - pre < block_time);
     return timestamp;
 };
-const txs_check = (block, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
+exports.txs_check = (block, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     const txs = block.txs.map((tx, i) => {
         return {
             hash: tx.hash,
@@ -161,6 +161,9 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     const tx_root = meta.tx_root;
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
+    chain.sort((a, b) => {
+        return a.meta.index - b.meta.index;
+    });
     const last = chain[chain.length - 1];
     const right_parenthash = (() => {
         if (last != null)
@@ -260,7 +263,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         else
             return _.toHash('');
     })();
-    const key_block = search_key_block(chain);
+    const key_block = exports.search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
@@ -268,7 +271,10 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
     const date = new Date();
     const now = date.getTime();
-    const already_micro = search_micro_block(chain, key_block);
+    const already_micro = exports.search_micro_block(chain, key_block);
+    chain.sort((a, b) => {
+        return a.meta.index - b.meta.index;
+    });
     if (_.object_hash_check(hash, meta)) {
         console.log("invalid hash");
         return false;
@@ -333,7 +339,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("too many micro blocks");
         return false;
     }
-    else if (txs_check(block, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData)) {
+    else if (exports.txs_check(block, my_version, native, unit, chain.slice(), token_name_maxsize, StateData, LocationData)) {
         console.log("invalid txs");
         return false;
     }
@@ -355,7 +361,7 @@ exports.CreateKeyBlock = (version, shard_id, chain, block_time, max_blocks, pow_
     })();
     const validator_address = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator_address; })[0] || StateSet.CreateState(0, validator_address, unit, 0, {}, []);
-    const pre_key = search_key_block(chain);
+    const pre_key = exports.search_key_block(chain);
     const timestamp = (() => {
         const waited = Wait_block_time(pre_key.meta.timestamp, block_time * max_blocks);
         return PoS_mining(parenthash, validator_address, validator_state.amount, pos_diff);

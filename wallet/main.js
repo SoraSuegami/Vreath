@@ -14,6 +14,8 @@ const socket_io_1 = __importDefault(require("socket.io"));
 const http = __importStar(require("http"));
 const express_1 = __importDefault(require("express"));
 const index_1 = require("./index");
+const fs = __importStar(require("fs"));
+const gen = __importStar(require("../genesis/index"));
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
 const app = express_1.default();
@@ -27,10 +29,18 @@ app.get('/', (req, res) => {
 io.on('connect', (socket) => {
     socket.on('tx', async (msg) => {
         const tx = JSON.parse(msg);
-        await index_1.tx_accept(tx, socket);
+        await index_1.tx_accept(tx, io);
     });
     socket.on('block', async (msg) => {
         const block = JSON.parse(msg);
-        await index_1.block_accept(block, socket);
+        await index_1.block_accept(block, io);
+    });
+    socket.on('checkchain', async (msg) => {
+        socket.emit('replacechain', fs.readFileSync('./json/blockchain.json', 'utf-8'));
+    });
+    socket.on('replacechain', async (msg) => {
+        const new_chain = JSON.parse(msg);
+        const my_chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
+        await index_1.check_chain(new_chain.slice(), my_chain.slice(), socket);
     });
 });

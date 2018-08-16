@@ -34,14 +34,14 @@ export const empty_block = ():T.Block=>{
     }
 }
 
-const search_key_block = (chain:T.Block[])=>{
+export const search_key_block = (chain:T.Block[])=>{
     for(let block of chain.reverse()){
         if(block.meta.kind==="key") return block;
     }
     return empty_block();
 }
 
-const search_micro_block = (chain:T.Block[],key_block:T.Block):T.Block[]=>{
+export const search_micro_block = (chain:T.Block[],key_block:T.Block):T.Block[]=>{
     return chain.slice(key_block.meta.index).filter((block:T.Block)=>{
         return block.meta.kind==="micro"&&_.reduce_pub(block.meta.validatorPub)===_.reduce_pub(key_block.meta.validatorPub)
     });
@@ -103,7 +103,7 @@ const Wait_block_time = (pre:number,block_time:number)=>{
     return timestamp;
 }
 
-const txs_check = (block:T.Block,my_version:number,native:string,unit:string,chain:T.Block[],token_name_maxsize:number,StateData:T.State[],LocationData:T.Location[])=>{
+export const txs_check = (block:T.Block,my_version:number,native:string,unit:string,chain:T.Block[],token_name_maxsize:number,StateData:T.State[],LocationData:T.Location[])=>{
     const txs = block.txs.map((tx,i):T.Tx=>{
         return {
             hash:tx.hash,
@@ -157,6 +157,9 @@ export const ValidKeyBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,m
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
 
+    chain.sort((a:T.Block,b:T.Block)=>{
+        return a.meta.index - b.meta.index;
+    });
 
     const last = chain[chain.length-1];
     const right_parenthash = (()=>{
@@ -251,7 +254,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
     const txs = block.txs;
     const natives = block.natives;
     const units = block.units;
-    const raws:T.TxRaw[] = block.raws;
+    const raws = block.raws;
 
     const empty = empty_block();
     const last = chain[chain.length-1];
@@ -272,6 +275,9 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
     const now = date.getTime();
 
     const already_micro = search_micro_block(chain,key_block);
+    chain.sort((a:T.Block,b:T.Block)=>{
+        return a.meta.index - b.meta.index;
+    });
 
     if(_.object_hash_check(hash,meta)){
         console.log("invalid hash");
@@ -337,7 +343,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
         console.log("too many micro blocks");
         return false;
     }
-    else if(txs_check(block,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData)){
+    else if(txs_check(block,my_version,native,unit,chain.slice(),token_name_maxsize,StateData,LocationData)){
         console.log("invalid txs");
         return false;
     }

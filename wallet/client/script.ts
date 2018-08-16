@@ -1,6 +1,6 @@
 import * as rx from 'rxjs'
 import {IO, ioEvent} from 'rxjs-socket.io'
-import {tx_accept,block_accept,get_balance,send_request_tx,send_refresh_tx,send_key_block,send_micro_block,pure_to_tx, trie_ins} from './index'
+import {tx_accept,block_accept,get_balance,send_request_tx,trie_ins,check_chain} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate} from '../con'
@@ -22,17 +22,41 @@ socket.connect('http://'+ip+':'+port);
 
 const onTx: ioEvent = new ioEvent('tx');
 const onBlock: ioEvent = new ioEvent('block');
+const checkChain: ioEvent = new ioEvent('checkchain');
+const replaceChain: ioEvent = new ioEvent('replacechain');
 
 const tx$: rx.Subscription = socket.listenToEvent(onTx).event$.subscribe(async (data:string)=>{
-    const tx:T.Tx = JSON.parse(data);
-    console.log(tx)
-    store.dispatch("tx_accept",tx);
+    try{
+        const tx:T.Tx = JSON.parse(data);
+        console.log(tx)
+        await store.dispatch("tx_accept",tx);
+    }
+    catch(e){console.log(e);}
 });
 
 const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(async (data:string)=>{
-    const block:T.Block = JSON.parse(data);
-    store.dispatch("block_accept",block);
-    console.log(store.state.chain)
+    try{
+        const block:T.Block = JSON.parse(data);
+        const chain:T.Block[] = store.state.chain;
+        if(block.meta.index!=chain.length) socket.emit("checkchain");
+        else await store.dispatch("block_accept",block);
+        console.log(block)
+    }
+    catch(e){console.log(e);}
+});
+
+const checkchain$: rx.Subscription = socket.listenToEvent(checkChain).event$.subscribe(async (data:string)=>{
+    socket.emit('replacechain',JSON.stringify(store.state.chain));
+});
+
+const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.subscribe(async (data:string)=>{
+    try{
+        const chain:T.Block[] = JSON.parse(data);
+        console.log("replace:")
+        console.log(chain)
+        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.pool,store.state.roots,store.state.candidates,store.state.code,store.state.secret,socket);
+    }
+    catch(e){console.log(e);}
 });
 
 Vue.use(Vuex)
@@ -82,8 +106,10 @@ localStorage.removeItem("candidates");
         if(s.kind==="state") await S_Trie.put(s.owner,s);
         else await S_Trie.put(s.token,s);
     });
-    console.log(S_Trie.now_root());
+    socket.emit("checkchain");
 })();
+
+const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
 
 export const store = new Vuex.Store({
     state:{
@@ -94,7 +120,9 @@ export const store = new Vuex.Store({
         chain:JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),
         roots:JSON.parse(localStorage.getItem("roots")||JSON.stringify(gen.roots)),
         candidates:JSON.parse(localStorage.getItem("candidates")||JSON.stringify(gen.candidates)),
-        secret:"f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
+        secret:localStorage.getItem("secret")||CryptoSet.GenerateKeys(),
+        balance:0,
+        validator_mode:false
     },
     mutations:{
         add_app(state,obj:Installed){
@@ -113,7 +141,13 @@ export const store = new Vuex.Store({
             state.chain = state.chain.concat(block).slice().sort((a:T.Block,b:T.Block)=>{
                 return a.meta.index - b.meta.index;
             });
-            localStorage.setItem("chain",state.chain);
+            localStorage.setItem("chain",JSON.stringify(state.chain));
+        },
+        replace_chain(state,chain:T.Block[]){
+            state.chain = chain.slice().sort((a:T.Block,b:T.Block)=>{
+                return a.meta.index - b.meta.index;
+            });
+            localStorage.setItem("chain",JSON.stringify(state.chain));
         },
         refresh_roots(state,roots:{[key:string]:string}){
             state.roots = roots;
@@ -121,10 +155,20 @@ export const store = new Vuex.Store({
         },
         refresh_candidates(state,candidates:T.Candidates[]){
             state.candidates = candidates;
-            localStorage.setItem("candidates",state.candidates);
+            localStorage.setItem("candidates",JSON.stringify(state.candidates));
         },
         refresh_secret(state,secret:string){
             state.secret = secret;
+            localStorage.setItem("secret",state.secret);
+        },
+        refresh_balance(state,amount:number){
+            state.balance = amount;
+        },
+        validator_time(state){
+            state.validator_mode = true;
+            setTimeout(() => {
+                state.validator_mode = false;
+            }, block_time*max_blocks);
         }
     },
     getters:{
@@ -132,28 +176,25 @@ export const store = new Vuex.Store({
     },
     actions:{
         tx_accept(commit,tx:T.Tx){
-            tx_accept(tx,socket);
-            send_key_block(socket);
+            try{
+                tx_accept(tx,store.state.chain,store.state.roots,store.state.pool,store.state.secret,store.state.validator_mode,store.state.candidates,socket).then(()=>{
+                    console.log("tx accept");
+                })
+            }
+            catch(e){console.log(e)}
         },
         block_accept(commit,block:T.Block){
-            block_accept(block,socket).then(()=>{
-                const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
-                console.log(reqs_pure);
-                if(reqs_pure.length>0){
-                    P.forEach(reqs_pure,async (pure:T.TxPure)=>{
-                        console.log("refresh!")
-                        const req_tx = pure_to_tx(pure,block);
-                        console.log(req_tx);
-                        const code:string = store.state.code[req_tx.meta.data.token]
-                        send_refresh_tx(req_tx,block.meta.index,code,socket).then(()=>{
-                            console.log(store.state.chain);
-                            send_micro_block(socket);
-                        });
-                    })
-                }
-                else send_micro_block(socket);
-            });
-        }
+            try{
+                block_accept(block,store.state.chain,store.state.candidates,store.state.roots,store.state.pool,store.state.code,store.state.secret,socket).then(()=>{
+                    console.log("block accept");
+                    get_balance(store.getters.my_address).then((amount)=>{
+                        commit.commit("refresh_balance",amount);
+                    });
+
+                })
+            }
+            catch(e){console.log(e);}
+        },
     }
 })
 
@@ -187,20 +228,38 @@ const Wallet = {
     store,
     data:function(){
         return{
-            from:this.$store.getters.my_address,
             to:"Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
-            amount:"100",
-            secret:this.$store.state.secret,
-            balance:0
+            amount:"100"
         }
     },
     created:async function(){
-        this.balance = await get_balance(this.from)
+        const balance = await get_balance(this.from);
+        console.log(balance);
+        store.commit("refresh_balance",balance);
+    },
+    watch:{
+        refresh_balance:async function(){
+            const balance = await get_balance(this.from);
+            console.log(balance);
+            store.commit("refresh_balance",balance);
+        }
+    },
+    computed:{
+        from:function():string{
+            return this.$store.getters.my_address
+        },
+        balance:function():number{
+            return this.$store.state.balance;
+        },
+        secret:function():string{
+            return this.$store.state.secret;
+        }
     },
     methods:{
         remit:async function(){
             try{
-                await send_request_tx(this.to,this.amount,socket);
+                console.log("request");
+                await send_request_tx(this.$store.state.secret,this.to,this.amount,this.$store.state.roots,this.$store.state.chain,socket);
             }
             catch(e){console.log(e)}
         }
@@ -333,4 +392,6 @@ const router = new VueRouter({
 
 const app = new Vue({
     router: router
-}).$mount('#app')
+}).$mount('#app');
+
+

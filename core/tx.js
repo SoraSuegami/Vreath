@@ -10,6 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const _ = __importStar(require("./basic"));
 const CryptoSet = __importStar(require("./crypto_set"));
 const StateSet = __importStar(require("./state"));
+const BlockSet = __importStar(require("./block"));
 exports.empty_tx = () => {
     const data = {
         address: "",
@@ -74,7 +75,7 @@ exports.empty_location = () => {
         hash: _.toHash("")
     };
 };
-const requested_check = (base, LocationData) => {
+exports.requested_check = (base, LocationData) => {
     const addresses = LocationData.map(l => l.address);
     return base.some(key => {
         const index = addresses.indexOf(key);
@@ -90,7 +91,7 @@ const requested_check = (base, LocationData) => {
 const hashed_pub_check = (state, pubs) => {
     return state.owner.split(':')[2] != _.toHash(_.reduce_pub(pubs));
 };
-const refreshed_check = (base, index, tx_hash, LocationData) => {
+exports.refreshed_check = (base, index, tx_hash, LocationData) => {
     const addresses = LocationData.map(l => l.address);
     return base.some(key => {
         const i = addresses.indexOf(key);
@@ -191,10 +192,23 @@ const mining = (request, refresher, output, target) => {
 };
 exports.find_req_tx = (ref_tx, chain) => {
     const index = ref_tx.meta.data.index || 0;
-    const req_pure = chain[index].txs.filter(tx => tx.hash === ref_tx.meta.data.request).concat(chain[index].natives.filter(tx => tx.hash === ref_tx.meta.data.request)).concat(chain[index].units.filter(tx => tx.hash === ref_tx.meta.data.request))[0];
+    const block = chain[index] || BlockSet.empty_block();
+    const req_pure = block.txs.filter(tx => tx.hash === ref_tx.meta.data.request).concat(block.natives.filter(tx => tx.hash === ref_tx.meta.data.request)).concat(block.units.filter(tx => tx.hash === ref_tx.meta.data.request))[0];
     if (req_pure == null)
         return exports.empty_tx();
-    const req_raw = chain[index].raws[chain[index].txs.indexOf(req_pure)];
+    const raw_index = (() => {
+        const txs = block.txs.indexOf(req_pure);
+        if (txs != -1)
+            return txs;
+        const natives = block.natives.indexOf(req_pure);
+        if (natives != -1)
+            return block.txs.length + natives;
+        const units = block.units.indexOf(req_pure);
+        if (units != -1)
+            return block.txs.length + block.natives.length + units;
+        return -1;
+    })();
+    const req_raw = block.raws[raw_index];
     return {
         hash: req_pure.hash,
         meta: req_pure.meta,
@@ -257,47 +271,41 @@ const ValidNative = (req_tx, ref_tx, chain, StateData) => {
     }
 };
 const ValidUnit = (req_tx, ref_tx, chain, StateData) => {
-    try {
-        const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
-        const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
-        if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
-            return true;
-        const inputs = req_tx.raw.raw;
-        const type = inputs[0];
-        const remiter = inputs[1];
-        const item_refs = JSON.parse(inputs[2]) || [exports.empty_tx()];
-        const prices = item_refs.map(ref => ref.meta.unit_price);
-        const price_sum = prices.reduce((sum, p) => { return sum + p; }, 0);
-        const valid_state = prices.reduce((state, price) => {
-            state.nonce++;
-            state.amount += price;
-            return state;
-        }, base_state);
-        const mined_check = item_refs.some(ref => {
-            const request = ref.meta.data.request;
-            const nonce = ref.meta.nonce;
-            const payee = ref.meta.data.payee;
-            const output = ref.meta.data.output;
-            const pow_target = chain[ref.meta.data.index].meta.pow_target;
-            return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target;
-        });
-        const empty_state = StateSet.CreateState();
-        const empty_token = StateSet.CreateToken();
-        switch (type) {
-            case "buy":
-                const remit_state = StateData.filter(s => { return s.kind === "state" && s.owner === remiter; })[0] || empty_state;
-                const commit_token = StateData.filter(s => { return s.kind === "token" && s.token === req_tx.meta.data.token; })[0] || empty_token;
-                const committed = item_refs.map(item => item.hash).some(key => {
-                    return commit_token.committed.indexOf(key) != -1;
-                });
-                return mined_check || req_tx.meta.data.type != "issue" || base_state.owner != req_tx.meta.data.address || new_state.amount - base_state.amount != item_refs.length || req_tx.meta.pre.flag != true || valid_state != new_state || remit_state === empty_state || commit_token === empty_token || remit_state.amount - price_sum < 0 || committed;
-            default:
-                return true;
-        }
-    }
-    catch (e) {
-        console.log(e);
+    const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
+    const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
+    if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
         return true;
+    const inputs = req_tx.raw.raw;
+    const type = inputs[0];
+    const remiter = inputs[1];
+    const item_refs = JSON.parse(inputs[2]) || [exports.empty_tx()];
+    const prices = item_refs.map(ref => ref.meta.unit_price);
+    const price_sum = prices.reduce((sum, p) => { return sum + p; }, 0);
+    const valid_state = prices.reduce((state, price) => {
+        state.nonce++;
+        state.amount += price;
+        return state;
+    }, base_state);
+    const mined_check = item_refs.some(ref => {
+        const request = ref.meta.data.request;
+        const nonce = ref.meta.nonce;
+        const payee = ref.meta.data.payee;
+        const output = ref.meta.data.output;
+        const pow_target = chain[ref.meta.data.index].meta.pow_target;
+        return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target;
+    });
+    const empty_state = StateSet.CreateState();
+    const empty_token = StateSet.CreateToken();
+    switch (type) {
+        case "buy":
+            const remit_state = StateData.filter(s => { return s.kind === "state" && s.owner === remiter; })[0] || empty_state;
+            const commit_token = StateData.filter(s => { return s.kind === "token" && s.token === req_tx.meta.data.token; })[0] || empty_token;
+            const committed = item_refs.map(item => item.hash).some(key => {
+                return commit_token.committed.indexOf(key) != -1;
+            });
+            return mined_check || req_tx.meta.data.type != "issue" || base_state.owner != req_tx.meta.data.address || new_state.amount - base_state.amount != item_refs.length || req_tx.meta.pre.flag != true || valid_state != new_state || remit_state === empty_state || commit_token === empty_token || remit_state.amount - price_sum < 0 || committed;
+        default:
+            return true;
     }
 };
 exports.ValidTxBasic = (tx, my_version) => {
@@ -379,7 +387,7 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         console.log("invalid kind");
         return false;
     }
-    else if (solvency_state == null || hashed_pub_check(solvency_state, pub_key) || requested_check([solvency], LocationData)) {
+    else if (solvency_state == null || hashed_pub_check(solvency_state, pub_key) || exports.requested_check([solvency], LocationData)) {
         console.log("invalid solvency");
         return false;
     }
@@ -387,7 +395,7 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         console.log("invalid base");
         return false;
     }
-    else if (requested_check(base, LocationData)) {
+    else if (exports.requested_check(base, LocationData)) {
         console.log("base states are already requested");
         return false;
     }
@@ -418,20 +426,24 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     const output = tx_data.output;
     const raw = tx.raw;
     const output_raw = raw.raw;
-    const pow_target = chain[index].meta.pow_target;
+    const block = chain[index] || BlockSet.empty_block();
+    const pow_target = block.meta.pow_target;
     const req_tx = _.find_tx(chain, request);
     const req_raw = (() => {
-        const txs_index = chain[index].txs.indexOf(req_tx);
+        const txs_index = block.txs.indexOf(req_tx);
         if (txs_index != -1)
-            return chain[index].raws[txs_index];
-        const natives_index = chain[index].natives.indexOf(req_tx);
+            return block.raws[txs_index];
+        const natives_index = block.natives.indexOf(req_tx);
         if (natives_index != -1)
-            return chain[index].raws[natives_index];
-        const units_index = chain[index].units.indexOf(req_tx);
+            return block.raws[natives_index];
+        const units_index = block.units.indexOf(req_tx);
         if (units_index != -1)
-            return chain[index].raws[units_index];
+            return block.raws[units_index];
         return exports.empty_tx().raw;
     })();
+    chain = chain.slice().sort((a, b) => {
+        return a.meta.index - b.meta.index;
+    });
     const req_tx_full = {
         hash: req_tx.hash,
         meta: req_tx.meta,
@@ -453,7 +465,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid kind");
         return false;
     }
-    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target) {
+    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(output) > pow_target) {
         console.log("invalid nonce");
         return false;
     }
@@ -466,14 +478,13 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         return false;
     }
     else if (req_tx == exports.empty_tx_pure() || (chain[tx.meta.data.index].txs.indexOf(req_tx) === -1 && chain[tx.meta.data.index].natives.indexOf(req_tx) === -1 && chain[tx.meta.data.index].units.indexOf(req_tx) === -1)) {
-        console.log("invalid request hash");
         return false;
     }
-    else if (refreshed_check(req_tx.meta.data.base, index, request, LocationData)) {
+    else if (exports.refreshed_check(req_tx.meta.data.base, index, request, LocationData)) {
         console.log("base states are already refreshed");
         return false;
     }
-    else if (refreshed_check([req_tx.meta.data.solvency], index, request, LocationData)) {
+    else if (exports.refreshed_check([req_tx.meta.data.solvency], index, request, LocationData)) {
         console.log("invalid solvency");
         return false;
     }
@@ -676,6 +687,9 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
     return [StateData_added, LocationData_added];
 };
 exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, LocationData) => {
+    chain = chain.sort((a, b) => {
+        return a.meta.index - b.meta.index;
+    });
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {
         const token_info = JSON.parse(req_tx.raw.raw[0]);
@@ -752,7 +766,10 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
         const LocationData_added = req_tx.meta.data.base.reduce((locs, key) => {
             const index = loc_addresses.indexOf(key);
             const pre_loc = locs[index];
-            const new_loc = Object.assign({ state: "yet" }, pre_loc);
+            const new_loc = ((loc) => {
+                loc.state = "yet";
+                return loc;
+            })(Object.assign({}, pre_loc));
             return locs.map((val, i) => { if (index === i)
                 return new_loc;
             else
@@ -762,9 +779,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             const receiver = req_tx.raw.raw[1];
             const amount = -1 * Number(req_tx.raw.raw[2]);
             const receiver_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === receiver; })[0] || StateSet.CreateState(0, receiver, native, 0, {}, []);
-            const recieved = Object.assign({ nonce: receiver_state.nonce + 1, amount: receiver_state.amount + amount }, receiver_state);
+            const recieved = ((state) => {
+                state.nonce++;
+                state.amount += amount;
+                return state;
+            })(Object.assign({}, receiver_state));
             const native_info = StateData_added.filter(s => { return s.kind === "token" && s.token === native; })[0];
-            const native_added = Object.assign({ nonce: native_info.nonce + 1 }, native_info);
+            const native_added = ((state) => {
+                state.nonce++;
+                return state;
+            })(Object.assign({}, native_info));
             const StateData_native = StateData_added.map(s => {
                 if (s.kind === "state" && s.owner === receiver)
                     return recieved;
@@ -785,18 +809,18 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                 return sum + ref.meta.unit_price;
             }, 0);
             const remiter_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === remiter; })[0];
-            const remited = {
-                nonce: remiter_state.nonce + 1,
-                amount: remiter_state.amount - price_sum
-            };
-            const new_remiter = Object.assign(remited, remiter_state);
+            const new_remiter = ((state) => {
+                state.nonce++;
+                state.amount -= price_sum;
+                return state;
+            })(Object.assign({}, remiter_state));
             const unit_address = CryptoSet.GenereateAddress(unit, _.reduce_pub(req_tx.meta.data.pub_key));
             const unit_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === unit_address; })[0] || StateSet.CreateState(0, unit_address, unit, 0, {}, []);
-            const issued_unit = {
-                nonce: unit_state.nonce + 1,
-                amount: unit_state.amount + item_refs.length
-            };
-            const new_unit_state = Object.assign(issued_unit, unit_state);
+            const new_unit_state = ((state) => {
+                state.nonce++;
+                state.amount += item_refs.length;
+                return state;
+            })(Object.assign({}, unit_state));
             const owners = StateData_added.map(s => s.owner);
             const StateData_unit_remit = ((states) => {
                 const index = owners.indexOf(unit_address);
@@ -827,9 +851,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                     return val; });
             }, StateData_unit_remit);
             const pre_native = StateData.filter(s => { return s.kind === "token" && s.token === native; })[0];
-            const new_native = Object.assign({ nonce: pre_native.nonce + item_refs.length }, pre_native);
+            const new_native = ((state) => {
+                state.nonce += item_refs.length;
+                return state;
+            })(Object.assign({}, pre_native));
             const pre_unit = StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0];
-            const new_unit = Object.assign({ nonce: pre_unit.nonce + 1, issued: pre_unit.issued + item_refs.length }, pre_native);
+            const new_unit = ((state) => {
+                state.nonce++;
+                state.issued += item_refs.length;
+                return state;
+            })(Object.assign({}, pre_native));
             const StateData_unit = StateData_unit_recieve.map((val, i) => { if (i === owners.indexOf(native))
                 return new_native;
             else

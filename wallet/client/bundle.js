@@ -100466,6 +100466,7 @@ const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genes
 const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
+console.log(ip);
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
 const onTx = new rxjs_socket_io_1.ioEvent('tx');

@@ -16,6 +16,7 @@ import * as P from 'p-iteration'
 
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
+console.log(ip)
 
 const socket = new IO();
 socket.connect('http://'+ip+':'+port);

@@ -100465,7 +100465,7 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
 const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
 const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
 const port = process.env.vreath_port || "57750";
-const ip = "localhost"; //"163.44.175.141";
+const ip = process.env.vreath_port || "localhost";
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
 const onTx = new rxjs_socket_io_1.ioEvent('tx');

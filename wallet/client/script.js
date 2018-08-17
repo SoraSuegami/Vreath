@@ -21,7 +21,7 @@ const vue_router_1 = __importDefault(require("vue-router"));
 const gen = __importStar(require("../../genesis/index"));
 const P = __importStar(require("p-iteration"));
 const port = process.env.vreath_port || "57750";
-const ip = "localhost"; //"163.44.175.141";
+const ip = process.env.vreath_port || "localhost";
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
 const onTx = new rxjs_socket_io_1.ioEvent('tx');

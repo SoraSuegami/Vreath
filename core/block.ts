@@ -459,7 +459,7 @@ const CandidatesForm = (states:T.State[]):T.Candidates[]=>{
     });
 }
 
-const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
+export const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
     return CandidatesForm(reduce_units(get_units(unit,StateData),rate))
 }
 

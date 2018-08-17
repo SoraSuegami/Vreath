@@ -650,7 +650,7 @@ const CandidatesForm = (states) => {
         return { address: state.owner, amount: state.amount };
     });
 };
-const NewCandidates = (unit, rate, StateData) => {
+exports.NewCandidates = (unit, rate, StateData) => {
     return CandidatesForm(reduce_units(get_units(unit, StateData), rate));
 };
 /*const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
@@ -692,7 +692,7 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
 };
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, StateData, LocationData) => {
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, StateData)) {
-        const new_candidates = NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData);
         return {
             state: StateData,
             location: LocationData,
@@ -736,7 +736,7 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
                 return result;
         }, sets);
         const unit_changed = change_unit_amounts(block, unit, rate, refreshed[0]);
-        const new_candidates = NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData);
         return {
             state: unit_changed,
             location: refreshed[1],
@@ -1772,16 +1772,29 @@ exports.SignTx = (tx, my_private, my_address) => {
 exports.PayFee = (solvency, validator, fee) => {
     if (solvency.owner === validator.owner)
         return [solvency, validator];
-    solvency.amount -= fee;
-    validator.amount += fee;
-    return [solvency, validator];
+    console.log(fee);
+    const new_solvency = ((solvency) => {
+        solvency.amount -= fee;
+        return solvency;
+    })(Object.assign({}, solvency));
+    const new_validator = ((validator) => {
+        validator.amount -= fee;
+        return validator;
+    })(Object.assign({}, validator));
+    return [new_solvency, new_validator];
 };
 exports.PayGas = (solvency, payee, gas) => {
     if (solvency.owner === payee.owner)
         return [solvency, payee];
-    solvency.amount -= gas;
-    payee.amount += gas;
-    return [solvency, payee];
+    const new_solvency = ((solvency) => {
+        solvency.amount -= gas;
+        return solvency;
+    })(Object.assign({}, solvency));
+    const new_payee = ((payee) => {
+        payee.amount -= gas;
+        return payee;
+    })(Object.assign({}, payee));
+    return [new_solvency, new_payee];
 };
 exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => {
     const after_gas = exports.PayGas(solvency_state, payee_state, gas);
@@ -1801,6 +1814,8 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
     const validator_state = StateData.filter(s => s.owner === validator)[0];
     const fee = _.tx_fee(tx);
     const after = exports.PayFee(solvency_state, validator_state, fee);
+    console.log("after:");
+    console.log(after);
     const StateData_added = StateData.map(s => {
         if (s.owner === after[0].owner)
             return after[0];
@@ -100052,7 +100067,7 @@ const random_chose = (array, num) => {
     }
     return array.slice(0, num);
 };
-exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candidates, socket) => {
+exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candidates, codes, socket) => {
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
     const locationroot = roots.locationroot;
@@ -100066,16 +100081,16 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candi
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool) && unit_amount > 0) {
         script_1.store.commit("refresh_pool", new_pool);
         if (validator_mode && tx.meta.kind === "refresh")
-            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.slice(), candidates.slice(), Object.assign({}, roots), socket);
+            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.slice(), candidates.slice(), Object.assign({}, roots), codes, validator_mode, socket);
         else
-            await exports.send_key_block(chain.slice(), secret, candidates.slice(), Object.assign({}, roots), socket);
+            await exports.send_key_block(chain.slice(), secret, candidates.slice(), Object.assign({}, roots), Object.assign({}, new_pool), codes, validator_mode, socket);
         //socket.emit('tx',JSON.stringify(tx))
         return new_pool;
     }
     else
         return pool;
 };
-exports.block_accept = async (block, chain, candidates, roots, pool, codes, secret, socket) => {
+exports.block_accept = async (block, chain, candidates, roots, pool, codes, secret, mode, socket) => {
     try {
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
@@ -100110,13 +100125,13 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
             await script_1.store.commit("add_block", accepted.block[0]);
             //socket.emit('block',JSON.stringify(block));
             const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
-            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.concat(accepted.block[0]), accepted.candidates.slice(), Object.assign({}, new_roots), socket);
+            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.concat(accepted.block[0]), accepted.candidates.slice(), Object.assign({}, new_roots), codes, mode, socket);
             if (reqs_pure.length > 0) {
                 await P.forEach(reqs_pure, async (pure) => {
                     console.log("refresh!");
                     const req_tx = exports.pure_to_tx(pure, block);
                     const code = codes[req_tx.meta.data.token];
-                    await exports.send_refresh_tx(Object.assign({}, new_roots), secret, req_tx, block.meta.index, code, chain.concat(accepted.block[0]), socket);
+                    await exports.send_refresh_tx(Object.assign({}, new_roots), secret, req_tx, block.meta.index, code, chain.concat(accepted.block[0]), Object.assign({}, new_pool), mode, accepted.candidates.slice(), codes, socket);
                 });
             }
             return {
@@ -100181,11 +100196,11 @@ exports.get_balance = async (address) => {
         return 0;
     return state.amount;
 };
-exports.send_request_tx = async (secret, to, amount, roots, chain, socket) => {
+exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, candidates, codes, socket) => {
     try {
         const pub_key = [CryptoSet.PublicFromPrivate(secret)];
         const from = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(pub_key));
-        const pre_tx = TxSet.CreateRequestTx(pub_key, from, 10, "scrap", con_1.native, [from], ["remit", to, "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 0.0000000001);
+        const pre_tx = TxSet.CreateRequestTx(pub_key, from, 10, "scrap", con_1.native, [from], ["remit", to, "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 0.05);
         const tx = TxSet.SignTx(pre_tx, secret, from);
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
@@ -100197,10 +100212,12 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, socket) => {
             alert("invalid infomations");
         else {
             alert("remit!");
+            socket.emit('tx', JSON.stringify(tx));
+            await script_1.store.dispatch("tx_accept", tx);
+            //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
             const new_pool = Object.assign({[tx.hash]:tx},pool);
             store.commit('refresh_pool',new_pool);*/
-            socket.emit('tx', JSON.stringify(tx));
             /*await send_key_block(socket);
             await send_micro_block(socket);*/
         }
@@ -100209,7 +100226,7 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, socket) => {
         console.log(e);
     }
 };
-exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, socket) => {
+exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool, mode, candidates, codes, socket) => {
     try {
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
@@ -100221,7 +100238,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, sock
         const pre_states = await P.map(req_pure.meta.data.base, async (add) => await S_Trie.get(add));
         const output_states = code_1.RunVM(code, pre_states, req_tx.raw.raw, req_pure, con_1.gas_limit);
         const output_raws = output_states.map(state => JSON.stringify(state));
-        const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 10, pub_key, con_1.pow_target, 0.0000000001, req_tx.hash, index, payee, output_raws, [], chain);
+        const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 10, pub_key, con_1.pow_target, 0.05, req_tx.hash, index, payee, output_raws, [], chain);
         const tx = TxSet.SignTx(pre_tx, secret, payee);
         const StateData = await exports.states_for_tx(tx, chain, S_Trie);
         const LocationData = await exports.locations_for_tx(tx, chain, L_Trie);
@@ -100229,17 +100246,19 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, sock
             console.log("fail to create valid refresh");
         else {
             console.log("create valid refresh tx");
+            socket.emit('tx', JSON.stringify(tx));
+            await script_1.store.dispatch("tx_accept", tx);
+            //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
             const new_pool = Object.assign({[tx.hash]:tx},pool);
             store.commit('refresh_pool',new_pool);*/
-            socket.emit('tx', JSON.stringify(tx));
         }
     }
     catch (e) {
         console.log(e);
     }
 };
-exports.send_key_block = async (chain, secret, candidates, roots, socket) => {
+exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, mode, socket) => {
     const pub_key = [CryptoSet.PublicFromPrivate(secret)];
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
@@ -100256,9 +100275,11 @@ exports.send_key_block = async (chain, secret, candidates, roots, socket) => {
         console.log("fail to create valid block");
     else {
         socket.emit('block', JSON.stringify(key_block));
+        await script_1.store.dispatch("block_accept", key_block);
+        //await block_accept(key_block,chain,candidates,roots,pool,codes,secret,mode,socket);
     }
 };
-exports.send_micro_block = async (pool, secret, chain, candidates, roots, socket) => {
+exports.send_micro_block = async (pool, secret, chain, candidates, roots, codes, mode, socket) => {
     if (Object.keys(pool).length > 0) {
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
@@ -100318,6 +100339,9 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, socket
             })(pool);
             store.commit('refresh_pool',new_pool);*/
             socket.emit('block', JSON.stringify(micro_block));
+            await script_1.store.dispatch("block_accept", micro_block);
+            //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
+            console.log(socket);
             console.log("create micro block");
             //await send_micro_block(socket);
         }
@@ -100328,7 +100352,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, socket
                 return p;
             })(Object.assign({}, pool));
             script_1.store.commit("refresh_pool", del_pool);
-            await exports.send_micro_block(del_pool, secret, chain, candidates, roots, socket);
+            await exports.send_micro_block(del_pool, secret, chain, candidates, roots, codes, mode, socket);
         }
         else {
             console.log("fall to create micro block;");
@@ -100337,7 +100361,30 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, socket
     else
         script_1.store.commit('validator_time');
 };
-exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes, secret, socket) => {
+const get_pre_info = async (block, chain) => {
+    const pre_block = chain[chain.length - 1];
+    const S_Trie = exports.trie_ins(pre_block.meta.stateroot);
+    const StateData = await exports.states_for_block(pre_block, chain, S_Trie);
+    const L_Trie = exports.trie_ins(pre_block.meta.locationroot);
+    const LocationData = await exports.locations_for_block(pre_block, chain, L_Trie);
+    const candidates = BlockSet.NewCandidates(con_1.unit, con_1.rate, StateData);
+    const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, S_Trie.now_root(), L_Trie.now_root(), con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+    await P.forEach(accepted.state, async (state) => {
+        if (state.kind === "state")
+            await S_Trie.put(state.owner, state);
+        else
+            await S_Trie.put(state.token, state);
+    });
+    await P.forEach(accepted.location, async (loc) => {
+        await L_Trie.put(loc.address, loc);
+    });
+    const pre_root = {
+        stateroot: S_Trie.now_root(),
+        locationroot: L_Trie.now_root()
+    };
+    return [pre_root, accepted.candidates];
+};
+exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes, secret, mode, socket) => {
     if (new_chain.length > my_chain.length) {
         const news = new_chain.slice().reverse();
         let target = [];
@@ -100355,14 +100402,26 @@ exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes
         console.log("add_block:");
         console.log(add_blocks);
         script_1.store.commit("replace_chain", back_chain);
-        const info = {
-            pool: pool,
-            roots: roots,
-            candidates: candidates,
-            chain: back_chain
-        };
+        const info = await (async () => {
+            if (back_chain.length === 1) {
+                return {
+                    pool: pool,
+                    roots: roots,
+                    candidates: candidates,
+                    chain: back_chain
+                };
+            }
+            console.log(back_chain.length);
+            const pre_info = await get_pre_info(back_chain[back_chain.length - 1], back_chain);
+            return {
+                pool: pool,
+                roots: pre_info[0],
+                candidates: pre_info[1],
+                chain: back_chain
+            };
+        })();
         await P.reduce(add_blocks, async (result, block) => {
-            const accepted = await exports.block_accept(block, result.chain.slice(), result.candidates.slice(), result.roots, result.pool, codes, secret, socket);
+            const accepted = await exports.block_accept(block, result.chain.slice(), result.candidates.slice(), result.roots, result.pool, codes, secret, mode, socket);
             const amount = await exports.get_balance(script_1.store.getters.my_address);
             script_1.store.commit("refresh_balance", amount);
             return accepted;
@@ -100406,7 +100465,7 @@ const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./no
 const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
 const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
 const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_port || "localhost";
+const ip = "localhost"; //"163.44.175.141";
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
 const onTx = new rxjs_socket_io_1.ioEvent('tx');
@@ -100427,7 +100486,7 @@ const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
     try {
         const block = JSON.parse(data);
         const chain = exports.store.state.chain;
-        if (block.meta.index != chain.length)
+        if (block.meta.index > chain.length)
             socket.emit("checkchain");
         else
             await exports.store.dispatch("block_accept", block);
@@ -100445,7 +100504,7 @@ const replacehain$ = socket.listenToEvent(replaceChain).event$.subscribe(async (
         const chain = JSON.parse(data);
         console.log("replace:");
         console.log(chain);
-        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.pool, exports.store.state.roots, exports.store.state.candidates, exports.store.state.code, exports.store.state.secret, socket);
+        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.pool, exports.store.state.roots, exports.store.state.candidates, exports.store.state.code, exports.store.state.secret, exports.store.state.validator_mode, socket);
     }
     catch (e) {
         console.log(e);
@@ -100557,7 +100616,7 @@ exports.store = new vuex_1.default.Store({
     actions: {
         tx_accept(commit, tx) {
             try {
-                index_1.tx_accept(tx, exports.store.state.chain, exports.store.state.roots, exports.store.state.pool, exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates, socket).then(() => {
+                index_1.tx_accept(tx, exports.store.state.chain, exports.store.state.roots, exports.store.state.pool, exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates, exports.store.state.code, socket).then(() => {
                     console.log("tx accept");
                 });
             }
@@ -100567,7 +100626,7 @@ exports.store = new vuex_1.default.Store({
         },
         block_accept(commit, block) {
             try {
-                index_1.block_accept(block, exports.store.state.chain, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.secret, socket).then(() => {
+                index_1.block_accept(block, exports.store.state.chain, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.secret, exports.store.state.code, socket).then(() => {
                     console.log("block accept");
                     index_1.get_balance(exports.store.getters.my_address).then((amount) => {
                         commit.commit("refresh_balance", amount);
@@ -100640,7 +100699,7 @@ const Wallet = {
         remit: async function () {
             try {
                 console.log("request");
-                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, this.$store.state.roots, this.$store.state.chain, socket);
+                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, this.$store.state.roots, this.$store.state.chain, this.$store.state.pool, this.$store.state.validator_mode, this.$store.state.candidates, this.$store.state.code, socket);
             }
             catch (e) {
                 console.log(e);

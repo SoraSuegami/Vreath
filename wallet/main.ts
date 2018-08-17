@@ -21,13 +21,14 @@ app.get('/',(req, res) => {
 });
 
 io.on('connect',(socket)=>{
+    socket.emit('checkchain');
     socket.on('tx', async (msg:string)=>{
         const tx:T.Tx = JSON.parse(msg);
-        await tx_accept(tx,io);
+        await tx_accept(tx,socket);
     });
     socket.on('block', async (msg:string)=>{
         const block:T.Block = JSON.parse(msg);
-        await block_accept(block,io);
+        await block_accept(block,socket);
     });
     socket.on('checkchain', async (msg:string)=>{
         socket.emit('replacechain',fs.readFileSync('./json/blockchain.json','utf-8'));

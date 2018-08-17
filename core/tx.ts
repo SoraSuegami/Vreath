@@ -644,16 +644,29 @@ export const SignTx = (tx:T.Tx,my_private:string,my_address:string)=>{
 
 export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
   if(solvency.owner===validator.owner) return [solvency,validator];
-  solvency.amount -= fee;
-  validator.amount += fee;
-  return [solvency,validator];
+  console.log(fee);
+  const new_solvency = ((solvency)=>{
+    solvency.amount -= fee;
+    return solvency;
+  })(Object.assign({},solvency));
+  const new_validator= ((validator)=>{
+    validator.amount -= fee;
+    return validator;
+  })(Object.assign({},validator));
+  return [new_solvency,new_validator];
 }
 
 export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
   if(solvency.owner===payee.owner) return [solvency,payee];
-  solvency.amount -= gas;
-  payee.amount += gas;
-  return [solvency,payee];
+  const new_solvency = ((solvency)=>{
+    solvency.amount -= gas;
+    return solvency;
+  })(Object.assign({},solvency));
+  const new_payee = ((payee)=>{
+    payee.amount -= gas;
+    return payee;
+  })(Object.assign({},payee));
+  return [new_solvency,new_payee];
 }
 
 export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_state:T.State,gas:number,fee:number)=>{
@@ -671,6 +684,8 @@ export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:
   const validator_state:T.State = StateData.filter(s=>s.owner===validator)[0];
   const fee = _.tx_fee(tx);
   const after = PayFee(solvency_state,validator_state,fee);
+  console.log("after:")
+  console.log(after);
   const StateData_added = StateData.map(s=>{
     if(s.owner===after[0].owner) return after[0];
     else if(s.owner===after[1].owner) return after[1];

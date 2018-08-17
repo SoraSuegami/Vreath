@@ -134,7 +134,7 @@ exports.locations_for_block = async (block, chain, L_Trie) => {
     const result = await P.reduce(targets, async (result, tx) => result.concat(await exports.locations_for_tx(tx, chain, L_Trie)), []);
     return result;
 };
-exports.tx_accept = async (tx, io) => {
+exports.tx_accept = async (tx, socket) => {
     console.log(tx);
     const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
     const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
@@ -149,10 +149,10 @@ exports.tx_accept = async (tx, io) => {
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
         fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
         console.log("receive valid tx");
-        io.emit('tx', JSON.stringify(tx));
+        socket.broadcast.emit('tx', JSON.stringify(tx));
     }
 };
-exports.block_accept = async (block, io) => {
+exports.block_accept = async (block, socket) => {
     const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
     console.log(block);
     const candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8')) || gen.candidates;
@@ -190,19 +190,41 @@ exports.block_accept = async (block, io) => {
         fs.writeFileSync('./json/candidates.json', JSON.stringify(accepted.candidates, null, '    '));
         fs.writeFileSync('./json/blockchain.json', JSON.stringify(chain.concat(accepted.block), null, '    '));
         console.log("received valid block");
-        io.emit('block', JSON.stringify(block));
+        socket.broadcast.emit('block', JSON.stringify(block));
     }
     else
         console.log("receive invalid block");
 };
-exports.check_chain = async (new_chain, chain, io) => {
-    if (new_chain.length > chain.length) {
-        const pres = chain.slice().reverse();
+const get_pre_info = async (block, chain) => {
+    const pre_block = chain[chain.length - 1];
+    const S_Trie = db.trie_ins(pre_block.meta.stateroot);
+    const StateData = await exports.states_for_block(pre_block, chain, S_Trie);
+    const L_Trie = db.trie_ins(pre_block.meta.locationroot);
+    const LocationData = await exports.locations_for_block(pre_block, chain, L_Trie);
+    const candidates = BlockSet.NewCandidates(con_1.unit, con_1.rate, StateData);
+    const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, S_Trie.now_root(), L_Trie.now_root(), con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+    await P.forEach(accepted.state, async (state) => {
+        if (state.kind === "state")
+            await S_Trie.put(state.owner, state);
+        else
+            await S_Trie.put(state.token, state);
+    });
+    await P.forEach(accepted.location, async (loc) => {
+        await L_Trie.put(loc.address, loc);
+    });
+    const pre_root = {
+        stateroot: S_Trie.now_root(),
+        locationroot: L_Trie.now_root()
+    };
+    return [pre_root, accepted.candidates];
+};
+exports.check_chain = async (new_chain, my_chain, socket) => {
+    if (new_chain.length > my_chain.length) {
         const news = new_chain.slice().reverse();
         let target = [];
         for (let index in news) {
             let i = Number(index);
-            if (pres[i] != null && pres[i] === news[i])
+            if (my_chain[news.length - i - 1] != null && _.ObjectHash(my_chain[news.length - i - 1]) === _.ObjectHash(news[i]))
                 break;
             else if (news[i].meta.kind === "key")
                 target.push(news[i]);
@@ -210,10 +232,26 @@ exports.check_chain = async (new_chain, chain, io) => {
                 target.push(news[i]);
         }
         const add_blocks = target.slice().reverse();
-        const back_chain = chain.slice(0, add_blocks[0].meta.index - 1);
+        const back_chain = my_chain.slice(0, add_blocks[0].meta.index);
         fs.writeFileSync('./json/blockchain.json', JSON.stringify(back_chain, null, '    '));
+        const info = await (async () => {
+            if (back_chain.length === 1) {
+                return {
+                    roots: gen.roots,
+                    candidates: gen.candidates
+                };
+            }
+            console.log(back_chain.length);
+            const pre_info = await get_pre_info(back_chain[back_chain.length - 1], back_chain);
+            return {
+                roots: pre_info[0],
+                candidates: pre_info[1]
+            };
+        })();
+        fs.writeFileSync('./json/root.json', JSON.stringify(info.roots, null, '    '));
+        fs.writeFileSync('./json/candidates.json', JSON.stringify(info.candidates, null, '    '));
         await P.forEach(add_blocks, async (block) => {
-            await exports.block_accept(block, io);
+            await exports.block_accept(block, socket);
         });
     }
 };

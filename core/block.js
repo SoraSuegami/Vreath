@@ -450,7 +450,7 @@ const CandidatesForm = (states) => {
         return { address: state.owner, amount: state.amount };
     });
 };
-const NewCandidates = (unit, rate, StateData) => {
+exports.NewCandidates = (unit, rate, StateData) => {
     return CandidatesForm(reduce_units(get_units(unit, StateData), rate));
 };
 /*const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
@@ -492,7 +492,7 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
 };
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, StateData, LocationData) => {
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, native, StateData)) {
-        const new_candidates = NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData);
         return {
             state: StateData,
             location: LocationData,
@@ -536,7 +536,7 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
                 return result;
         }, sets);
         const unit_changed = change_unit_amounts(block, unit, rate, refreshed[0]);
-        const new_candidates = NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData);
         return {
             state: unit_changed,
             location: refreshed[1],

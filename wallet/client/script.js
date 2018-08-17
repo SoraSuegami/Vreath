@@ -21,7 +21,7 @@ const vue_router_1 = __importDefault(require("vue-router"));
 const gen = __importStar(require("../../genesis/index"));
 const P = __importStar(require("p-iteration"));
 const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_port || "localhost";
+const ip = "localhost"; //"163.44.175.141";
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
 const onTx = new rxjs_socket_io_1.ioEvent('tx');
@@ -42,7 +42,7 @@ const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
     try {
         const block = JSON.parse(data);
         const chain = exports.store.state.chain;
-        if (block.meta.index != chain.length)
+        if (block.meta.index > chain.length)
             socket.emit("checkchain");
         else
             await exports.store.dispatch("block_accept", block);
@@ -60,7 +60,7 @@ const replacehain$ = socket.listenToEvent(replaceChain).event$.subscribe(async (
         const chain = JSON.parse(data);
         console.log("replace:");
         console.log(chain);
-        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.pool, exports.store.state.roots, exports.store.state.candidates, exports.store.state.code, exports.store.state.secret, socket);
+        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.pool, exports.store.state.roots, exports.store.state.candidates, exports.store.state.code, exports.store.state.secret, exports.store.state.validator_mode, socket);
     }
     catch (e) {
         console.log(e);
@@ -172,7 +172,7 @@ exports.store = new vuex_1.default.Store({
     actions: {
         tx_accept(commit, tx) {
             try {
-                index_1.tx_accept(tx, exports.store.state.chain, exports.store.state.roots, exports.store.state.pool, exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates, socket).then(() => {
+                index_1.tx_accept(tx, exports.store.state.chain, exports.store.state.roots, exports.store.state.pool, exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates, exports.store.state.code, socket).then(() => {
                     console.log("tx accept");
                 });
             }
@@ -182,7 +182,7 @@ exports.store = new vuex_1.default.Store({
         },
         block_accept(commit, block) {
             try {
-                index_1.block_accept(block, exports.store.state.chain, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.secret, socket).then(() => {
+                index_1.block_accept(block, exports.store.state.chain, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.secret, exports.store.state.code, socket).then(() => {
                     console.log("block accept");
                     index_1.get_balance(exports.store.getters.my_address).then((amount) => {
                         commit.commit("refresh_balance", amount);
@@ -255,7 +255,7 @@ const Wallet = {
         remit: async function () {
             try {
                 console.log("request");
-                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, this.$store.state.roots, this.$store.state.chain, socket);
+                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, this.$store.state.roots, this.$store.state.chain, this.$store.state.pool, this.$store.state.validator_mode, this.$store.state.candidates, this.$store.state.code, socket);
             }
             catch (e) {
                 console.log(e);

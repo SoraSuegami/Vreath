@@ -15,7 +15,7 @@ import * as P from 'p-iteration'
 
 
 const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_port || "localhost";
+const ip = "localhost"//"163.44.175.141";
 
 const socket = new IO();
 socket.connect('http://'+ip+':'+port);
@@ -38,7 +38,7 @@ const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(a
     try{
         const block:T.Block = JSON.parse(data);
         const chain:T.Block[] = store.state.chain;
-        if(block.meta.index!=chain.length) socket.emit("checkchain");
+        if(block.meta.index>chain.length) socket.emit("checkchain");
         else await store.dispatch("block_accept",block);
         console.log(block)
     }
@@ -54,7 +54,7 @@ const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.
         const chain:T.Block[] = JSON.parse(data);
         console.log("replace:")
         console.log(chain)
-        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.pool,store.state.roots,store.state.candidates,store.state.code,store.state.secret,socket);
+        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.pool,store.state.roots,store.state.candidates,store.state.code,store.state.secret,store.state.validator_mode,socket);
     }
     catch(e){console.log(e);}
 });
@@ -177,7 +177,7 @@ export const store = new Vuex.Store({
     actions:{
         tx_accept(commit,tx:T.Tx){
             try{
-                tx_accept(tx,store.state.chain,store.state.roots,store.state.pool,store.state.secret,store.state.validator_mode,store.state.candidates,socket).then(()=>{
+                tx_accept(tx,store.state.chain,store.state.roots,store.state.pool,store.state.secret,store.state.validator_mode,store.state.candidates,store.state.code,socket).then(()=>{
                     console.log("tx accept");
                 })
             }
@@ -185,7 +185,7 @@ export const store = new Vuex.Store({
         },
         block_accept(commit,block:T.Block){
             try{
-                block_accept(block,store.state.chain,store.state.candidates,store.state.roots,store.state.pool,store.state.code,store.state.secret,socket).then(()=>{
+                block_accept(block,store.state.chain,store.state.candidates,store.state.roots,store.state.pool,store.state.code,store.state.secret,store.state.code,socket).then(()=>{
                     console.log("block accept");
                     get_balance(store.getters.my_address).then((amount)=>{
                         commit.commit("refresh_balance",amount);
@@ -259,7 +259,7 @@ const Wallet = {
         remit:async function(){
             try{
                 console.log("request");
-                await send_request_tx(this.$store.state.secret,this.to,this.amount,this.$store.state.roots,this.$store.state.chain,socket);
+                await send_request_tx(this.$store.state.secret,this.to,this.amount,this.$store.state.roots,this.$store.state.chain,this.$store.state.pool,this.$store.state.validator_mode,this.$store.state.candidates,this.$store.state.code,socket);
             }
             catch(e){console.log(e)}
         }

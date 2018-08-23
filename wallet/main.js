@@ -30,11 +30,11 @@ io.on('connect', (socket) => {
     socket.emit('checkchain');
     socket.on('tx', async (msg) => {
         const tx = JSON.parse(msg);
-        await index_1.tx_accept(tx, socket);
+        await index_1.tx_accept(tx, io);
     });
     socket.on('block', async (msg) => {
         const block = JSON.parse(msg);
-        await index_1.block_accept(block, socket);
+        await index_1.block_accept(block, io);
     });
     socket.on('checkchain', async (msg) => {
         socket.emit('replacechain', fs.readFileSync('./json/blockchain.json', 'utf-8'));
@@ -42,6 +42,6 @@ io.on('connect', (socket) => {
     socket.on('replacechain', async (msg) => {
         const new_chain = JSON.parse(msg);
         const my_chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
-        await index_1.check_chain(new_chain.slice(), my_chain.slice(), socket);
+        await index_1.check_chain(new_chain.slice(), my_chain.slice(), io);
     });
 });

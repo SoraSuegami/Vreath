@@ -8,6 +8,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const TxSet = __importStar(require("./tx"));
+const _ = __importStar(require("./basic"));
 const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     if (tx.meta.kind == "request") {
         return TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
@@ -21,6 +22,9 @@ const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, State
 exports.Tx_to_Pool = (pool, tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     if (!check_tx(tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData))
         return pool;
-    const new_pool = Object.assign({ [tx.hash]: tx }, pool);
+    const new_pool = _.new_obj(pool, p => {
+        p[tx.hash] = tx;
+        return p;
+    });
     return new_pool;
 };

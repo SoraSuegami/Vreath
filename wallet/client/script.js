@@ -13,6 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const rxjs_socket_io_1 = require("rxjs-socket.io");
 const index_1 = require("./index");
 const CryptoSet = __importStar(require("../../core/crypto_set"));
+const _ = __importStar(require("../../core/basic"));
 const con_1 = require("../con");
 const vue_1 = __importDefault(require("vue"));
 const vuex_1 = __importDefault(require("vuex"));
@@ -21,7 +22,7 @@ const vue_router_1 = __importDefault(require("vue-router"));
 const gen = __importStar(require("../../genesis/index"));
 const P = __importStar(require("p-iteration"));
 const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_port || "localhost";
+const ip = process.env.vreath_ip || "localhost";
 console.log(ip);
 const socket = new rxjs_socket_io_1.IO();
 socket.connect('http://' + ip + ':' + port);
@@ -33,7 +34,7 @@ const tx$ = socket.listenToEvent(onTx).event$.subscribe(async (data) => {
     try {
         const tx = JSON.parse(data);
         console.log(tx);
-        await exports.store.dispatch("tx_accept", tx);
+        await exports.store.dispatch("tx_accept", _.copy(tx));
     }
     catch (e) {
         console.log(e);
@@ -45,8 +46,8 @@ const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
         const chain = exports.store.state.chain;
         if (block.meta.index > chain.length)
             socket.emit("checkchain");
-        else
-            await exports.store.dispatch("block_accept", block);
+        else if (block.meta.index === chain.length)
+            await exports.store.dispatch("block_accept", _.copy(block));
         console.log(block);
     }
     catch (e) {
@@ -54,14 +55,14 @@ const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
     }
 });
 const checkchain$ = socket.listenToEvent(checkChain).event$.subscribe(async (data) => {
-    socket.emit('replacechain', JSON.stringify(exports.store.state.chain));
+    socket.emit('replacechain', JSON.stringify(exports.store.state.chain.slice()));
 });
 const replacehain$ = socket.listenToEvent(replaceChain).event$.subscribe(async (data) => {
     try {
         const chain = JSON.parse(data);
         console.log("replace:");
         console.log(chain);
-        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.pool, exports.store.state.roots, exports.store.state.candidates, exports.store.state.code, exports.store.state.secret, exports.store.state.validator_mode, socket);
+        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.roots), exports.store.state.candidates.slice(), _.copy(exports.store.state.code), exports.store.state.secret, exports.store.state.validator_mode, socket);
     }
     catch (e) {
         console.log(e);
@@ -122,36 +123,36 @@ exports.store = new vuex_1.default.Store({
     },
     mutations: {
         add_app(state, obj) {
-            state.apps[obj.name] = obj;
-            localStorage.setItem("apps", JSON.stringify(state.apps));
+            state.apps[obj.name] = _.copy(obj);
+            localStorage.setItem("apps", JSON.stringify(_.copy(state.apps)));
         },
         del_app(state, key) {
             delete state.apps[key];
-            localStorage.setItem("apps", JSON.stringify(state.apps));
+            localStorage.setItem("apps", JSON.stringify(_.copy(state.apps)));
         },
         refresh_pool(state, pool) {
-            state.pool = pool;
-            localStorage.setItem("pool", JSON.stringify(state.pool));
+            state.pool = _.copy(pool);
+            localStorage.setItem("pool", JSON.stringify(_.copy(state.pool)));
         },
         add_block(state, block) {
-            state.chain = state.chain.concat(block).slice().sort((a, b) => {
+            state.chain = state.chain.concat(block).sort((a, b) => {
                 return a.meta.index - b.meta.index;
             });
-            localStorage.setItem("chain", JSON.stringify(state.chain));
+            localStorage.setItem("chain", JSON.stringify(state.chain.slice()));
         },
         replace_chain(state, chain) {
             state.chain = chain.slice().sort((a, b) => {
                 return a.meta.index - b.meta.index;
             });
-            localStorage.setItem("chain", JSON.stringify(state.chain));
+            localStorage.setItem("chain", JSON.stringify(state.chain.slice()));
         },
         refresh_roots(state, roots) {
-            state.roots = roots;
-            localStorage.setItem("roots", state.roots);
+            state.roots = _.copy(roots);
+            localStorage.setItem("roots", _.copy(state.roots));
         },
         refresh_candidates(state, candidates) {
-            state.candidates = candidates;
-            localStorage.setItem("candidates", JSON.stringify(state.candidates));
+            state.candidates = candidates.slice();
+            localStorage.setItem("candidates", JSON.stringify(state.candidates.slice()));
         },
         refresh_secret(state, secret) {
             state.secret = secret;
@@ -173,7 +174,7 @@ exports.store = new vuex_1.default.Store({
     actions: {
         tx_accept(commit, tx) {
             try {
-                index_1.tx_accept(tx, exports.store.state.chain, exports.store.state.roots, exports.store.state.pool, exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates, exports.store.state.code, socket).then(() => {
+                index_1.tx_accept(tx, exports.store.state.chain.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates.slice(), exports.store.state.code, socket).then(() => {
                     console.log("tx accept");
                 });
             }
@@ -183,7 +184,7 @@ exports.store = new vuex_1.default.Store({
         },
         block_accept(commit, block) {
             try {
-                index_1.block_accept(block, exports.store.state.chain, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.secret, exports.store.state.code, socket).then(() => {
+                index_1.block_accept(block, exports.store.state.chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.code), socket).then(() => {
                     console.log("block accept");
                     index_1.get_balance(exports.store.getters.my_address).then((amount) => {
                         commit.commit("refresh_balance", amount);
@@ -199,7 +200,7 @@ exports.store = new vuex_1.default.Store({
 const Home = {
     data: function () {
         return {
-            installed: this.$store.state.apps
+            installed: _.copy(this.$store.state.apps)
         };
     },
     store: exports.store,
@@ -230,6 +231,7 @@ const Wallet = {
         };
     },
     created: async function () {
+        socket.emit("checkchain");
         const balance = await index_1.get_balance(this.from);
         console.log(balance);
         exports.store.commit("refresh_balance", balance);
@@ -256,7 +258,7 @@ const Wallet = {
         remit: async function () {
             try {
                 console.log("request");
-                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, this.$store.state.roots, this.$store.state.chain, this.$store.state.pool, this.$store.state.validator_mode, this.$store.state.candidates, this.$store.state.code, socket);
+                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, _.copy(this.$store.state.roots), this.$store.state.chain.slice(), _.copy(this.$store.state.pool), this.$store.state.validator_mode, this.$store.state.candidates.slice(), this.$store.state.code, socket);
             }
             catch (e) {
                 console.log(e);

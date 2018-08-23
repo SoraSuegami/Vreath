@@ -15,6 +15,7 @@ const server = new http.Server(app);
 const io = socket(server);
 
 server.listen(port);
+
 app.use(express.static(__dirname+'/client'));
 app.get('/',(req, res) => {
     res.sendFile(__dirname + '/client/index.html');
@@ -24,11 +25,11 @@ io.on('connect',(socket)=>{
     socket.emit('checkchain');
     socket.on('tx', async (msg:string)=>{
         const tx:T.Tx = JSON.parse(msg);
-        await tx_accept(tx,socket);
+        await tx_accept(tx,io);
     });
     socket.on('block', async (msg:string)=>{
         const block:T.Block = JSON.parse(msg);
-        await block_accept(block,socket);
+        await block_accept(block,io);
     });
     socket.on('checkchain', async (msg:string)=>{
         socket.emit('replacechain',fs.readFileSync('./json/blockchain.json','utf-8'));
@@ -36,6 +37,6 @@ io.on('connect',(socket)=>{
     socket.on('replacechain', async (msg:string)=>{
         const new_chain:T.Block[] = JSON.parse(msg);
         const my_chain:T.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json','utf-8')) || [gen.block];
-        await check_chain(new_chain.slice(),my_chain.slice(),socket);
+        await check_chain(new_chain.slice(),my_chain.slice(),io);
     });
 });

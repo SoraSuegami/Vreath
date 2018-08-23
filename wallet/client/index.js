@@ -22,7 +22,6 @@ const tx_pool_1 = require("../../core/tx_pool");
 const script_1 = require("./script");
 const level_browserify_1 = __importDefault(require("level-browserify"));
 const code_1 = require("../../core/code");
-const con_2 = require("../../server/con");
 const db = level_browserify_1.default('./db');
 exports.trie_ins = (root) => {
     try {
@@ -172,6 +171,9 @@ const random_chose = (array, num) => {
     return array.slice(0, num);
 };
 exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candidates, codes, socket) => {
+    console.log("tx_accept");
+    console.log(tx.meta.data.address);
+    console.log(tx.meta.kind);
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
     const locationroot = roots.locationroot;
@@ -183,19 +185,20 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candi
     const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0, {}, []);
     const unit_amount = unit_state.amount;
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool) && unit_amount > 0) {
-        script_1.store.commit("refresh_pool", new_pool);
+        script_1.store.commit("refresh_pool", _.copy(new_pool));
         if (validator_mode && tx.meta.kind === "refresh")
-            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.slice(), candidates.slice(), Object.assign({}, roots), codes, validator_mode, socket);
+            await exports.send_micro_block(_.copy(new_pool), secret, chain.slice(), candidates.slice(), _.copy(roots), codes, validator_mode, socket);
         else
-            await exports.send_key_block(chain.slice(), secret, candidates.slice(), Object.assign({}, roots), Object.assign({}, new_pool), codes, validator_mode, socket);
-        //socket.emit('tx',JSON.stringify(tx))
-        return new_pool;
+            await exports.send_key_block(chain.slice(), secret, candidates.slice(), _.copy(roots), _.copy(new_pool), codes, validator_mode, socket);
+        return _.copy(new_pool);
     }
     else
-        return pool;
+        return _.copy(pool);
 };
 exports.block_accept = async (block, chain, candidates, roots, pool, codes, secret, mode, socket) => {
     try {
+        console.log("block_accept");
+        console.log(block.meta.index);
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
         const locationroot = roots.locationroot;
@@ -222,36 +225,36 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
                     delete p[tx.hash];
                 });
                 return p;
-            })(pool);
-            await script_1.store.commit('refresh_pool', new_pool);
-            await script_1.store.commit("refresh_roots", new_roots);
-            await script_1.store.commit("refresh_candidates", accepted.candidates);
-            await script_1.store.commit("add_block", accepted.block[0]);
+            })(_.copy(pool));
+            await script_1.store.commit('refresh_pool', _.copy(new_pool));
+            await script_1.store.commit("refresh_roots", _.copy(new_roots));
+            await script_1.store.commit("refresh_candidates", accepted.candidates.slice());
+            await script_1.store.commit("add_block", _.copy(accepted.block[0]));
             //socket.emit('block',JSON.stringify(block));
             const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
-            await exports.send_micro_block(Object.assign({}, new_pool), secret, chain.concat(accepted.block[0]), accepted.candidates.slice(), Object.assign({}, new_roots), codes, mode, socket);
+            await exports.send_micro_block(_.copy(new_pool), secret, chain.slice().concat(accepted.block[0]), accepted.candidates.slice(), _.copy(new_roots), codes, mode, socket);
             if (reqs_pure.length > 0) {
                 await P.forEach(reqs_pure, async (pure) => {
                     console.log("refresh!");
                     const req_tx = exports.pure_to_tx(pure, block);
                     const code = codes[req_tx.meta.data.token];
-                    await exports.send_refresh_tx(Object.assign({}, new_roots), secret, req_tx, block.meta.index, code, chain.concat(accepted.block[0]), Object.assign({}, new_pool), mode, accepted.candidates.slice(), codes, socket);
+                    await exports.send_refresh_tx(_.copy(new_roots), secret, req_tx, block.meta.index, code, chain.slice().concat(accepted.block[0]), _.copy(new_pool), mode, accepted.candidates.slice(), codes, socket);
                 });
             }
             return {
-                pool: new_pool,
-                roots: new_roots,
-                candidates: accepted.candidates,
-                chain: chain.concat(accepted.block[0]),
+                pool: _.copy(new_pool),
+                roots: _.copy(new_roots),
+                candidates: accepted.candidates.slice(),
+                chain: chain.slice().concat(accepted.block[0]),
             };
         }
         else {
             console.log("receive invalid block");
             return {
-                pool: pool,
-                roots: roots,
-                candidates: candidates,
-                chain: chain
+                pool: _.copy(pool),
+                roots: _.copy(roots),
+                candidates: candidates.slice(),
+                chain: chain.slice()
             };
         }
     }
@@ -302,6 +305,7 @@ exports.get_balance = async (address) => {
 };
 exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, candidates, codes, socket) => {
     try {
+        console.log("send_request_tx");
         const pub_key = [CryptoSet.PublicFromPrivate(secret)];
         const from = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(pub_key));
         const pre_tx = TxSet.CreateRequestTx(pub_key, from, 10, "scrap", con_1.native, [from], ["remit", to, "-" + amount], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 0.05);
@@ -317,7 +321,7 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, c
         else {
             alert("remit!");
             socket.emit('tx', JSON.stringify(tx));
-            await script_1.store.dispatch("tx_accept", tx);
+            //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
             const new_pool = Object.assign({[tx.hash]:tx},pool);
@@ -332,6 +336,7 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, c
 };
 exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool, mode, candidates, codes, socket) => {
     try {
+        console.log("send_refresh_tx");
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
         const locationroot = roots.locationroot;
@@ -351,7 +356,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool
         else {
             console.log("create valid refresh tx");
             socket.emit('tx', JSON.stringify(tx));
-            await script_1.store.dispatch("tx_accept", tx);
+            //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
             const new_pool = Object.assign({[tx.hash]:tx},pool);
@@ -363,6 +368,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool
     }
 };
 exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, mode, socket) => {
+    console.log("send_key_block");
     const pub_key = [CryptoSet.PublicFromPrivate(secret)];
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
@@ -370,7 +376,7 @@ exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, m
     const L_Trie = exports.trie_ins(locationroot);
     const validator_address = CryptoSet.GenereateAddress(con_1.unit, _.reduce_pub(pub_key));
     const validator_state = [await S_Trie.get(validator_address) || StateSet.CreateState(0, validator_address, con_1.unit, 0, {}, [])];
-    const pre_block = BlockSet.CreateKeyBlock(con_1.my_version, 0, chain, con_1.block_time, con_1.max_blocks, con_1.pow_target, con_2.pos_diff, con_1.unit, pub_key, _.ObjectHash(candidates), stateroot, locationroot, validator_state);
+    const pre_block = BlockSet.CreateKeyBlock(con_1.my_version, 0, chain, con_1.block_time, con_1.max_blocks, con_1.pow_target, con_1.pos_diff, con_1.unit, pub_key, _.ObjectHash(candidates), stateroot, locationroot, validator_state);
     const key_block = BlockSet.SignBlock(pre_block, secret, pub_key[0]);
     const StateData = await exports.states_for_block(key_block, chain, S_Trie);
     const LocationData = await exports.locations_for_block(key_block, chain, L_Trie);
@@ -379,11 +385,12 @@ exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, m
         console.log("fail to create valid block");
     else {
         socket.emit('block', JSON.stringify(key_block));
-        await script_1.store.dispatch("block_accept", key_block);
+        //await store.dispatch("block_accept",_.copy(key_block));
         //await block_accept(key_block,chain,candidates,roots,pool,codes,secret,mode,socket);
     }
 };
 exports.send_micro_block = async (pool, secret, chain, candidates, roots, codes, mode, socket) => {
+    console.log("send_micro_block");
     if (Object.keys(pool).length > 0) {
         const stateroot = roots.stateroot;
         const S_Trie = exports.trie_ins(stateroot);
@@ -420,14 +427,10 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, codes,
             return result;
         }, { txs: [], natives: [], units: [] });
         const pub_key = [CryptoSet.PublicFromPrivate(secret)];
-        chain.sort((a, b) => {
-            return a.meta.index - b.meta.index;
-        });
-        ;
         const txs = reduced.txs;
         const natives = reduced.natives;
         const units = reduced.units;
-        const pre_block = BlockSet.CreateMicroBlock(con_1.my_version, 0, chain, con_1.pow_target, con_2.pos_diff, pub_key, _.ObjectHash(candidates), stateroot, locationroot, txs, natives, units, con_1.block_time);
+        const pre_block = BlockSet.CreateMicroBlock(con_1.my_version, 0, chain, con_1.pow_target, con_1.pos_diff, pub_key, _.ObjectHash(candidates), stateroot, locationroot, txs, natives, units, con_1.block_time);
         const micro_block = BlockSet.SignBlock(pre_block, secret, pub_key[0]);
         const StateData = await exports.states_for_block(micro_block, chain, S_Trie);
         const LocationData = await exports.locations_for_block(micro_block, chain, L_Trie);
@@ -443,7 +446,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, codes,
             })(pool);
             store.commit('refresh_pool',new_pool);*/
             socket.emit('block', JSON.stringify(micro_block));
-            await script_1.store.dispatch("block_accept", micro_block);
+            //await store.dispatch("block_accept",_.copy(micro_block));
             //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
             console.log(socket);
             console.log("create micro block");
@@ -454,9 +457,9 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, codes,
             const del_pool = ((p) => {
                 delete p[target_pure.hash];
                 return p;
-            })(Object.assign({}, pool));
-            script_1.store.commit("refresh_pool", del_pool);
-            await exports.send_micro_block(del_pool, secret, chain, candidates, roots, codes, mode, socket);
+            })(_.copy(pool));
+            script_1.store.commit("refresh_pool", _.copy(del_pool));
+            //await send_micro_block(_.copy(del_pool),secret,chain.slice(),candidates.slice(),_.copy(roots),codes,mode,socket);
         }
         else {
             console.log("fall to create micro block;");
@@ -486,7 +489,7 @@ const get_pre_info = async (block, chain) => {
         stateroot: S_Trie.now_root(),
         locationroot: L_Trie.now_root()
     };
-    return [pre_root, accepted.candidates];
+    return [_.copy(pre_root), accepted.candidates.slice()];
 };
 exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes, secret, mode, socket) => {
     if (new_chain.length > my_chain.length) {
@@ -505,32 +508,45 @@ exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes
         const back_chain = my_chain.slice(0, add_blocks[0].meta.index);
         console.log("add_block:");
         console.log(add_blocks);
-        script_1.store.commit("replace_chain", back_chain);
+        script_1.store.commit("replace_chain", back_chain.slice());
         const info = await (async () => {
             if (back_chain.length === 1) {
                 return {
-                    pool: pool,
-                    roots: roots,
-                    candidates: candidates,
-                    chain: back_chain
+                    pool: _.copy(pool),
+                    roots: _.copy(roots),
+                    candidates: candidates.slice(),
+                    chain: back_chain.slice()
                 };
             }
             console.log(back_chain.length);
             const pre_info = await get_pre_info(back_chain[back_chain.length - 1], back_chain);
             return {
-                pool: pool,
-                roots: pre_info[0],
-                candidates: pre_info[1],
-                chain: back_chain
+                pool: _.copy(pool),
+                roots: _.copy(pre_info[0]),
+                candidates: pre_info[1].slice(),
+                chain: back_chain.slice()
             };
         })();
-        await P.reduce(add_blocks, async (result, block) => {
-            const accepted = await exports.block_accept(block, result.chain.slice(), result.candidates.slice(), result.roots, result.pool, codes, secret, mode, socket);
-            const amount = await exports.get_balance(script_1.store.getters.my_address);
-            script_1.store.commit("refresh_balance", amount);
-            return accepted;
-        }, info);
+        /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
+            const accepted = await block_accept(block,result.chain,result.candidates,result.roots,result.pool,codes,secret,mode,socket);
+            const amount = await get_balance(store.getters.my_address);
+            store.commit("refresh_balance",amount);
+            return _.copy(accepted);
+        },info);*/
     }
     else
         console.log("not replace");
+};
+exports.unit_buying = async (secret, units, roots, chain, pool, mode, candidates, codes, socket) => {
+    const pub_key = [CryptoSet.PublicFromPrivate(secret)];
+    const from = CryptoSet.GenereateAddress(con_1.unit, _.reduce_pub(pub_key));
+    const remiter = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(pub_key));
+    const pre_tx = TxSet.CreateRequestTx(pub_key, from, 10, "issue", con_1.unit, [from], ["buy", remiter, JSON.stringify(units)], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, 0.05);
+    const tx = TxSet.SignTx(pre_tx, secret, from);
+    const stateroot = roots.stateroot;
+    const S_Trie = exports.trie_ins(stateroot);
+    const locationroot = roots.locationroot;
+    const L_Trie = exports.trie_ins(locationroot);
+    const StateData = await exports.states_for_tx(tx, chain, S_Trie);
+    const LocationData = await exports.locations_for_tx(tx, chain, L_Trie);
 };

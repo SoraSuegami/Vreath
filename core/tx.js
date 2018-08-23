@@ -65,7 +65,10 @@ exports.tx_to_pure = (tx) => {
 };
 exports.empty_tx_pure = () => {
     const tx = exports.empty_tx();
-    return exports.tx_to_pure(tx);
+    return {
+        hash: tx.hash,
+        meta: tx.meta
+    };
 };
 exports.empty_location = () => {
     return {
@@ -106,9 +109,10 @@ exports.refreshed_check = (base, index, tx_hash, LocationData) => {
 };
 const state_check = (state, token_name_maxsize) => {
     const hash_size = Buffer.from(_.toHash("")).length;
-    return _.address_form_check(state.owner, token_name_maxsize) || state.amount < 0 ||
-        Object.entries(state.data).some((obj) => { return Buffer.from(obj[0]).length > hash_size || Buffer.from(obj[1]).length > hash_size; }) ||
-        state.product.some(pro => Buffer.from(pro).length > token_name_maxsize);
+    const copy_state = state;
+    return _.address_form_check(copy_state.owner, token_name_maxsize) || copy_state.amount < 0 ||
+        Object.entries(copy_state.data).some(([val, key]) => { return Buffer.from(key).length > hash_size || Buffer.from(val).length > hash_size; }) ||
+        copy_state.product.some(pro => Buffer.from(pro).length > token_name_maxsize);
 };
 const base_declaration_check = (target, bases, StateData) => {
     const getted = StateData.filter(s => { return s.kind === "state" && s.owner === target.owner; })[0];
@@ -181,12 +185,12 @@ const list_up_related = (chain, tx, order, result = []) => {
     const new_pres = result.concat(searched);
     return list_up_related(chain, searched, ori_order, new_pres);
 };
-const mining = (request, refresher, output, target) => {
+const mining = (request, index, refresher, output, unit_price, target) => {
     let nonce = -1;
     let num;
     do {
         nonce++;
-        num = _.Hex_to_Num(request) + nonce + _.Hex_to_Num(refresher) + _.Hex_to_Num(output);
+        num = _.Hex_to_Num(request) + index + nonce + _.Hex_to_Num(refresher) + _.Hex_to_Num(output) + unit_price;
     } while (num > target);
     return nonce;
 };
@@ -227,87 +231,93 @@ const search_related_raw = (chain, hash, order, caller_hash) => {
     }
     return exports.empty_tx().raw;
 };
-const ValidNative = (req_tx, ref_tx, chain, StateData) => {
-    try {
-        const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
-        const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
-        if (_.ObjectHash(base_state) === _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) === _.ObjectHash(StateSet.CreateState()))
-            return true;
-        const inputs = req_tx.raw.raw;
-        const type = inputs[0];
-        const other = inputs[1];
-        const amount = Number(inputs[2]);
-        const empty_token = StateSet.CreateToken();
-        const valid_state = ((state) => {
-            state.nonce++;
-            state.amount += amount;
-            return state;
-        })(Object.assign({}, base_state));
-        switch (type) {
-            case "remit":
-                return req_tx.meta.data.type != "scrap" || base_state.owner != req_tx.meta.data.address || new_state.amount - base_state.amount != amount || _.ObjectHash(valid_state) != _.ObjectHash(new_state) || amount >= 0;
-            case "deposit":
-                if (req_tx.meta.data.type != "scrap" || base_state.owner != req_tx.meta.data.address || amount >= 0 || new_state.amount - base_state.amount != amount || req_tx.meta.next.flag != true || _.ObjectHash(valid_state) != _.ObjectHash(new_state))
-                    return true;
-                const depo_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
-                const depo_raw = search_related_raw(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
-                const depo_token_info = JSON.parse(depo_raw.raw[0]) || empty_token;
-                return !(depo_meta.data.type === "update" && depo_token_info != empty_token && depo_token_info.token === req_tx.meta.data.token && amount + depo_token_info.deposited === 0 && other === depo_token_info.token && valid_state.amount > 0);
-            case "withdrawal":
-                if (req_tx.meta.data.type != "issue" || base_state.owner != req_tx.meta.data.address || amount <= 0 || new_state.amount - base_state.amount != amount || req_tx.meta.pre.flag != true || _.ObjectHash(valid_state) != _.ObjectHash(new_state))
-                    return true;
-                const with_meta = search_related_tx(chain, req_tx.meta.next.hash, 'pre', req_tx.meta.purehash);
-                const with_raw = search_related_raw(chain, req_tx.meta.next.hash, 'next', req_tx.meta.purehash);
-                const with_token_info = JSON.parse(with_raw.raw[0]) || empty_token;
-                const pre_token_info = StateData.filter(s => { return s.kind === "token" && s.token === with_token_info.token; })[0] || empty_token;
-                return !(with_meta.data.type === "update" && with_token_info != empty_token && pre_token_info != empty_token && with_token_info.token === req_tx.meta.data.token && amount + with_token_info.deposited === 0 && other === with_token_info.token && valid_state.amount > 0 && pre_token_info.deposited - amount > 0);
-            default:
-                return true;
-        }
-    }
-    catch (e) {
-        console.log(e);
+/*const ValidNative = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=>{
+  try{
+    const base_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.base[0]})[0] || StateSet.CreateState();
+    const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
+    if(_.ObjectHash(base_state)===_.ObjectHash(StateSet.CreateState())||_.ObjectHash(new_state)===_.ObjectHash(StateSet.CreateState())) return true;
+    const inputs = req_tx.raw.raw;
+    const type = inputs[0];
+    const other = inputs[1];
+    const amount = Number(inputs[2]);
+    const empty_token = StateSet.CreateToken();
+    const valid_state = iassign(
+      base_state,
+      (state)=>{
+        state.nonce ++ ;
+        state.amount += amount;
+        return state;
+      }
+    );
+    switch(type){
+      case "remit":
+        return req_tx.meta.data.type!="scrap"||base_state.owner!=req_tx.meta.data.address||new_state.amount-base_state.amount!=amount||_.ObjectHash(valid_state)!=_.ObjectHash(new_state)||amount>=0;
+
+      case "deposit":
+        if(req_tx.meta.data.type!="scrap"||base_state.owner!=req_tx.meta.data.address||amount>=0||new_state.amount-base_state.amount!=amount||req_tx.meta.next.flag!=true||_.ObjectHash(valid_state)!=_.ObjectHash(new_state)) return true;
+        const depo_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const depo_raw = search_related_raw(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const depo_token_info:T.State = JSON.parse(depo_raw.raw[0]) || empty_token;
+        return !(depo_meta.data.type==="update"&&depo_token_info!=empty_token&&depo_token_info.token===req_tx.meta.data.token&&amount+depo_token_info.deposited===0&&other===depo_token_info.token&&valid_state.amount>0);
+
+      case "withdrawal":
+        if(req_tx.meta.data.type!="issue"||base_state.owner!=req_tx.meta.data.address||amount<=0||new_state.amount-base_state.amount!=amount||req_tx.meta.pre.flag!=true||_.ObjectHash(valid_state)!=_.ObjectHash(new_state))return true;
+        const with_meta = search_related_tx(chain,req_tx.meta.next.hash,'pre',req_tx.meta.purehash);
+        const with_raw= search_related_raw(chain,req_tx.meta.next.hash,'next',req_tx.meta.purehash);
+        const with_token_info:T.State = JSON.parse(with_raw.raw[0]) || empty_token;
+        const pre_token_info:T.State = StateData.filter(s=>{return s.kind==="token"&&s.token===with_token_info.token})[0] || empty_token;
+        return !(with_meta.data.type==="update"&&with_token_info!=empty_token&&pre_token_info!=empty_token&&with_token_info.token===req_tx.meta.data.token&&amount+with_token_info.deposited===0&&other===with_token_info.token&&valid_state.amount>0&&pre_token_info.deposited-amount>0);
+
+      default:
         return true;
     }
-};
-const ValidUnit = (req_tx, ref_tx, chain, StateData) => {
-    const base_state = StateData.filter(s => { return s.kind === "state" && s.owner === req_tx.meta.data.base[0]; })[0] || StateSet.CreateState();
-    const new_state = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
-    if (_.ObjectHash(base_state) != _.ObjectHash(StateSet.CreateState()) || _.ObjectHash(new_state) != _.ObjectHash(StateSet.CreateState()))
-        return true;
+  }
+  catch(e){
+    console.log(e);
+    return true;
+  }
+}
+
+const ValidUnit = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=>{
+    const base_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.base[0]})[0] || StateSet.CreateState();
+    const new_state:T.State = JSON.parse(ref_tx.raw.raw[0]) || StateSet.CreateState();
+    if(_.ObjectHash(base_state)!=_.ObjectHash(StateSet.CreateState())||_.ObjectHash(new_state)!=_.ObjectHash(StateSet.CreateState())) return true;
     const inputs = req_tx.raw.raw;
     const type = inputs[0];
     const remiter = inputs[1];
-    const item_refs = JSON.parse(inputs[2]) || [exports.empty_tx()];
-    const prices = item_refs.map(ref => ref.meta.unit_price);
-    const price_sum = prices.reduce((sum, p) => { return sum + p; }, 0);
-    const valid_state = prices.reduce((state, price) => {
-        state.nonce++;
-        state.amount += price;
+    const units:T.Unit[] = JSON.parse(inputs[2]);
+    const prices = units.map(u=>u.unit_price);
+    const price_sum = prices.reduce((sum,p)=>{return sum+p},0)
+    const valid_state =
+    prices.reduce((state,price)=>{
+        state.nonce ++;
+        state.amount -= price;
         return state;
-    }, base_state);
-    const mined_check = item_refs.some(ref => {
-        const request = ref.meta.data.request;
-        const nonce = ref.meta.nonce;
-        const payee = ref.meta.data.payee;
-        const output = ref.meta.data.output;
-        const pow_target = chain[ref.meta.data.index].meta.pow_target;
-        return _.Hex_to_Num(request) + nonce + _.Hex_to_Num(JSON.stringify(payee)) + _.Hex_to_Num(output) > pow_target;
+    },base_state);
+    const mined_check = units.some(u=>{
+      const request = u.request;
+      const index = u.index;
+      const nonce = u.nonce;
+      const payee = u.payee;
+      const output = u.output;
+      const pow_target = chain[index].meta.pow_target;
+      return _.Hex_to_Num(request)+index+nonce+_.Hex_to_Num(payee)+_.Hex_to_Num(output)>pow_target;
     });
     const empty_state = StateSet.CreateState();
     const empty_token = StateSet.CreateToken();
-    switch (type) {
-        case "buy":
-            const remit_state = StateData.filter(s => { return s.kind === "state" && s.owner === remiter; })[0] || empty_state;
-            const commit_token = StateData.filter(s => { return s.kind === "token" && s.token === req_tx.meta.data.token; })[0] || empty_token;
-            const committed = item_refs.map(item => item.hash).some(key => {
-                return commit_token.committed.indexOf(key) != -1;
-            });
-            return mined_check || req_tx.meta.data.type != "issue" || base_state.owner != req_tx.meta.data.address || new_state.amount - base_state.amount != item_refs.length || req_tx.meta.pre.flag != true || valid_state != new_state || remit_state === empty_state || commit_token === empty_token || remit_state.amount - price_sum < 0 || committed;
-        default:
-            return true;
+
+    switch(type){
+      case "buy":
+        const remit_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.owner===remiter})[0] || empty_state;
+        const commit_token:T.State = StateData.filter(s=>{return s.kind==="token"&&s.token===unit})[0] || empty_token;
+        const committed = units.map(item=>_.ObjectHash(item)).some(key=>{
+          return commit_token.committed.indexOf(key)!=-1;
+        });
+        return mined_check||req_tx.meta.data.type!="issue"||base_state.owner!=req_tx.meta.data.address||new_state.amount-base_state.amount!=units.length||req_tx.meta.pre.flag!=true||valid_state!=new_state||remit_state===empty_state||commit_token===empty_token||remit_state.amount-price_sum<0||committed;
+      default:
+        return true;
     }
-};
+}*/
 exports.ValidTxBasic = (tx, my_version) => {
     const hash = tx.hash;
     const tx_meta = tx.meta;
@@ -388,6 +398,7 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         return false;
     }
     else if (solvency_state == null || hashed_pub_check(solvency_state, pub_key) || exports.requested_check([solvency], LocationData)) {
+        console.log(exports.requested_check([solvency], LocationData));
         console.log("invalid solvency");
         return false;
     }
@@ -441,9 +452,6 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
             return block.raws[units_index];
         return exports.empty_tx().raw;
     })();
-    chain = chain.slice().sort((a, b) => {
-        return a.meta.index - b.meta.index;
-    });
     const req_tx_full = {
         hash: req_tx.hash,
         meta: req_tx.meta,
@@ -465,7 +473,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid kind");
         return false;
     }
-    else if (_.Hex_to_Num(request) + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(output) > pow_target) {
+    else if (_.Hex_to_Num(request) + index + nonce + _.Hex_to_Num(payee) + _.Hex_to_Num(output) + unit_price > pow_target) {
         console.log("invalid nonce");
         return false;
     }
@@ -478,6 +486,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         return false;
     }
     else if (req_tx == exports.empty_tx_pure() || (chain[tx.meta.data.index].txs.indexOf(req_tx) === -1 && chain[tx.meta.data.index].natives.indexOf(req_tx) === -1 && chain[tx.meta.data.index].units.indexOf(req_tx) === -1)) {
+        console.log("invalid request hash");
         return false;
     }
     else if (exports.refreshed_check(req_tx.meta.data.base, index, request, LocationData)) {
@@ -508,14 +517,14 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid next txs");
         return false;
     }
-    else if (token === native && ValidNative(req_tx_full, tx, chain, StateData)) {
-        console.log("invalid native txs");
-        return false;
+    /*else if(token===native&&ValidNative(req_tx_full,tx,chain,StateData)){
+      console.log("invalid native txs");
+      return false;
     }
-    else if (token === unit && ValidUnit(req_tx_full, tx, chain, StateData)) {
-        console.log("invalid unit txs");
-        return false;
-    }
+    else if(token===unit&&ValidUnit(req_tx_full,tx,chain,StateData)){
+      console.log("invalid unit txs");
+      return false;
+    }*/
     else {
         return true;
     }
@@ -592,7 +601,7 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
         payee: payee,
         output: output
     };
-    const nonce = mining(request, JSON.stringify(payee), output, target);
+    const nonce = mining(request, index, JSON.stringify(payee), output, target, unit_price);
     const meta = {
         kind: "refresh",
         version: version,
@@ -623,34 +632,36 @@ exports.SignTx = (tx, my_private, my_address) => {
     if (index === -1)
         return tx;
     const sign = CryptoSet.SignData(tx.hash, my_private);
-    tx.raw.signature[index] = sign;
-    return tx;
+    return _.new_obj(tx, tx => {
+        tx.raw.signature[index] = sign;
+        return tx;
+    });
 };
 exports.PayFee = (solvency, validator, fee) => {
     if (solvency.owner === validator.owner)
         return [solvency, validator];
     console.log(fee);
-    const new_solvency = ((solvency) => {
+    const new_solvency = _.new_obj(solvency, solvency => {
         solvency.amount -= fee;
         return solvency;
-    })(Object.assign({}, solvency));
-    const new_validator = ((validator) => {
+    });
+    const new_validator = _.new_obj(validator, validator => {
         validator.amount -= fee;
         return validator;
-    })(Object.assign({}, validator));
+    });
     return [new_solvency, new_validator];
 };
 exports.PayGas = (solvency, payee, gas) => {
     if (solvency.owner === payee.owner)
         return [solvency, payee];
-    const new_solvency = ((solvency) => {
+    const new_solvency = _.new_obj(solvency, solvency => {
         solvency.amount -= gas;
         return solvency;
-    })(Object.assign({}, solvency));
-    const new_payee = ((payee) => {
+    });
+    const new_payee = _.new_obj(payee, payee => {
         payee.amount -= gas;
         return payee;
-    })(Object.assign({}, payee));
+    });
     return [new_solvency, new_payee];
 };
 exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => {
@@ -671,8 +682,6 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
     const validator_state = StateData.filter(s => s.owner === validator)[0];
     const fee = _.tx_fee(tx);
     const after = exports.PayFee(solvency_state, validator_state, fee);
-    console.log("after:");
-    console.log(after);
     const StateData_added = StateData.map(s => {
         if (s.owner === after[0].owner)
             return after[0];
@@ -702,9 +711,6 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
     return [StateData_added, LocationData_added];
 };
 exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, LocationData) => {
-    chain = chain.sort((a, b) => {
-        return a.meta.index - b.meta.index;
-    });
     const req_tx = exports.find_req_tx(ref_tx, chain);
     if (req_tx.meta.data.type === "create") {
         const token_info = JSON.parse(req_tx.raw.raw[0]);
@@ -719,12 +725,12 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
     else if (req_tx.meta.data.type === "update") {
         const token_info = JSON.parse(req_tx.raw.raw[0]);
         const pre_token = StateData.filter(s => { return s.kind === "token" && s.token === token_info.token; })[0];
-        const change = {
-            nonce: pre_token.nonce + 1,
-            issued: pre_token.issued + token_info.issued,
-            committed: pre_token.committed.concat(token_info.committed)
-        };
-        const new_token = Object.assign(change, pre_token);
+        const new_token = _.new_obj(pre_token, (token) => {
+            token.nonce++;
+            token.issued += token_info.issued;
+            token.committed = token.committed.concat(token_info.committed);
+            return token;
+        });
         const StateData_update = StateData.map(s => {
             if (s.kind === "token" && s.token === token_info.token)
                 return new_token;
@@ -781,10 +787,10 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
         const LocationData_added = req_tx.meta.data.base.reduce((locs, key) => {
             const index = loc_addresses.indexOf(key);
             const pre_loc = locs[index];
-            const new_loc = ((loc) => {
+            const new_loc = _.new_obj(pre_loc, loc => {
                 loc.state = "yet";
                 return loc;
-            })(Object.assign({}, pre_loc));
+            });
             return locs.map((val, i) => { if (index === i)
                 return new_loc;
             else
@@ -794,16 +800,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             const receiver = req_tx.raw.raw[1];
             const amount = -1 * Number(req_tx.raw.raw[2]);
             const receiver_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === receiver; })[0] || StateSet.CreateState(0, receiver, native, 0, {}, []);
-            const recieved = ((state) => {
+            const recieved = _.new_obj(receiver_state, state => {
                 state.nonce++;
                 state.amount += amount;
                 return state;
-            })(Object.assign({}, receiver_state));
+            });
             const native_info = StateData_added.filter(s => { return s.kind === "token" && s.token === native; })[0];
-            const native_added = ((state) => {
+            const native_added = _.new_obj(native_info, state => {
                 state.nonce++;
                 return state;
-            })(Object.assign({}, native_info));
+            });
             const StateData_native = StateData_added.map(s => {
                 if (s.kind === "state" && s.owner === receiver)
                     return recieved;
@@ -817,25 +823,25 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
         else if (req_tx.meta.data.token === unit && req_tx.meta.data.type === "issue" && req_tx.raw.raw[0] === "buy") {
             const inputs = req_tx.raw.raw;
             const remiter = inputs[1];
-            const item_refs = JSON.parse(inputs[2]) || [exports.empty_tx()];
-            const hashes = item_refs.map(ref => ref.hash);
-            const sellers = item_refs.map(ref => ref.meta.data.payee);
-            const price_sum = item_refs.reduce((sum, ref) => {
-                return sum + ref.meta.unit_price;
+            const units = JSON.parse(inputs[2]);
+            const hashes = units.map(u => _.ObjectHash(u));
+            const sellers = units.map(u => u.payee);
+            const price_sum = units.reduce((sum, u) => {
+                return sum + u.unit_price;
             }, 0);
             const remiter_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === remiter; })[0];
-            const new_remiter = ((state) => {
+            const new_remiter = _.new_obj(remiter_state, (state) => {
                 state.nonce++;
                 state.amount -= price_sum;
                 return state;
-            })(Object.assign({}, remiter_state));
+            });
             const unit_address = CryptoSet.GenereateAddress(unit, _.reduce_pub(req_tx.meta.data.pub_key));
             const unit_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === unit_address; })[0] || StateSet.CreateState(0, unit_address, unit, 0, {}, []);
-            const new_unit_state = ((state) => {
+            const new_unit_state = _.new_obj(unit_state, (state) => {
                 state.nonce++;
-                state.amount += item_refs.length;
+                state.amount += units.length;
                 return state;
-            })(Object.assign({}, unit_state));
+            });
             const owners = StateData_added.map(s => s.owner);
             const StateData_unit_remit = ((states) => {
                 const index = owners.indexOf(unit_address);
@@ -852,7 +858,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                 return val; }));
             const StateData_unit_recieve = sellers.reduce((states, seller) => {
                 const index = owners.indexOf(seller);
-                const amount = item_refs[index].meta.unit_price;
+                const amount = units[index].unit_price;
                 if (index == -1)
                     return states.concat(StateSet.CreateState(0, seller, native, amount, {}, []));
                 const pre = states[index];
@@ -866,16 +872,16 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                     return val; });
             }, StateData_unit_remit);
             const pre_native = StateData.filter(s => { return s.kind === "token" && s.token === native; })[0];
-            const new_native = ((state) => {
-                state.nonce += item_refs.length;
+            const new_native = _.new_obj(pre_native, (state) => {
+                state.nonce += units.length;
                 return state;
-            })(Object.assign({}, pre_native));
+            });
             const pre_unit = StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0];
-            const new_unit = ((state) => {
+            const new_unit = _.new_obj(pre_unit, (state) => {
                 state.nonce++;
-                state.issued += item_refs.length;
+                state.issued += units.length;
                 return state;
-            })(Object.assign({}, pre_native));
+            });
             const StateData_unit = StateData_unit_recieve.map((val, i) => { if (i === owners.indexOf(native))
                 return new_native;
             else

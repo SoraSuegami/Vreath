@@ -11,12 +11,20 @@ import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_si
 import { Tx_to_Pool } from '../core/tx_pool';
 import * as fs from 'fs'
 import * as db from './db'
-import { Socket } from 'socket.io'
+import { Server } from 'socket.io'
 
 fs.writeFileSync('./json/tx_pool.json',"{}");
 fs.writeFileSync('./json/root.json',JSON.stringify(gen.roots,null, '    '));
 fs.writeFileSync('./json/candidates.json',JSON.stringify(gen.candidates,null, '    '));
 fs.writeFileSync('./json/blockchain.json',JSON.stringify([gen.block],null, '    '));
+
+(async ()=>{
+    const S_Trie = db.trie_ins("");
+    await P.forEach(gen.state, async (state:T.State)=>{
+        if(state.kind==="state") await S_Trie.put(state.owner,state);
+        else await S_Trie.put(state.token,state);
+    });
+})();
 
 const output_keys = (tx:T.Tx)=>{
     if(tx.meta.kind==="request") return [];
@@ -92,14 +100,16 @@ export const states_for_block = async (block:T.Block,chain:T.Block[],S_Trie:Trie
         const b = (()=>{
             if(tx.meta.kind==="request") return block;
             else return chain[tx.meta.data.index];
-        })();
-        return await S_Trie.get(b.raws[b.txs.length+i].raw[1])||StateSet.CreateState(0,b.raws[b.txs.length+i].raw[1],native,0);
+        })() || BlockSet.empty_block();
+        console.log(tx.meta.data.index)
+        const raw = b.raws[b.txs.length+i] || TxSet.empty_tx().raw;
+        return await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],native,0);
     });
     const unit_states:T.State[] = await P.map(block.units,async (tx:T.Tx,i:number)=>{
         const b = (()=>{
             if(tx.meta.kind==="request") return block;
             else return chain[tx.meta.data.index];
-        })();
+        })() || BlockSet.empty_block();
         const remiter:T.State = await S_Trie.get(b.raws[b.txs.length+b.natives.length+i].raw[1])||StateSet.CreateState(0,b.raws[b.txs.length+b.natives.length+i].raw[1],unit,0);
         const items:T.Tx[] = JSON.parse(b.raws[b.txs.length+b.natives.length+i].raw[2]) || [TxSet.empty_tx()];
         const sellers:T.State[] = await P.map(items, async (it:T.Tx)=>await S_Trie.get(it.meta.data.payee)||StateSet.CreateState(0,it.meta.data.payee,unit,0));
@@ -120,7 +130,7 @@ export const locations_for_block = async (block:T.Block,chain:T.Block[],L_Trie:T
     return result;
 }
 
-export const tx_accept = async (tx:T.Tx,socket:Socket)=>{
+export const tx_accept = async (tx:T.Tx,socket:Server)=>{
     console.log(tx);
     const chain = JSON.parse(fs.readFileSync('./json/blockchain.json','utf-8')) || [gen.block];
     const roots = JSON.parse(fs.readFileSync('./json/root.json','utf-8')) || gen.roots;
@@ -133,13 +143,15 @@ export const tx_accept = async (tx:T.Tx,socket:Socket)=>{
     const locations = await locations_for_tx(tx,chain,L_Trie);
     const new_pool = Tx_to_Pool(pool,tx,my_version,native,unit,chain,token_name_maxsize,states,locations);
     if(_.ObjectHash(new_pool)!=_.ObjectHash(pool)){
-        fs.writeFileSync('./json/tx_pool.json',JSON.stringify(new_pool,null, '    '));
+        fs.writeFileSync('./json/tx_pool.json',JSON.stringify(_.copy(new_pool),null, '    '));
         console.log("receive valid tx");
-        socket.broadcast.emit('tx',JSON.stringify(tx))
+        socket.emit('tx',JSON.stringify(tx))
     }
 }
 
-export const block_accept = async (block:T.Block,socket:Socket)=>{
+
+export const block_accept = async (block:T.Block,socket:Server)=>{
+    try{
     const chain:T.Block[] = JSON.parse(fs.readFileSync('./json/blockchain.json','utf-8')) || [gen.block];
     console.log(block);
     const candidates:T.Candidates[] = JSON.parse(fs.readFileSync('./json/candidates.json','utf-8')) || gen.candidates;
@@ -170,14 +182,16 @@ export const block_accept = async (block:T.Block,socket:Socket)=>{
             });
             return p;
         })(pool);
-        fs.writeFileSync('./json/tx_pool.json',JSON.stringify(new_pool,null, '    '));
-        fs.writeFileSync('./json/root.json',JSON.stringify(new_roots,null, '    '));
-        fs.writeFileSync('./json/candidates.json',JSON.stringify(accepted.candidates,null, '    '));
-        fs.writeFileSync('./json/blockchain.json',JSON.stringify(chain.concat(accepted.block),null, '    '));
+        fs.writeFileSync('./json/tx_pool.json',JSON.stringify(_.copy(new_pool),null, '    '));
+        fs.writeFileSync('./json/root.json',JSON.stringify(_.copy(new_roots),null, '    '));
+        fs.writeFileSync('./json/candidates.json',JSON.stringify(accepted.candidates.slice(),null, '    '));
+        fs.writeFileSync('./json/blockchain.json',JSON.stringify(chain.slice().concat(accepted.block),null, '    '));
         console.log("received valid block")
-        socket.broadcast.emit('block',JSON.stringify(block));
+        socket.emit('block',JSON.stringify(_.copy(block)));
     }
     else console.log("receive invalid block");
+    }
+    catch(e){console.log(e)}
 }
 
 const get_pre_info = async (block:T.Block,chain:T.Block[])=>{
@@ -202,7 +216,7 @@ const get_pre_info = async (block:T.Block,chain:T.Block[])=>{
     return [pre_root,accepted.candidates];
 }
 
-export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],socket:Socket)=>{
+export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],socket:Server)=>{
     if(new_chain.length>my_chain.length){
         const news = new_chain.slice().reverse();
         let target:T.Block[] = [];
@@ -229,10 +243,10 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],socket:
                 candidates:pre_info[1]
             }
         })();
-        fs.writeFileSync('./json/root.json',JSON.stringify(info.roots,null, '    '));
-        fs.writeFileSync('./json/candidates.json',JSON.stringify(info.candidates,null, '    '));
+        fs.writeFileSync('./json/root.json',JSON.stringify(_.copy(info).roots,null, '    '));
+        fs.writeFileSync('./json/candidates.json',JSON.stringify(_.copy(info).candidates,null, '    '));
         await P.forEach(add_blocks,async (block:T.Block)=>{
-            await block_accept(block,socket);
+            await block_accept(_.copy(block),socket);
         });
     }
 }

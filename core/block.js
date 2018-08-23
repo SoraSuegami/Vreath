@@ -40,7 +40,7 @@ exports.empty_block = () => {
     };
 };
 exports.search_key_block = (chain) => {
-    for (let block of chain.reverse()) {
+    for (let block of chain.slice().reverse()) {
         if (block.meta.kind === "key")
             return block;
     }
@@ -161,9 +161,6 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     const tx_root = meta.tx_root;
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
-    chain.sort((a, b) => {
-        return a.meta.index - b.meta.index;
-    });
     const last = chain[chain.length - 1];
     const right_parenthash = (() => {
         if (last != null)
@@ -191,6 +188,8 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
         return false;
     }
     else if (index != chain.length) {
+        console.log(chain.length);
+        console.log(index);
         console.log("invalid index");
         return false;
     }
@@ -272,9 +271,6 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     const date = new Date();
     const now = date.getTime();
     const already_micro = exports.search_micro_block(chain, key_block);
-    chain.sort((a, b) => {
-        return a.meta.index - b.meta.index;
-    });
     if (_.object_hash_check(hash, meta)) {
         console.log("invalid hash");
         return false;
@@ -292,6 +288,8 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         return false;
     }
     else if (index != chain.length) {
+        console.log(chain.length);
+        console.log(index);
         console.log("invalid index");
         return false;
     }
@@ -441,8 +439,10 @@ const get_units = (unit, StateData) => {
 };
 const reduce_units = (states, rate) => {
     return states.map(state => {
-        state.amount *= rate;
-        return state;
+        return _.new_obj(state, s => {
+            s.amount *= rate;
+            return s;
+        });
     });
 };
 const CandidatesForm = (states) => {
@@ -471,7 +471,10 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
     const reduced = StateData.map(s => {
         if (s.kind != "state" || s.token != unit)
             return s;
-        return Object.assign({ amount: s.amount * rate }, s);
+        return _.new_obj(s, s => {
+            s.amount *= rate;
+            return s;
+        });
     });
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(block.meta.validatorPub));
     const index = reduced.map(r => r.owner).indexOf(validator);
@@ -484,7 +487,10 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
         else
             return sum;
     }, 0);
-    const shared = Object.assign({ amount: validator_state.amount - share_amount * (1 - rate) }, validator_state);
+    const shared = _.new_obj(validator_state, s => {
+        s.amount -= share_amount * (1 - rate);
+        return s;
+    });
     return StateData.map((val, i) => { if (i === index)
         return shared;
     else

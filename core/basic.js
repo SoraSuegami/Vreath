@@ -9,6 +9,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const CryptoSet = __importStar(require("./crypto_set"));
 const TxSet = __importStar(require("./tx"));
+exports.copy = (data) => {
+    return Object.assign({}, data);
+};
+exports.new_obj = (obj, fn) => {
+    return fn(exports.copy(obj));
+};
 exports.toHash = (str) => {
     return CryptoSet.HashFromPass(str);
 };
@@ -71,18 +77,18 @@ exports.tx_fee = (tx) => {
     return price * Buffer.from(target).length;
 };
 exports.find_tx = (chain, hash) => {
-    for (let block of chain) {
+    for (let block of chain.slice()) {
         if (block.meta.kind === "key")
             continue;
-        for (let tx of block.txs) {
+        for (let tx of block.txs.slice()) {
             if (tx.hash === hash)
                 return tx;
         }
-        for (let tx of block.natives) {
+        for (let tx of block.natives.slice()) {
             if (tx.hash === hash)
                 return tx;
         }
-        for (let tx of block.units) {
+        for (let tx of block.units.slice()) {
             if (tx.hash === hash)
                 return tx;
         }

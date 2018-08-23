@@ -2,22 +2,32 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import * as TxSet from './tx'
 
+
+export const copy = <T>(data:T)=>{
+  return Object.assign({},data);
+}
+
+
+export const new_obj = <T>(obj:T,fn:(obj:T)=>T)=>{
+  return fn(copy(obj));
+}
+
 export const toHash = (str:string)=>{
   return CryptoSet.HashFromPass(str);
 }
 
-export const ObjectSort = (obj:{[key:string]:any}|any[]):string=>{
+export const ObjectSort = <T>(obj:{[key:string]:T}|T[]):string=>{
   const keys = Object.keys(obj).sort();
-  let maped:{[key:string]:any} = {};
+  let maped:{[key:string]:T} = {};
   keys.forEach(((key:string)=>{
-    let val:any = obj[key];
+    let val = obj[key];
     if(typeof val==="object") val = ObjectSort(val);
     maped[key] = val;
   }));
   return JSON.stringify(maped);
 }
 
-export const ObjectHash = (obj:{[key:string]:any}|any[])=>{
+export const ObjectHash = <T>(obj:{[key:string]:T}|T[])=>{
   const sorted = ObjectSort(obj);
   return toHash(sorted);
 }
@@ -77,15 +87,15 @@ export const tx_fee = (tx:T.Tx)=>{
 }
 
 export const find_tx = (chain:T.Block[],hash:string)=>{
-  for(let block of chain){
+  for(let block of chain.slice()){
     if(block.meta.kind==="key") continue;
-    for(let tx of block.txs){
+    for(let tx of block.txs.slice()){
       if(tx.hash===hash) return tx;
     }
-    for(let tx of block.natives){
+    for(let tx of block.natives.slice()){
       if(tx.hash===hash) return tx;
     }
-    for(let tx of block.units){
+    for(let tx of block.units.slice()){
       if(tx.hash===hash) return tx;
     }
   }

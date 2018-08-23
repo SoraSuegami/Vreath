@@ -22,6 +22,15 @@ fs.writeFileSync('./json/tx_pool.json', "{}");
 fs.writeFileSync('./json/root.json', JSON.stringify(gen.roots, null, '    '));
 fs.writeFileSync('./json/candidates.json', JSON.stringify(gen.candidates, null, '    '));
 fs.writeFileSync('./json/blockchain.json', JSON.stringify([gen.block], null, '    '));
+(async () => {
+    const S_Trie = db.trie_ins("");
+    await P.forEach(gen.state, async (state) => {
+        if (state.kind === "state")
+            await S_Trie.put(state.owner, state);
+        else
+            await S_Trie.put(state.token, state);
+    });
+})();
 const output_keys = (tx) => {
     if (tx.meta.kind === "request")
         return [];
@@ -104,8 +113,10 @@ exports.states_for_block = async (block, chain, S_Trie) => {
                 return block;
             else
                 return chain[tx.meta.data.index];
-        })();
-        return await S_Trie.get(b.raws[b.txs.length + i].raw[1]) || StateSet.CreateState(0, b.raws[b.txs.length + i].raw[1], con_1.native, 0);
+        })() || BlockSet.empty_block();
+        console.log(tx.meta.data.index);
+        const raw = b.raws[b.txs.length + i] || TxSet.empty_tx().raw;
+        return await S_Trie.get(raw.raw[1]) || StateSet.CreateState(0, raw.raw[1], con_1.native, 0);
     });
     const unit_states = await P.map(block.units, async (tx, i) => {
         const b = (() => {
@@ -113,7 +124,7 @@ exports.states_for_block = async (block, chain, S_Trie) => {
                 return block;
             else
                 return chain[tx.meta.data.index];
-        })();
+        })() || BlockSet.empty_block();
         const remiter = await S_Trie.get(b.raws[b.txs.length + b.natives.length + i].raw[1]) || StateSet.CreateState(0, b.raws[b.txs.length + b.natives.length + i].raw[1], con_1.unit, 0);
         const items = JSON.parse(b.raws[b.txs.length + b.natives.length + i].raw[2]) || [TxSet.empty_tx()];
         const sellers = await P.map(items, async (it) => await S_Trie.get(it.meta.data.payee) || StateSet.CreateState(0, it.meta.data.payee, con_1.unit, 0));
@@ -147,53 +158,58 @@ exports.tx_accept = async (tx, socket) => {
     const locations = await exports.locations_for_tx(tx, chain, L_Trie);
     const new_pool = tx_pool_1.Tx_to_Pool(pool, tx, con_1.my_version, con_1.native, con_1.unit, chain, con_1.token_name_maxsize, states, locations);
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
-        fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
+        fs.writeFileSync('./json/tx_pool.json', JSON.stringify(_.copy(new_pool), null, '    '));
         console.log("receive valid tx");
-        socket.broadcast.emit('tx', JSON.stringify(tx));
+        socket.emit('tx', JSON.stringify(tx));
     }
 };
 exports.block_accept = async (block, socket) => {
-    const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
-    console.log(block);
-    const candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8')) || gen.candidates;
-    const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
-    const stateroot = roots.stateroot;
-    const S_Trie = db.trie_ins(stateroot);
-    const locationroot = roots.locationroot;
-    const L_Trie = db.trie_ins(locationroot);
-    const StateData = await exports.states_for_block(block, chain, S_Trie);
-    const LocationData = await exports.locations_for_block(block, chain, L_Trie);
-    const accepted = BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
-    if (accepted.block.length > 0) {
-        await P.forEach(accepted.state, async (state) => {
-            if (state.kind === "state")
-                await S_Trie.put(state.owner, state);
-            else
-                await S_Trie.put(state.token, state);
-        });
-        await P.forEach(accepted.location, async (loc) => {
-            await L_Trie.put(loc.address, loc);
-        });
-        const new_roots = {
-            stateroot: S_Trie.now_root(),
-            locationroot: L_Trie.now_root()
-        };
-        const pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8')) || {};
-        const new_pool = ((p) => {
-            block.txs.concat(block.natives).concat(block.units).forEach(tx => {
-                delete p[tx.hash];
+    try {
+        const chain = JSON.parse(fs.readFileSync('./json/blockchain.json', 'utf-8')) || [gen.block];
+        console.log(block);
+        const candidates = JSON.parse(fs.readFileSync('./json/candidates.json', 'utf-8')) || gen.candidates;
+        const roots = JSON.parse(fs.readFileSync('./json/root.json', 'utf-8')) || gen.roots;
+        const stateroot = roots.stateroot;
+        const S_Trie = db.trie_ins(stateroot);
+        const locationroot = roots.locationroot;
+        const L_Trie = db.trie_ins(locationroot);
+        const StateData = await exports.states_for_block(block, chain, S_Trie);
+        const LocationData = await exports.locations_for_block(block, chain, L_Trie);
+        const accepted = BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+        if (accepted.block.length > 0) {
+            await P.forEach(accepted.state, async (state) => {
+                if (state.kind === "state")
+                    await S_Trie.put(state.owner, state);
+                else
+                    await S_Trie.put(state.token, state);
             });
-            return p;
-        })(pool);
-        fs.writeFileSync('./json/tx_pool.json', JSON.stringify(new_pool, null, '    '));
-        fs.writeFileSync('./json/root.json', JSON.stringify(new_roots, null, '    '));
-        fs.writeFileSync('./json/candidates.json', JSON.stringify(accepted.candidates, null, '    '));
-        fs.writeFileSync('./json/blockchain.json', JSON.stringify(chain.concat(accepted.block), null, '    '));
-        console.log("received valid block");
-        socket.broadcast.emit('block', JSON.stringify(block));
+            await P.forEach(accepted.location, async (loc) => {
+                await L_Trie.put(loc.address, loc);
+            });
+            const new_roots = {
+                stateroot: S_Trie.now_root(),
+                locationroot: L_Trie.now_root()
+            };
+            const pool = JSON.parse(fs.readFileSync('./json/tx_pool.json', 'utf-8')) || {};
+            const new_pool = ((p) => {
+                block.txs.concat(block.natives).concat(block.units).forEach(tx => {
+                    delete p[tx.hash];
+                });
+                return p;
+            })(pool);
+            fs.writeFileSync('./json/tx_pool.json', JSON.stringify(_.copy(new_pool), null, '    '));
+            fs.writeFileSync('./json/root.json', JSON.stringify(_.copy(new_roots), null, '    '));
+            fs.writeFileSync('./json/candidates.json', JSON.stringify(accepted.candidates.slice(), null, '    '));
+            fs.writeFileSync('./json/blockchain.json', JSON.stringify(chain.slice().concat(accepted.block), null, '    '));
+            console.log("received valid block");
+            socket.emit('block', JSON.stringify(_.copy(block)));
+        }
+        else
+            console.log("receive invalid block");
     }
-    else
-        console.log("receive invalid block");
+    catch (e) {
+        console.log(e);
+    }
 };
 const get_pre_info = async (block, chain) => {
     const pre_block = chain[chain.length - 1];
@@ -248,10 +264,10 @@ exports.check_chain = async (new_chain, my_chain, socket) => {
                 candidates: pre_info[1]
             };
         })();
-        fs.writeFileSync('./json/root.json', JSON.stringify(info.roots, null, '    '));
-        fs.writeFileSync('./json/candidates.json', JSON.stringify(info.candidates, null, '    '));
+        fs.writeFileSync('./json/root.json', JSON.stringify(_.copy(info).roots, null, '    '));
+        fs.writeFileSync('./json/candidates.json', JSON.stringify(_.copy(info).candidates, null, '    '));
         await P.forEach(add_blocks, async (block) => {
-            await exports.block_accept(block, socket);
+            await exports.block_accept(_.copy(block), socket);
         });
     }
 };

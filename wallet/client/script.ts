@@ -3,6 +3,7 @@ import {IO, ioEvent} from 'rxjs-socket.io'
 import {tx_accept,block_accept,get_balance,send_request_tx,trie_ins,check_chain} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
+import * as  _ from '../../core/basic'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate} from '../con'
 import Vue from 'vue'
 import Vuex from 'vuex'
@@ -15,7 +16,7 @@ import * as P from 'p-iteration'
 
 
 const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_port || "localhost";
+const ip = process.env.vreath_ip || "localhost";
 console.log(ip)
 
 const socket = new IO();
@@ -30,7 +31,7 @@ const tx$: rx.Subscription = socket.listenToEvent(onTx).event$.subscribe(async (
     try{
         const tx:T.Tx = JSON.parse(data);
         console.log(tx)
-        await store.dispatch("tx_accept",tx);
+        await store.dispatch("tx_accept",_.copy(tx));
     }
     catch(e){console.log(e);}
 });
@@ -40,14 +41,14 @@ const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(a
         const block:T.Block = JSON.parse(data);
         const chain:T.Block[] = store.state.chain;
         if(block.meta.index>chain.length) socket.emit("checkchain");
-        else await store.dispatch("block_accept",block);
+        else if(block.meta.index===chain.length) await store.dispatch("block_accept",_.copy(block));
         console.log(block)
     }
     catch(e){console.log(e);}
 });
 
 const checkchain$: rx.Subscription = socket.listenToEvent(checkChain).event$.subscribe(async (data:string)=>{
-    socket.emit('replacechain',JSON.stringify(store.state.chain));
+    socket.emit('replacechain',JSON.stringify(store.state.chain.slice()));
 });
 
 const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.subscribe(async (data:string)=>{
@@ -55,7 +56,7 @@ const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.
         const chain:T.Block[] = JSON.parse(data);
         console.log("replace:")
         console.log(chain)
-        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.pool,store.state.roots,store.state.candidates,store.state.code,store.state.secret,store.state.validator_mode,socket);
+        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.roots),store.state.candidates.slice(),_.copy(store.state.code),store.state.secret,store.state.validator_mode,socket);
     }
     catch(e){console.log(e);}
 });
@@ -127,36 +128,36 @@ export const store = new Vuex.Store({
     },
     mutations:{
         add_app(state,obj:Installed){
-            state.apps[obj.name] = obj;
-            localStorage.setItem("apps",JSON.stringify(state.apps));
+            state.apps[obj.name] = _.copy(obj);
+            localStorage.setItem("apps",JSON.stringify(_.copy(state.apps)));
         },
         del_app(state,key:string){
             delete state.apps[key];
-            localStorage.setItem("apps",JSON.stringify(state.apps));
+            localStorage.setItem("apps",JSON.stringify(_.copy(state.apps)));
         },
         refresh_pool(state,pool:T.Pool){
-            state.pool = pool;
-            localStorage.setItem("pool",JSON.stringify(state.pool));
+            state.pool = _.copy(pool);
+            localStorage.setItem("pool",JSON.stringify(_.copy(state.pool)));
         },
         add_block(state,block:T.Block){
-            state.chain = state.chain.concat(block).slice().sort((a:T.Block,b:T.Block)=>{
+            state.chain = state.chain.concat(block).sort((a:T.Block,b:T.Block)=>{
                 return a.meta.index - b.meta.index;
             });
-            localStorage.setItem("chain",JSON.stringify(state.chain));
+            localStorage.setItem("chain",JSON.stringify(state.chain.slice()));
         },
         replace_chain(state,chain:T.Block[]){
             state.chain = chain.slice().sort((a:T.Block,b:T.Block)=>{
                 return a.meta.index - b.meta.index;
             });
-            localStorage.setItem("chain",JSON.stringify(state.chain));
+            localStorage.setItem("chain",JSON.stringify(state.chain.slice()));
         },
         refresh_roots(state,roots:{[key:string]:string}){
-            state.roots = roots;
-            localStorage.setItem("roots",state.roots);
+            state.roots = _.copy(roots);
+            localStorage.setItem("roots",_.copy(state.roots));
         },
         refresh_candidates(state,candidates:T.Candidates[]){
-            state.candidates = candidates;
-            localStorage.setItem("candidates",JSON.stringify(state.candidates));
+            state.candidates = candidates.slice();
+            localStorage.setItem("candidates",JSON.stringify(state.candidates.slice()));
         },
         refresh_secret(state,secret:string){
             state.secret = secret;
@@ -178,7 +179,7 @@ export const store = new Vuex.Store({
     actions:{
         tx_accept(commit,tx:T.Tx){
             try{
-                tx_accept(tx,store.state.chain,store.state.roots,store.state.pool,store.state.secret,store.state.validator_mode,store.state.candidates,store.state.code,socket).then(()=>{
+                tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.validator_mode,store.state.candidates.slice(),store.state.code,socket).then(()=>{
                     console.log("tx accept");
                 })
             }
@@ -186,7 +187,7 @@ export const store = new Vuex.Store({
         },
         block_accept(commit,block:T.Block){
             try{
-                block_accept(block,store.state.chain,store.state.candidates,store.state.roots,store.state.pool,store.state.code,store.state.secret,store.state.code,socket).then(()=>{
+                block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),socket).then(()=>{
                     console.log("block accept");
                     get_balance(store.getters.my_address).then((amount)=>{
                         commit.commit("refresh_balance",amount);
@@ -202,7 +203,7 @@ export const store = new Vuex.Store({
 const Home = {
     data:function(){
         return{
-            installed:this.$store.state.apps
+            installed:_.copy(this.$store.state.apps)
         }
     },
     store,
@@ -234,6 +235,7 @@ const Wallet = {
         }
     },
     created:async function(){
+        socket.emit("checkchain");
         const balance = await get_balance(this.from);
         console.log(balance);
         store.commit("refresh_balance",balance);
@@ -260,7 +262,7 @@ const Wallet = {
         remit:async function(){
             try{
                 console.log("request");
-                await send_request_tx(this.$store.state.secret,this.to,this.amount,this.$store.state.roots,this.$store.state.chain,this.$store.state.pool,this.$store.state.validator_mode,this.$store.state.candidates,this.$store.state.code,socket);
+                await send_request_tx(this.$store.state.secret,this.to,this.amount,_.copy(this.$store.state.roots),this.$store.state.chain.slice(),_.copy(this.$store.state.pool),this.$store.state.validator_mode,this.$store.state.candidates.slice(),this.$store.state.code,socket);
             }
             catch(e){console.log(e)}
         }

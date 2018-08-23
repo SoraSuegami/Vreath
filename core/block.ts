@@ -35,7 +35,7 @@ export const empty_block = ():T.Block=>{
 }
 
 export const search_key_block = (chain:T.Block[])=>{
-    for(let block of chain.reverse()){
+    for(let block of chain.slice().reverse()){
         if(block.meta.kind==="key") return block;
     }
     return empty_block();
@@ -157,15 +157,11 @@ export const ValidKeyBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,m
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
 
-    chain.sort((a:T.Block,b:T.Block)=>{
-        return a.meta.index - b.meta.index;
-    });
-
     const last = chain[chain.length-1];
     const right_parenthash = (()=>{
         if(last!=null) return last.hash;
         else return _.toHash('');
-    })();
+    })()
 
 
     const unit_validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(validatorPub));
@@ -190,6 +186,8 @@ export const ValidKeyBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,m
         return false;
     }
     else if(index!=chain.length){
+        console.log(chain.length);
+        console.log(index);
         console.log("invalid index");
         return false;
     }
@@ -275,9 +273,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
     const now = date.getTime();
 
     const already_micro = search_micro_block(chain,key_block);
-    chain.sort((a:T.Block,b:T.Block)=>{
-        return a.meta.index - b.meta.index;
-    });
+
 
     if(_.object_hash_check(hash,meta)){
         console.log("invalid hash");
@@ -296,6 +292,8 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
         return false;
     }
     else if(index!=chain.length){
+        console.log(chain.length);
+        console.log(index)
         console.log("invalid index");
         return false;
     }
@@ -448,8 +446,13 @@ const get_units = (unit:string,StateData:T.State[])=>{
 
 const reduce_units = (states:T.State[],rate:number)=>{
     return states.map(state=>{
-        state.amount *= rate;
-        return state;
+        return _.new_obj(
+            state,
+            s=>{
+                s.amount *= rate;
+                return s;
+            }
+        );
     });
 }
 
@@ -482,7 +485,13 @@ export const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
 const change_unit_amounts = (block:T.Block,unit:string,rate:number,StateData:T.State[])=>{
     const reduced = StateData.map(s=>{
         if(s.kind!="state"||s.token!=unit) return s;
-        return Object.assign({amount:s.amount*rate},s);
+        return _.new_obj(
+            s,
+            s=>{
+                s.amount *= rate
+                return s;
+            }
+        );
     });
     const validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(block.meta.validatorPub));
     const index = reduced.map(r=>r.owner).indexOf(validator);
@@ -492,7 +501,13 @@ const change_unit_amounts = (block:T.Block,unit:string,rate:number,StateData:T.S
         if(tx.meta.data.address!=validator) return sum+block.raws[block.txs.length+block.natives.length+i].raw[2].length;
         else return sum;
     },0);
-    const shared = Object.assign({amount:validator_state.amount-share_amount*(1-rate)},validator_state);
+    const shared = _.new_obj(
+        validator_state,
+        s=>{
+            s.amount -= share_amount*(1-rate)
+            return s;
+        }
+    )
     return StateData.map((val,i)=>{if(i===index)return shared; else return val;});
 }
 

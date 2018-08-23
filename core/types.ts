@@ -120,3 +120,12 @@ export type Block = {
 export type Pool = {
   [key:string]:Tx;
 }
+
+export type Unit = {
+  request:string,
+  index:number,
+  nonce:number,
+  payee:string,
+  output:string,
+  unit_price:number,
+}

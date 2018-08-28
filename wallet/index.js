@@ -175,7 +175,7 @@ exports.block_accept = async (block, socket) => {
         const L_Trie = db.trie_ins(locationroot);
         const StateData = await exports.states_for_block(block, chain, S_Trie);
         const LocationData = await exports.locations_for_block(block, chain, L_Trie);
-        const accepted = BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+        const accepted = BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, stateroot, locationroot, con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, con_1.all_issue, StateData, LocationData);
         if (accepted.block.length > 0) {
             await P.forEach(accepted.state, async (state) => {
                 if (state.kind === "state")
@@ -218,7 +218,7 @@ const get_pre_info = async (block, chain) => {
     const L_Trie = db.trie_ins(pre_block.meta.locationroot);
     const LocationData = await exports.locations_for_block(pre_block, chain, L_Trie);
     const candidates = BlockSet.NewCandidates(con_1.unit, con_1.rate, StateData);
-    const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, S_Trie.now_root(), L_Trie.now_root(), con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, StateData, LocationData);
+    const accepted = await BlockSet.AcceptBlock(block, chain, 0, con_1.my_version, con_1.block_time, con_1.max_blocks, con_1.block_size, candidates, S_Trie.now_root(), L_Trie.now_root(), con_1.native, con_1.unit, con_1.rate, con_1.token_name_maxsize, con_1.all_issue, StateData, LocationData);
     await P.forEach(accepted.state, async (state) => {
         if (state.kind === "state")
             await S_Trie.put(state.owner, state);

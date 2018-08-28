@@ -3,8 +3,8 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import * as StateSet from './state'
 import * as BlockSet from './block'
-import { unit } from '../wallet/con';
-import { stat } from 'fs';
+import { block } from '../genesis';
+import {BigNumber} from 'bignumber.js'
 
 export const empty_tx = ():T.Tx=>{
   const data:T.TxData = {
@@ -110,9 +110,9 @@ export const refreshed_check = (base:string[],index:number,tx_hash:string,Locati
 const state_check = (state:T.State,token_name_maxsize:number)=>{
   const hash_size = Buffer.from(_.toHash("")).length;
   const copy_state = state;
-  return _.address_form_check(copy_state.owner,token_name_maxsize) || copy_state.amount<0 ||
-  Object.entries(copy_state.data).some(([val,key])=>{return Buffer.from(key).length>hash_size || Buffer.from(val).length>hash_size}) ||
-  copy_state.product.some(pro=>Buffer.from(pro).length>token_name_maxsize);
+  return _.address_form_check(copy_state.owner,token_name_maxsize) || new BigNumber(copy_state.amount).isLessThan(0) ||
+  Object.entries(copy_state.data).some(([val,key])=>{return new BigNumber(Buffer.from(key).length).isGreaterThan(hash_size) || new BigNumber(Buffer.from(val).length).isGreaterThan(hash_size)}) ||
+  copy_state.product.some(pro=>new BigNumber(Buffer.from(pro).length).isGreaterThan(token_name_maxsize));
 }
 
 const base_declaration_check = (target:T.State,bases:string[],StateData:T.State[])=>{
@@ -128,7 +128,7 @@ const output_check = (type:T.TxTypes,base_states:T.State[],output_raw:string[],t
     const dev_check = token_state.developer.some((dev)=>{
       return _.address_form_check(dev,token_name_maxsize)
     });
-    if(getted!=null||dev_check||token_state.nonce!=0||token_state.issued<0||token_state.code!=_.toHash(code)) return true;
+    if(getted!=null||dev_check||token_state.nonce!=0||new BigNumber(token_state.issued).isLessThan(0)||token_state.code!=_.toHash(code)) return true;
     else return false;
   }
   else if(type==="update"){
@@ -142,7 +142,7 @@ const output_check = (type:T.TxTypes,base_states:T.State[],output_raw:string[],t
     const comm = getted.committed.some((c:string)=>{
       return token_state.committed.indexOf(c)===-1
     });
-    if(getted==null||dev_check||token_state.deposited<0||comm) return true;
+    if(getted==null||dev_check||new BigNumber(token_state.deposited).isLessThan(0)||comm) return true;
     else return false;
   }
   else{
@@ -152,9 +152,11 @@ const output_check = (type:T.TxTypes,base_states:T.State[],output_raw:string[],t
     const bases = base_states.map(s=>s.owner);
     const nonce_check = base_states.some((b,i)=>b.nonce+1!=new_states[i].nonce);
     if(new_states.some((s:T.State)=>{return state_check(s,token_name_maxsize)||base_declaration_check(s,bases,StateData)})||nonce_check) return true;
-    const pre_amount = base_states.reduce((sum,s)=>{return sum+s.amount},0);
-    const new_amount = new_states.reduce((sum,s)=>{return sum+s.amount},0);
-    return (type==="issue"&&pre_amount>=new_amount) || (type==="change"&&pre_amount!=new_amount) || (type==="scrap"&&pre_amount<=new_amount);
+    const pre_amount = base_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
+    const new_amount = new_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
+    console.log(pre_amount.toNumber());
+    console.log(new_amount.toNumber());
+    return (type==="issue"&&new BigNumber(pre_amount).isGreaterThanOrEqualTo(new_amount)) || (type==="change"&&pre_amount!=new_amount) || (type==="scrap"&&new BigNumber(pre_amount).isLessThanOrEqualTo(new_amount));
   }
 }
 
@@ -179,13 +181,16 @@ const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T
   return list_up_related(chain,searched,ori_order,new_pres);
 }
 
-const mining = (request:string,index:number,refresher:string,output:string,unit_price:number,target:number)=>{
+const mining = (request:string,index:number,refresher:string,output:string,target:number)=>{
   let nonce:number = -1;
-  let num:number;
+  let num:number = 0;
+  let i:number = 0;
   do{
+    i ++;
+    if(i>1000000) break;
     nonce ++;
-    num = _.Hex_to_Num(request)+index+nonce+_.Hex_to_Num(refresher)+_.Hex_to_Num(output)+unit_price;
-  }while(num>target);
+    num = _.Hex_to_Num(_.toHash(new BigNumber(_.Hex_to_Num(request)).plus(index).plus(nonce).plus(_.Hex_to_Num(refresher)).plus(_.Hex_to_Num(output)).toString()));
+  }while(new BigNumber(num).isGreaterThan(target));
   return nonce;
 }
 
@@ -381,8 +386,10 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   const raw_data = tx.raw.raw;
 
   const solvency_state:T.State = StateData.filter(s=>{
-    return s.kind==="state"&&s.token===native&&s.owner===solvency&&s.amount>=_.tx_fee(tx)+gas
+    return s.kind==="state"&&s.token===native&&s.owner===solvency&&new BigNumber(s.amount).isGreaterThanOrEqualTo(new BigNumber(_.tx_fee(tx)).plus(gas))
   })[0];
+  console.log(_.tx_fee(tx))
+  console.log(gas)
 
   const base_states = base.map(key=>{
     return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
@@ -396,6 +403,7 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
     return false;
   }
   else if(solvency_state==null||hashed_pub_check(solvency_state,pub_key)||requested_check([solvency],LocationData)){
+    console.log(solvency_state)
     console.log(requested_check([solvency],LocationData))
     console.log("invalid solvency");
     return false;
@@ -460,12 +468,12 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
   const token = req_tx.meta.data.token;
 
   const payee_state:T.State = StateData.filter(s=>{
-    return s.kind==="state"&&s.owner===payee&&s.amount+req_tx.meta.data.gas>=_.tx_fee(tx)&&s.token===native
+    return s.kind==="state"&&s.owner===payee&&new BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx))&&s.token===native
   })[0];
 
 
   const base_states:T.State[] = req_tx.meta.data.base.map(key=>{
-    return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
+    return StateData.slice().filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
   });
 
 
@@ -480,11 +488,11 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
     console.log("invalid kind");
     return false;
   }
-  else if(_.Hex_to_Num(request)+index+nonce+_.Hex_to_Num(payee)+_.Hex_to_Num(output)+unit_price>pow_target){
+  else if(new BigNumber(_.Hex_to_Num(_.toHash(new BigNumber(_.Hex_to_Num(request)).plus(index).plus(nonce).plus(_.Hex_to_Num(payee)).plus(_.Hex_to_Num(output)).toString()))).isGreaterThan(pow_target)){
     console.log("invalid nonce");
     return false;
   }
-  else if(unit_price<0){
+  else if(new BigNumber(unit_price).isLessThan(0)){
     console.log("invalid unit_price");
     return false;
   }
@@ -512,7 +520,10 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
     console.log("invalid output hash");
     return false;
   }
-  else if(output_check(req_tx.meta.data.type,base_states,output_raw,token_name_maxsize,StateData)){
+  else if(output!=_.ObjectHash(base_states.map(s=>JSON.stringify(s)))&&output_check(req_tx.meta.data.type,base_states,output_raw,token_name_maxsize,StateData)){
+    console.log(base_states);
+    console.log(output_raw.map(o=>JSON.parse(o)))
+    console.log(_.ObjectHash(base_states.slice())===_.ObjectHash(output_raw.map(o=>JSON.parse(o))))
     console.log("invalid output");
     return false;
   }
@@ -615,7 +626,8 @@ export const CreateRefreshTx = (version:number,unit_price:number,pub_key:string[
     payee:payee,
     output:output
   }
-  const nonce = mining(request,index,JSON.stringify(payee),output,target,unit_price);
+  const nonce = mining(request,index,JSON.stringify(payee),output,target);
+
   const meta:T.TxMeta = {
     kind:"refresh",
     version:version,
@@ -660,14 +672,14 @@ export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
   const new_solvency = _.new_obj(
     solvency,
     solvency=>{
-      solvency.amount -= fee;
+      solvency.amount = new BigNumber(solvency.amount).minus(fee).toNumber();
       return solvency;
     }
   );
   const new_validator= _.new_obj(
     validator,
     validator=>{
-      validator.amount -= fee;
+      validator.amount = new BigNumber(validator.amount).minus(fee).toNumber();
       return validator;
     }
   )
@@ -679,14 +691,14 @@ export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
   const new_solvency = _.new_obj(
     solvency,
     solvency=>{
-      solvency.amount -= gas;
+      solvency.amount = new BigNumber(solvency.amount).minus(gas).toNumber();
       return solvency;
     }
   )
   const new_payee = _.new_obj(
     payee,
     payee=>{
-      payee.amount -= gas;
+      payee.amount = new BigNumber(payee.amount).minus(gas).toNumber();
       return payee;
     }
   )
@@ -749,7 +761,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       pre_token,
       (token)=>{
         token.nonce ++;
-        token.issued += token_info.issued;
+        token.issued = new BigNumber(token.issued).plus(token_info.issued).toNumber();
         token.committed = token.committed.concat(token_info.committed);
         return token;
       }
@@ -766,9 +778,15 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0]
     });
     const new_states:T.State[] = ref_tx.raw.raw.map(obj=>JSON.parse(obj));
-    const pre_amount_sum = base_states.reduce((sum,state)=>sum+state.amount,0);
-    const new_amount_sum = new_states.reduce((sum,state)=>sum+state.amount,0);
-    const new_token_info = Object.assign({nonce:token_info.nonce+1,issued:token_info.issued+new_amount_sum-pre_amount_sum},token_info);
+    const pre_amount_sum = base_states.reduce((sum,state)=>new BigNumber(sum).plus(state.amount).toNumber(),0);
+    const new_amount_sum = new_states.reduce((sum,state)=>new BigNumber(sum).plus(state.amount).toNumber(),0);
+    const new_token_info = _.new_obj(
+      token_info,
+      (token)=>{
+        token.issued = new BigNumber(token.issued).plus(new_amount_sum).minus(pre_amount_sum).toNumber();
+        return token;
+      }
+    );
     const solvency_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.solvency})[0] || StateSet.CreateState(0,req_tx.meta.data.solvency,native,0,{},[]);
     const payee_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===ref_tx.meta.data.payee})[0] || StateSet.CreateState(0,ref_tx.meta.data.payee,native,0,{},[]);
     const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,native,0,{},[]);
@@ -810,57 +828,95 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       return locs.map((val,i)=>{if(index===i)return new_loc; else return val;})
     },LocationData);
     if(req_tx.meta.data.token===native&&req_tx.meta.data.type==="scrap"&&req_tx.raw.raw[0]==="remit"){
+      const remiter_state = StateData.filter(s=>s.kind==="state"&&s.token===native&&s.owner===req_tx.meta.data.address)[0];
       const receiver = req_tx.raw.raw[1];
       const amount = -1*Number(req_tx.raw.raw[2]);
-      const receiver_state:T.State = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===receiver})[0] || StateSet.CreateState(0,receiver,native,0,{},[]);
+      if(remiter_state==null||new BigNumber(amount).isLessThan(0)||new BigNumber(remiter_state.amount).plus(amount).isLessThan(0)) return [StateData_added,LocationData_added];
+      const remited = _.new_obj(
+        remiter_state,
+        (state)=>{
+          state.nonce ++;
+          state.amount = new BigNumber(state.amount).minus(amount).toNumber();
+          return state;
+        }
+      )
+      const StateData_remited = StateData.map(s=>{
+        if(s.kind==="state"&&s.token===native&&s.owner===req_tx.meta.data.address) return remited;
+        else return s;
+      });
+      const receiver_state:T.State = StateData_remited.filter(s=>{return s.kind==="state"&&s.owner===receiver})[0] || StateSet.CreateState(0,receiver,native,0,{},[]);
       const recieved = _.new_obj(
         receiver_state,
         state=>{
-          state.nonce ++;
-          state.amount += amount;
-          return state;
-        }
-      );
-      const native_info = StateData_added.filter(s=>{return s.kind==="token"&&s.token===native})[0];
-      const native_added = _.new_obj(
-        native_info,
-        state=>{
-          state.nonce ++;
+          state.amount = new BigNumber(state.amount).plus(amount).toNumber();
           return state;
         }
       );
       const StateData_native = StateData_added.map(s=>{
         if(s.kind==="state"&&s.owner===receiver) return recieved;
-        else if(s.kind==="token"&&s.token===native) return native_added;
         else return s;
       });
       return [StateData_native,LocationData_added];
     }
     else if(req_tx.meta.data.token===unit&&req_tx.meta.data.type==="issue"&&req_tx.raw.raw[0]==="buy"){
       const inputs = req_tx.raw.raw;
+      const pre_unit = StateData.filter(s=>{return s.kind==="token"&&s.token===unit})[0];
       const remiter = inputs[1];
       const units:T.Unit[] = JSON.parse(inputs[2]);
+      const unit_check = units.some(u=>{
+        const block = chain[u.index] || BlockSet.empty_block();
+        const unit_ref_tx = (()=>{
+          for(let block of chain.slice().reverse()){
+            for(let tx of block.txs.concat(block.natives).concat(block.units)){
+              if(tx.meta.kind==="refresh"&&tx.meta.data.request===u.request&&tx.meta.data.index===u.index) return tx;
+            }
+          }
+          return empty_tx_pure();
+        })();
+        return unit_ref_tx.meta.data.output!=u.output || pre_unit.committed.indexOf(_.ObjectHash(u))!=-1;
+      });
+      if(unit_check) return [StateData_added,LocationData_added];
       const hashes = units.map(u=>_.ObjectHash(u));
       const sellers = units.map(u=>u.payee);
-      const price_sum = units.reduce((sum,u)=>{
-        return sum+u.unit_price;
+      const unit_address = CryptoSet.GenereateAddress(unit,_.reduce_pub(req_tx.meta.data.pub_key));
+      const unit_state = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===unit_address})[0] || StateSet.CreateState(0,unit_address,unit,0,{},[]);
+      const pre_waiting_total_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_total")[0]||JSON.stringify({waiting_total:[block.meta.index,0]}));
+      const pre_waiting_total = Object.values(pre_waiting_total_obj)[0][1];
+      const pre_block_index = (()=>{
+        for(let block of chain.slice().reverse()){
+          if(block.units.length!=0) return block.meta.index;
+        }
+        return 0;
+      })();
+      const waiting_states_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_states")[0]||JSON.stringify({waiting_states:[block.meta.index,0]}));
+      const waiting_states = Object.values(waiting_states_obj)[0][1];
+      const waiting_total = new BigNumber(pre_waiting_total).plus(new BigNumber(block.meta.index).minus(pre_block_index)).times(waiting_states).toNumber();
+      const unit_waitings = units.map(u=>{
+        const pre_obj:{[key:string]:number} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]===u.payee)[0]||JSON.stringify({[u.payee]:block.meta.index}));
+        const pre_time = Object.values(pre_obj)[0];
+        return BigNumber.maximum(block.meta.index-pre_time,0).toNumber();
+      });
+      const unit_values = unit_waitings.map(time=>BigNumber.maximum(
+        new BigNumber(2).exponentiatedBy(new BigNumber(time).div(waiting_total).times(
+          new BigNumber(10).exponentiatedBy(7).toNumber()
+        ).toNumber()
+      ).toNumber(),1).toNumber());
+      const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);
+      const new_unit_state = _.new_obj(
+        unit_state,
+        (state)=>{
+          state.amount = new BigNumber(state.amount).plus(unit_sum).toNumber();
+          return state;
+        }
+      );
+      const price_sum = units.reduce((sum,u,i)=>{
+        return new BigNumber(sum).plus(u.unit_price*unit_values[i]).toNumber();
       },0)
       const remiter_state:T.State = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===remiter})[0];
       const new_remiter:T.State = _.new_obj(
         remiter_state,
         (state)=>{
-          state.nonce ++;
-          state.amount -= price_sum
-          return state;
-        }
-      );
-      const unit_address = CryptoSet.GenereateAddress(unit,_.reduce_pub(req_tx.meta.data.pub_key));
-      const unit_state = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===unit_address})[0] || StateSet.CreateState(0,unit_address,unit,0,{},[]);
-      const new_unit_state = _.new_obj(
-        unit_state,
-        (state)=>{
-          state.nonce ++;
-          state.amount += units.length;
+          state.amount = new BigNumber(state.amount).minus(price_sum).toNumber();
           return state;
         }
       );
@@ -870,35 +926,34 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
         if(index!=-1) return states.map((val,i)=>{if(index===i)return new_unit_state;else return val;})
         else return states.concat(new_unit_state);
       })(StateData.map((val,i)=>{if(i===owners.indexOf(remiter))return new_remiter;else return val;}));
-      const StateData_unit_recieve = sellers.reduce((states:T.State[],seller)=>{
+      const StateData_unit_recieve = sellers.reduce((states:T.State[],seller,i)=>{
         const index = owners.indexOf(seller);
-        const amount = units[index].unit_price;
+        const amount = units[index].unit_price * unit_values[i];
         if(index==-1) return states.concat(StateSet.CreateState(0,seller,native,amount,{},[]));
         const pre = states[index];
-        const recieved = {
-          nonce:pre.nonce,
-          amount:pre.amount+amount
-        };
-        return states.map((val,i)=>{if(index===i)return Object.assign(recieved,pre);else return val;})
+        return states.map((val,i)=>{if(index===i)return _.new_obj(val,(state)=>{
+          state.amount = new BigNumber(state.amount).plus(amount).toNumber();
+          return state
+        });else return val;})
       },StateData_unit_remit);
-      const pre_native = StateData.filter(s=>{return s.kind==="token"&&s.token===native})[0];
-      const new_native = _.new_obj(
-        pre_native,
-        (state)=>{
-          state.nonce += units.length;
-          return state;
-        }
-      );
-      const pre_unit = StateData.filter(s=>{return s.kind==="token"&&s.token===unit})[0];
+      const new_waitings = units.map(u=>{
+        return JSON.stringify({
+          [u.payee]:block.meta.index
+        })
+      });
+      const reduced_time = unit_waitings.reduce((sum,time)=>BigNumber.maximum(new BigNumber(sum).minus(time).toNumber(),0).toNumber(),waiting_states);
+      const firsters = unit_waitings.filter(time=>new BigNumber(time).isLessThanOrEqualTo(0));
+      const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();
       const new_unit = _.new_obj(
         pre_unit,
         (state)=>{
           state.nonce ++;
-          state.issued += units.length;
+          state.issued = new BigNumber(state.issued).plus(unit_sum).toNumber();
+          state.committed = state.committed.concat(hashes).concat(new_waitings).concat(JSON.stringify({waiting_total:[block.meta.index,reduced_time]})).concat(JSON.stringify({waiting_states:[block.meta.index,new_wait_states]}))
           return state;
         }
       );
-      const StateData_unit = StateData_unit_recieve.map((val,i)=>{if(i===owners.indexOf(native))return new_native;else return val;}).map((val,i)=>{if(i===owners.indexOf(unit))return new_unit;else return val;})
+      const StateData_unit = StateData_unit_recieve.map((val,i)=>{if(i===owners.indexOf(unit))return new_unit;else return val;})
       return [StateData_unit,LocationData_added];
     }
     return [StateData_added,LocationData_added];

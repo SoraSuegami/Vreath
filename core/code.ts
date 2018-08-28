@@ -80,13 +80,15 @@ const edit = (editted,states:T.State[],gas_limit:number)=>{
     return editted;
 };
 
-export const RunVM = (code:string,states:T.State[],input:string[],tx:T.TxPure,gas_limit:number)=>{
+export const RunVM = (code:string,states:T.State[],input:string[],tx:T.TxPure,token_state:T.State,chain:{hash:string,meta:T.BlockMeta}[],pre_tx:T.Tx,next_tx:T.Tx,gas_limit:number)=>{
     const vreath = new vreath_vm_state(states.map(s=>Object.assign({},s)),gas_limit);
     try{
-        const identifier = ["vreath","input","tx","Number","console"]
+        const identifier = ["vreath","input","tx","Number","token_state","chain","pre_tx","next_tx","console"]
         const dependence = {
             "vreath":["gas_check","states","gas_sum","state_roots","add_states","change_states","delete_states","create_state"],
             "tx":["hash","meta","raw"],
+            "pre_tx":["hash","meta","raw"],
+            "next_tx":["hash","meta","raw"],
             "state":["nonce","owner","token","amount","data","product"],
             "console":["log"]
         }
@@ -96,6 +98,10 @@ export const RunVM = (code:string,states:T.State[],input:string[],tx:T.TxPure,ga
             vreath,
             input,
             tx,
+            token_state,
+            chain,
+            pre_tx,
+            next_tx,
             console
         };
         vm.runInNewContext(generated,sandbox);

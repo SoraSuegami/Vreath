@@ -9,6 +9,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const CryptoSet = __importStar(require("./crypto_set"));
 const TxSet = __importStar(require("./tx"));
+const bignumber_js_1 = require("bignumber.js");
 exports.copy = (data) => {
     return Object.assign({}, data);
 };
@@ -74,7 +75,7 @@ exports.tx_fee = (tx) => {
     const meta_part = Object.entries(tx.meta).filter(en => en[0] != "feeprice");
     const raw_part = Object.entries(tx.raw).filter(en => en[0] != "signature");
     const target = JSON.stringify(meta_part) + JSON.stringify(raw_part);
-    return price * Buffer.from(target).length;
+    return new bignumber_js_1.BigNumber(price).times(Buffer.from(target).length).toNumber();
 };
 exports.find_tx = (chain, hash) => {
     for (let block of chain.slice()) {

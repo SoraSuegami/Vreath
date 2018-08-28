@@ -1,10 +1,10 @@
 import * as rx from 'rxjs'
 import {IO, ioEvent} from 'rxjs-socket.io'
-import {tx_accept,block_accept,get_balance,send_request_tx,trie_ins,check_chain} from './index'
+import {tx_accept,block_accept,get_balance,send_request_tx,trie_ins,check_chain,send_key_block} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
-import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate} from '../con'
+import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate,compatible_version} from '../con'
 import Vue from 'vue'
 import Vuex from 'vuex'
 import AtComponents from 'at-ui'
@@ -12,6 +12,7 @@ import VueRouter from 'vue-router'
 import * as gen from '../../genesis/index';
 import vm from 'js-vm';
 import * as P from 'p-iteration'
+import { Trie } from '../../core_arc2/merkle_patricia';
 
 
 
@@ -40,9 +41,11 @@ const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(a
     try{
         const block:T.Block = JSON.parse(data);
         const chain:T.Block[] = store.state.chain;
-        if(block.meta.index>chain.length) socket.emit("checkchain");
-        else if(block.meta.index===chain.length) await store.dispatch("block_accept",_.copy(block));
-        console.log(block)
+        if(block.meta.version>=compatible_version){
+            if(block.meta.index>chain.length) socket.emit("checkchain");
+            else if(block.meta.index===chain.length) await store.dispatch("block_accept",_.copy(block));
+            console.log(block)
+        }
     }
     catch(e){console.log(e);}
 });
@@ -56,7 +59,10 @@ const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.
         const chain:T.Block[] = JSON.parse(data);
         console.log("replace:")
         console.log(chain)
-        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.roots),store.state.candidates.slice(),_.copy(store.state.code),store.state.secret,store.state.validator_mode,socket);
+        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.roots),store.state.candidates.slice(),_.copy(store.state.code),store.state.secret,store.state.validator_mode,store.state.unit_store,socket);
+        const S_Trie = trie_ins(store.state.roots.stateroot);
+        const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
+        if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.validator_mode,socket);
     }
     catch(e){console.log(e);}
 });
@@ -91,7 +97,8 @@ const def_apps:{[key:string]:Installed} = {
 }
 
 const codes = {
-    "native":"function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0) return 0; const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}"
+    "native":"const main = () => {};",//"function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0 || state.amount < amount) {console.log('error'); return 0;} const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}",
+    "unit":"const main = () => {};"
 }
 
 localStorage.removeItem("data");
@@ -101,15 +108,7 @@ localStorage.removeItem("pool");
 localStorage.removeItem("chain");
 localStorage.removeItem("roots");
 localStorage.removeItem("candidates");
-
-(async ()=>{
-    const S_Trie = trie_ins("");
-    await P.forEach(gen.state,async (s:T.State)=>{
-        if(s.kind==="state") await S_Trie.put(s.owner,s);
-        else await S_Trie.put(s.token,s);
-    });
-    socket.emit("checkchain");
-})();
+localStorage.removeItem("unit_store");
 
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
 
@@ -122,6 +121,7 @@ export const store = new Vuex.Store({
         chain:JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),
         roots:JSON.parse(localStorage.getItem("roots")||JSON.stringify(gen.roots)),
         candidates:JSON.parse(localStorage.getItem("candidates")||JSON.stringify(gen.candidates)),
+        unit_store:JSON.parse(localStorage.getItem("unit_store")||JSON.stringify({})),
         secret:localStorage.getItem("secret")||CryptoSet.GenerateKeys(),
         balance:0,
         validator_mode:false
@@ -159,6 +159,10 @@ export const store = new Vuex.Store({
             state.candidates = candidates.slice();
             localStorage.setItem("candidates",JSON.stringify(state.candidates.slice()));
         },
+        refresh_unit_store(state,store:{[key:string]:T.Unit[]}){
+            state.unit_store = _.copy(store);
+            localStorage.setItem("unit_store",JSON.stringify(_.copy(state.unit_store)));
+        },
         refresh_secret(state,secret:string){
             state.secret = secret;
             localStorage.setItem("secret",state.secret);
@@ -179,7 +183,7 @@ export const store = new Vuex.Store({
     actions:{
         tx_accept(commit,tx:T.Tx){
             try{
-                tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.validator_mode,store.state.candidates.slice(),store.state.code,socket).then(()=>{
+                tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.validator_mode,store.state.candidates.slice(),store.state.code,_.copy(store.state.unit_store),socket).then(()=>{
                     console.log("tx accept");
                 })
             }
@@ -187,7 +191,7 @@ export const store = new Vuex.Store({
         },
         block_accept(commit,block:T.Block){
             try{
-                block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),socket).then(()=>{
+                block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),_.copy(store.state.unit_store),socket).then(()=>{
                     console.log("block accept");
                     get_balance(store.getters.my_address).then((amount)=>{
                         commit.commit("refresh_balance",amount);
@@ -198,7 +202,27 @@ export const store = new Vuex.Store({
             catch(e){console.log(e);}
         },
     }
-})
+});
+
+(async ()=>{
+    const S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        if(s.kind==="state") await S_Trie.put(s.owner,s);
+        else await S_Trie.put(s.token,s);
+    });
+    console.log("stateroot:")
+    console.log(S_Trie.now_root());
+    socket.emit("checkchain");
+    let pre_length = 0;
+    let new_length = store.state.chain.length;
+    setInterval(async ()=>{
+        pre_length = new_length;
+        new_length = store.state.chain.length;
+        console.log(pre_length)
+        console.log(new_length);
+        if(pre_length===new_length) await send_key_block(store.state.chain,store.state.secret,store.state.candidates,store.state.roots,store.state.pool,store.state.code,store.state.validator_mode,socket);
+    },block_time*max_blocks*10);
+})();
 
 const Home = {
     data:function(){
@@ -231,7 +255,7 @@ const Wallet = {
     data:function(){
         return{
             to:"Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
-            amount:"100"
+            amount:"0.01"
         }
     },
     created:async function(){
@@ -252,7 +276,7 @@ const Wallet = {
             return this.$store.getters.my_address
         },
         balance:function():number{
-            return this.$store.state.balance;
+            return this.$store.state.balance.toFixed(18);
         },
         secret:function():string{
             return this.$store.state.secret;

@@ -44,11 +44,13 @@ const block$ = socket.listenToEvent(onBlock).event$.subscribe(async (data) => {
     try {
         const block = JSON.parse(data);
         const chain = exports.store.state.chain;
-        if (block.meta.index > chain.length)
-            socket.emit("checkchain");
-        else if (block.meta.index === chain.length)
-            await exports.store.dispatch("block_accept", _.copy(block));
-        console.log(block);
+        if (block.meta.version >= con_1.compatible_version) {
+            if (block.meta.index > chain.length)
+                socket.emit("checkchain");
+            else if (block.meta.index === chain.length)
+                await exports.store.dispatch("block_accept", _.copy(block));
+            console.log(block);
+        }
     }
     catch (e) {
         console.log(e);
@@ -62,7 +64,11 @@ const replacehain$ = socket.listenToEvent(replaceChain).event$.subscribe(async (
         const chain = JSON.parse(data);
         console.log("replace:");
         console.log(chain);
-        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.roots), exports.store.state.candidates.slice(), _.copy(exports.store.state.code), exports.store.state.secret, exports.store.state.validator_mode, socket);
+        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.roots), exports.store.state.candidates.slice(), _.copy(exports.store.state.code), exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.unit_store, socket);
+        const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
+        const unit_state = await S_Trie.get(CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret)));
+        if (chain.length === 1 && unit_state != null && unit_state.amount > 0)
+            await index_1.send_key_block(JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.validator_mode, socket);
     }
     catch (e) {
         console.log(e);
@@ -88,7 +94,8 @@ const def_apps = {
     setting: setting
 };
 const codes = {
-    "native": "function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0) return 0; const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}"
+    "native": "const main = () => {};",
+    "unit": "const main = () => {};"
 };
 localStorage.removeItem("data");
 localStorage.removeItem("apps");
@@ -97,16 +104,7 @@ localStorage.removeItem("pool");
 localStorage.removeItem("chain");
 localStorage.removeItem("roots");
 localStorage.removeItem("candidates");
-(async () => {
-    const S_Trie = index_1.trie_ins("");
-    await P.forEach(gen.state, async (s) => {
-        if (s.kind === "state")
-            await S_Trie.put(s.owner, s);
-        else
-            await S_Trie.put(s.token, s);
-    });
-    socket.emit("checkchain");
-})();
+localStorage.removeItem("unit_store");
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
 exports.store = new vuex_1.default.Store({
     state: {
@@ -117,6 +115,7 @@ exports.store = new vuex_1.default.Store({
         chain: JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])),
         roots: JSON.parse(localStorage.getItem("roots") || JSON.stringify(gen.roots)),
         candidates: JSON.parse(localStorage.getItem("candidates") || JSON.stringify(gen.candidates)),
+        unit_store: JSON.parse(localStorage.getItem("unit_store") || JSON.stringify({})),
         secret: localStorage.getItem("secret") || CryptoSet.GenerateKeys(),
         balance: 0,
         validator_mode: false
@@ -154,6 +153,10 @@ exports.store = new vuex_1.default.Store({
             state.candidates = candidates.slice();
             localStorage.setItem("candidates", JSON.stringify(state.candidates.slice()));
         },
+        refresh_unit_store(state, store) {
+            state.unit_store = _.copy(store);
+            localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+        },
         refresh_secret(state, secret) {
             state.secret = secret;
             localStorage.setItem("secret", state.secret);
@@ -174,7 +177,7 @@ exports.store = new vuex_1.default.Store({
     actions: {
         tx_accept(commit, tx) {
             try {
-                index_1.tx_accept(tx, exports.store.state.chain.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates.slice(), exports.store.state.code, socket).then(() => {
+                index_1.tx_accept(tx, exports.store.state.chain.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.validator_mode, exports.store.state.candidates.slice(), exports.store.state.code, _.copy(exports.store.state.unit_store), socket).then(() => {
                     console.log("tx accept");
                 });
             }
@@ -184,7 +187,7 @@ exports.store = new vuex_1.default.Store({
         },
         block_accept(commit, block) {
             try {
-                index_1.block_accept(block, exports.store.state.chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.code), socket).then(() => {
+                index_1.block_accept(block, exports.store.state.chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.code), _.copy(exports.store.state.unit_store), socket).then(() => {
                     console.log("block accept");
                     index_1.get_balance(exports.store.getters.my_address).then((amount) => {
                         commit.commit("refresh_balance", amount);
@@ -197,6 +200,28 @@ exports.store = new vuex_1.default.Store({
         },
     }
 });
+(async () => {
+    const S_Trie = index_1.trie_ins("");
+    await P.forEach(gen.state, async (s) => {
+        if (s.kind === "state")
+            await S_Trie.put(s.owner, s);
+        else
+            await S_Trie.put(s.token, s);
+    });
+    console.log("stateroot:");
+    console.log(S_Trie.now_root());
+    socket.emit("checkchain");
+    let pre_length = 0;
+    let new_length = exports.store.state.chain.length;
+    setInterval(async () => {
+        pre_length = new_length;
+        new_length = exports.store.state.chain.length;
+        console.log(pre_length);
+        console.log(new_length);
+        if (pre_length === new_length)
+            await index_1.send_key_block(exports.store.state.chain, exports.store.state.secret, exports.store.state.candidates, exports.store.state.roots, exports.store.state.pool, exports.store.state.code, exports.store.state.validator_mode, socket);
+    }, con_1.block_time * con_1.max_blocks * 10);
+})();
 const Home = {
     data: function () {
         return {
@@ -227,7 +252,7 @@ const Wallet = {
     data: function () {
         return {
             to: "Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
-            amount: "100"
+            amount: "0.01"
         };
     },
     created: async function () {
@@ -248,7 +273,7 @@ const Wallet = {
             return this.$store.getters.my_address;
         },
         balance: function () {
-            return this.$store.state.balance;
+            return this.$store.state.balance.toFixed(18);
         },
         secret: function () {
             return this.$store.state.secret;

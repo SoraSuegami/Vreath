@@ -7,7 +7,7 @@ import * as TxSet from '../core/tx'
 import * as BlockSet from '../core/block'
 import * as P from 'p-iteration'
 import * as gen from '../genesis/index';
-import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate} from './con'
+import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate, all_issue} from './con'
 import { Tx_to_Pool } from '../core/tx_pool';
 import * as fs from 'fs'
 import * as db from './db'
@@ -162,7 +162,7 @@ export const block_accept = async (block:T.Block,socket:Server)=>{
     const L_Trie:Trie = db.trie_ins(locationroot);
     const StateData = await states_for_block(block,chain,S_Trie);
     const LocationData = await locations_for_block(block,chain,L_Trie);
-    const accepted = BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,stateroot,locationroot,native,unit,rate,token_name_maxsize,StateData,LocationData);
+    const accepted = BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,stateroot,locationroot,native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
     if(accepted.block.length>0){
         await P.forEach(accepted.state, async (state:T.State)=>{
             if(state.kind==="state") await S_Trie.put(state.owner,state);
@@ -201,7 +201,7 @@ const get_pre_info = async (block:T.Block,chain:T.Block[])=>{
     const L_Trie = db.trie_ins(pre_block.meta.locationroot);
     const LocationData = await locations_for_block(pre_block,chain,L_Trie);
     const candidates = BlockSet.NewCandidates(unit,rate,StateData);
-    const accepted = await BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,StateData,LocationData);
+    const accepted = await BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
     await P.forEach(accepted.state, async (state:T.State)=>{
         if(state.kind==="state") await S_Trie.put(state.owner,state);
         else await S_Trie.put(state.token,state);

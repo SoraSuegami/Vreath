@@ -16,6 +16,7 @@ const express_1 = __importDefault(require("express"));
 const index_1 = require("./index");
 const fs = __importStar(require("fs"));
 const gen = __importStar(require("../genesis/index"));
+const con_1 = require("./con");
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
 const app = express_1.default();
@@ -34,7 +35,8 @@ io.on('connect', (socket) => {
     });
     socket.on('block', async (msg) => {
         const block = JSON.parse(msg);
-        await index_1.block_accept(block, io);
+        if (block.meta.version >= con_1.compatible_version)
+            await index_1.block_accept(block, io);
     });
     socket.on('checkchain', async (msg) => {
         socket.emit('replacechain', fs.readFileSync('./json/blockchain.json', 'utf-8'));

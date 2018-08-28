@@ -89,13 +89,15 @@ const edit = (editted, states, gas_limit) => {
     });
     return editted;
 };
-exports.RunVM = (code, states, input, tx, gas_limit) => {
+exports.RunVM = (code, states, input, tx, token_state, chain, pre_tx, next_tx, gas_limit) => {
     const vreath = new vm_class_1.vreath_vm_state(states.map(s => Object.assign({}, s)), gas_limit);
     try {
-        const identifier = ["vreath", "input", "tx", "Number", "console"];
+        const identifier = ["vreath", "input", "tx", "Number", "token_state", "chain", "pre_tx", "next_tx", "console"];
         const dependence = {
             "vreath": ["gas_check", "states", "gas_sum", "state_roots", "add_states", "change_states", "delete_states", "create_state"],
             "tx": ["hash", "meta", "raw"],
+            "pre_tx": ["hash", "meta", "raw"],
+            "next_tx": ["hash", "meta", "raw"],
             "state": ["nonce", "owner", "token", "amount", "data", "product"],
             "console": ["log"]
         };
@@ -105,6 +107,10 @@ exports.RunVM = (code, states, input, tx, gas_limit) => {
             vreath,
             input,
             tx,
+            token_state,
+            chain,
+            pre_tx,
+            next_tx,
             console
         };
         js_vm_1.default.runInNewContext(generated, sandbox);

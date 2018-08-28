@@ -6,6 +6,7 @@ import {tx_accept,block_accept,check_chain} from './index'
 import * as T from '../core/types'
 import * as fs from 'fs'
 import * as gen from '../genesis/index';
+import {compatible_version} from './con'
 
 const port = process.env.vreath_port || "57750";
 const ip = process.env.vreath_port || "localhost";
@@ -29,7 +30,7 @@ io.on('connect',(socket)=>{
     });
     socket.on('block', async (msg:string)=>{
         const block:T.Block = JSON.parse(msg);
-        await block_accept(block,io);
+        if(block.meta.version>=compatible_version) await block_accept(block,io);
     });
     socket.on('checkchain', async (msg:string)=>{
         socket.emit('replacechain',fs.readFileSync('./json/blockchain.json','utf-8'));

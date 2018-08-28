@@ -1,6 +1,7 @@
 import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import * as TxSet from './tx'
+import {BigNumber} from 'bignumber.js'
 
 
 export const copy = <T>(data:T)=>{
@@ -83,7 +84,7 @@ export const tx_fee = (tx:T.Tx)=>{
   const meta_part = Object.entries(tx.meta).filter(en=>en[0]!="feeprice");
   const raw_part = Object.entries(tx.raw).filter(en=>en[0]!="signature");
   const target = JSON.stringify(meta_part)+JSON.stringify(raw_part);
-  return price * Buffer.from(target).length;
+  return new BigNumber(price).times(Buffer.from(target).length).toNumber();
 }
 
 export const find_tx = (chain:T.Block[],hash:string)=>{
@@ -101,3 +102,4 @@ export const find_tx = (chain:T.Block[],hash:string)=>{
   }
   return TxSet.empty_tx_pure();
 }
+

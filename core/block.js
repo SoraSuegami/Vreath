@@ -94,10 +94,10 @@ const PoS_mining = (parenthash, address, balance, difficulty) => {
         date = new Date();
         timestamp = date.getTime();
         i++;
-        if (i > 300)
+        if (i > 1000)
             break;
-        console.log("left:" + _.Hex_to_Num(_.toHash((new bignumber_js_1.BigNumber(_.Hex_to_Num(parenthash)).plus(_.Hex_to_Num(address)).plus(timestamp)).toString())));
-        console.log("right:" + (new bignumber_js_1.BigNumber(2).exponentiatedBy(256)).times(new bignumber_js_1.BigNumber(balance).div(difficulty)).toString());
+        //console.log("left:"+_.Hex_to_Num(_.toHash((new BigNumber(_.Hex_to_Num(parenthash)).plus(_.Hex_to_Num(address)).plus(timestamp)).toString())))
+        //console.log("right:"+(new BigNumber(2).exponentiatedBy(256)).times(new BigNumber(balance).div(difficulty)).toString())
     } while (new bignumber_js_1.BigNumber(_.Hex_to_Num(_.toHash((new bignumber_js_1.BigNumber(_.Hex_to_Num(parenthash)).plus(_.Hex_to_Num(address)).plus(timestamp)).toString()))).isGreaterThan(new bignumber_js_1.BigNumber(new bignumber_js_1.BigNumber(2).exponentiatedBy(256)).times(new bignumber_js_1.BigNumber(balance).div(difficulty))));
     return timestamp;
 };
@@ -107,7 +107,6 @@ const Wait_block_time = (pre, block_time) => {
     do {
         date = new Date();
         timestamp = date.getTime();
-        console.log(timestamp);
     } while (new bignumber_js_1.BigNumber(timestamp).minus(pre).isLessThan(new bignumber_js_1.BigNumber(block_time)));
     return timestamp;
 };
@@ -145,7 +144,7 @@ exports.txs_check = (block, my_version, native, unit, chain, token_name_maxsize,
             return true;
     });
 };
-exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, unit, StateData) => {
+exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_size, native, unit, StateData, LocationData) => {
     const hash = block.hash;
     const sign = block.validatorSign;
     const meta = block.meta;
@@ -163,6 +162,9 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     const tx_root = meta.tx_root;
     const fee_sum = meta.fee_sum;
     const raws = block.raws;
+    const txs = block.txs;
+    const natives = block.natives;
+    const units = block.units;
     const last = chain[chain.length - 1];
     const right_parenthash = (() => {
         if (last != null)
@@ -170,6 +172,7 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
         else
             return _.toHash('');
     })();
+    const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const unit_validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === unit_validator && s.token === unit; })[0] || StateSet.CreateState(0, unit_validator, unit, 0, {}, []);
     /*console.log("dgw:")
@@ -189,6 +192,10 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     const date = new Date();
     if (_.object_hash_check(hash, meta) || new bignumber_js_1.BigNumber(_.Hex_to_Num(_.toHash((new bignumber_js_1.BigNumber(_.Hex_to_Num(parenthash)).plus(_.Hex_to_Num(unit_validator)).plus(timestamp)).toString()))).isGreaterThan(new bignumber_js_1.BigNumber(new bignumber_js_1.BigNumber(2).exponentiatedBy(256)).times(new bignumber_js_1.BigNumber(unit_validator_state.amount).div(pos_diff)))) {
         console.log("invalid hash");
+        return false;
+    }
+    else if (TxSet.requested_check([native_validator, unit_validator], LocationData)) {
+        console.log("invalid validator");
         return false;
     }
     else if (_.ObjectHash(unit_validator_state) === _.ObjectHash(StateSet.CreateState(0, unit_validator, unit, 0, {}, [])) || sign.length === 0 || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
@@ -278,8 +285,24 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     })();
     const key_block = exports.search_key_block(chain);
     const right_pub = key_block.meta.validatorPub;
+    const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
+    const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
-    const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
+    const validator_state = StateData.filter(s => { return s.kind === "state" && s.token === unit && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
+    const native_refresh_check = natives.some(pure => {
+        if (pure.meta.kind === "request")
+            return false;
+        const tx = TxSet.pure_to_tx(pure, block);
+        const req = TxSet.find_req_tx(tx, chain);
+        return req.meta.data.base.indexOf(native_validator) != -1;
+    });
+    const unit_refresh_check = units.some(pure => {
+        if (pure.meta.kind === "request")
+            return false;
+        const tx = TxSet.pure_to_tx(pure, block);
+        const req = TxSet.find_req_tx(tx, chain);
+        return req.meta.data.base.indexOf(unit_validator) != -1;
+    });
     const tx_roots = txs.map(t => t.hash).concat(natives.map(n => n.hash)).concat(units.map(u => u.hash));
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
     const date = new Date();
@@ -289,7 +312,16 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("invalid hash");
         return false;
     }
-    else if (_.ObjectHash(validator_state) === _.ObjectHash(StateSet.CreateState(0, validator, unit, 0, {}, [])) || sign.length === 0 || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
+    else if (_.ObjectHash(validator_state) === _.ObjectHash(StateSet.CreateState(0, validator, unit, 0, {}, []))) {
+        console.log("invalid validator");
+        return false;
+    }
+    else if ((TxSet.requested_check([native_validator], LocationData) && !native_refresh_check) || (TxSet.requested_check([unit_validator], LocationData) && !unit_refresh_check)) {
+        console.log("validator is already requested");
+        console.log(block);
+        return false;
+    }
+    else if (sign.length === 0 || sign.some((s, i) => _.sign_check(hash, s, validatorPub[i]))) {
         console.log("invalid validator signature");
         return false;
     }
@@ -302,8 +334,6 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         return false;
     }
     else if (index != chain.length) {
-        console.log(chain.length);
-        console.log(index);
         console.log("invalid index");
         return false;
     }
@@ -347,7 +377,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("too big block");
         return false;
     }
-    else if (already_micro.length + 1 > max_blocks) {
+    else if (already_micro.length > max_blocks) {
         console.log("too many micro blocks");
         return false;
     }
@@ -375,7 +405,7 @@ exports.CreateKeyBlock = (version, shard_id, chain, block_time, max_blocks, pow_
     const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator_address; })[0] || StateSet.CreateState(0, validator_address, unit, 0, {}, []);
     const pre_key = exports.search_key_block(chain);
     const timestamp = (() => {
-        const waited = Wait_block_time(pre_key.meta.timestamp, block_time * max_blocks);
+        //const waited = Wait_block_time(pre_key.meta.timestamp,block_time*max_blocks);
         return PoS_mining(parenthash, validator_address, validator_state.amount, pos_diff);
     })();
     const empty = exports.empty_block();
@@ -448,7 +478,7 @@ exports.SignBlock = (block, my_private, my_pub) => {
     block.validatorSign[index] = sign;
     return block;
 };
-const get_units = (unit, StateData) => {
+exports.get_units = (unit, StateData) => {
     return StateData.filter(s => { return s.kind === "state" && s.token === unit; });
 };
 const reduce_units = (states, rate) => {
@@ -459,13 +489,15 @@ const reduce_units = (states, rate) => {
         });
     });
 };
-const CandidatesForm = (states) => {
-    return states.map(state => {
+exports.CandidatesForm = (states) => {
+    return states.slice().sort((a, b) => {
+        return _.Hex_to_Num(_.toHash(a.owner)) - _.Hex_to_Num(_.toHash(b.owner));
+    }).map(state => {
         return { address: state.owner, amount: state.amount };
     });
 };
 exports.NewCandidates = (unit, rate, StateData) => {
-    return CandidatesForm(reduce_units(get_units(unit, StateData), rate));
+    return exports.CandidatesForm(reduce_units(exports.get_units(unit, StateData), rate));
 };
 /*const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
     const tx = _.find_tx(chain,block.meta.fraud.hash);
@@ -481,8 +513,8 @@ exports.NewCandidates = (unit, rate, StateData) => {
     if(result.traced!=tx.meta.data.trace) return true;
     return false;
 }*/
-const change_unit_amounts = (block, unit, rate, StateData) => {
-    const reduced = StateData.map(s => {
+const change_unit_amounts = (unit, rate, StateData) => {
+    return StateData.map(s => {
         if (s.kind != "state" || s.token != unit)
             return s;
         return _.new_obj(s, s => {
@@ -490,31 +522,10 @@ const change_unit_amounts = (block, unit, rate, StateData) => {
             return s;
         });
     });
-    const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(block.meta.validatorPub));
-    const index = reduced.map(r => r.owner).indexOf(validator);
-    if (index === -1)
-        return reduced;
-    const validator_state = reduced[index];
-    const share_amount = block.units.reduce((sum, tx, i) => {
-        if (tx.meta.data.address != validator)
-            return sum + block.raws[block.txs.length + block.natives.length + i].raw[2].length;
-        else
-            return sum;
-    }, 0);
-    const shared = _.new_obj(validator_state, s => {
-        s.amount = new bignumber_js_1.BigNumber(s.amount).minus(share_amount).times(new bignumber_js_1.BigNumber(1).minus(rate)).toNumber();
-        return s;
-    });
-    return StateData.map((val, i) => { if (i === index)
-        return shared;
-    else
-        return val; });
 };
 const compute_issue = (all_issue, index, cycle) => {
     const new_amount = new bignumber_js_1.BigNumber(all_issue).times(new bignumber_js_1.BigNumber(0.5).exponentiatedBy(index + 1));
     const pre_amount = new bignumber_js_1.BigNumber(all_issue).times(new bignumber_js_1.BigNumber(0.5).exponentiatedBy(index));
-    console.log(new_amount.toNumber());
-    console.log(pre_amount.toNumber());
     const issue = pre_amount.minus(new_amount).div(cycle);
     if (issue.isLessThanOrEqualTo(new bignumber_js_1.BigNumber(10).exponentiatedBy(-18)))
         return 0;
@@ -525,8 +536,6 @@ const issue_native = (block, validator, all_issue, block_time, native, StateData
     const cycle = new bignumber_js_1.BigNumber(126144000000).dividedToIntegerBy(block_time);
     const index = new bignumber_js_1.BigNumber(block.meta.index);
     const i = index.div(cycle).integerValue(bignumber_js_1.BigNumber.ROUND_DOWN).toNumber();
-    console.log(all_issue);
-    console.log(i);
     const issue = compute_issue(all_issue, i, cycle.toNumber());
     return StateData.map(s => {
         if (s.kind === "state" && s.owner === validator && s.token === native) {
@@ -540,12 +549,13 @@ const issue_native = (block, validator, all_issue, block_time, native, StateData
     });
 };
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, all_issue, StateData, LocationData) => {
-    if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_time, max_blocks, block_size, unit, StateData)) {
+    if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_size, native, unit, StateData, LocationData)) {
         const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
         const StateData_issued = issue_native(block, validator, all_issue, block_time, native, StateData);
+        const StateData_unit = change_unit_amounts(unit, rate, StateData_issued);
         const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
         return {
-            state: StateData_issued,
+            state: StateData_unit,
             location: LocationData,
             candidates: new_candidates,
             block: [block]
@@ -575,8 +585,7 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
         });
         const target = txs.concat(natives).concat(units);
         const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
-        const StateData_issued = issue_native(block, validator, all_issue, block_time, native, StateData);
-        const sets = [StateData_issued, LocationData];
+        const sets = [StateData, LocationData];
         const refreshed = target.reduce((result, tx) => {
             if (tx.meta.kind === "request") {
                 return TxSet.AcceptRequestTx(tx, validator, block.meta.index, result[0], result[1]);
@@ -587,10 +596,11 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
             else
                 return result;
         }, sets);
-        //const unit_changed = change_unit_amounts(block,unit,rate,refreshed[0]);
+        const StateData_issued = issue_native(block, validator, all_issue, block_time, native, refreshed[0]);
+        const unit_changed = change_unit_amounts(unit, rate, StateData_issued);
         const new_candidates = exports.NewCandidates(unit, rate, StateData);
         return {
-            state: refreshed[0],
+            state: unit_changed,
             location: refreshed[1],
             candidates: new_candidates,
             block: [block]

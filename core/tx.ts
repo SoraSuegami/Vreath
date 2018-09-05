@@ -64,6 +64,17 @@ export const tx_to_pure = (tx:T.Tx):T.TxPure=>{
   }
 }
 
+export const pure_to_tx = (pure:T.TxPure,block:T.Block):T.Tx=>{
+  const index = block.txs.concat(block.natives).concat(block.units).indexOf(pure);
+  if(index===-1) return empty_tx();
+  const raw = block.raws[index];
+  return {
+      hash:pure.hash,
+      meta:pure.meta,
+      raw:raw
+  }
+}
+
 export const empty_tx_pure = ()=>{
   const tx = empty_tx();
   return {
@@ -154,8 +165,6 @@ const output_check = (type:T.TxTypes,base_states:T.State[],output_raw:string[],t
     if(new_states.some((s:T.State)=>{return state_check(s,token_name_maxsize)||base_declaration_check(s,bases,StateData)})||nonce_check) return true;
     const pre_amount = base_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
     const new_amount = new_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
-    console.log(pre_amount.toNumber());
-    console.log(new_amount.toNumber());
     return (type==="issue"&&new BigNumber(pre_amount).isGreaterThanOrEqualTo(new_amount)) || (type==="change"&&pre_amount!=new_amount) || (type==="scrap"&&new BigNumber(pre_amount).isLessThanOrEqualTo(new_amount));
   }
 }
@@ -388,8 +397,6 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   const solvency_state:T.State = StateData.filter(s=>{
     return s.kind==="state"&&s.token===native&&s.owner===solvency&&new BigNumber(s.amount).isGreaterThanOrEqualTo(new BigNumber(_.tx_fee(tx)).plus(gas))
   })[0];
-  console.log(_.tx_fee(tx))
-  console.log(gas)
 
   const base_states = base.map(key=>{
     return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
@@ -403,8 +410,6 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
     return false;
   }
   else if(solvency_state==null||hashed_pub_check(solvency_state,pub_key)||requested_check([solvency],LocationData)){
-    console.log(solvency_state)
-    console.log(requested_check([solvency],LocationData))
     console.log("invalid solvency");
     return false;
   }
@@ -468,8 +473,9 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
   const token = req_tx.meta.data.token;
 
   const payee_state:T.State = StateData.filter(s=>{
-    return s.kind==="state"&&s.owner===payee&&new BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx))&&s.token===native
+    return s.kind==="state"&&s.owner===payee&&s.token===native&&new BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx))
   })[0];
+
 
 
   const base_states:T.State[] = req_tx.meta.data.base.map(key=>{
@@ -521,9 +527,6 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
     return false;
   }
   else if(output!=_.ObjectHash(base_states.map(s=>JSON.stringify(s)))&&output_check(req_tx.meta.data.type,base_states,output_raw,token_name_maxsize,StateData)){
-    console.log(base_states);
-    console.log(output_raw.map(o=>JSON.parse(o)))
-    console.log(_.ObjectHash(base_states.slice())===_.ObjectHash(output_raw.map(o=>JSON.parse(o))))
     console.log("invalid output");
     return false;
   }
@@ -653,9 +656,9 @@ export const CreateRefreshTx = (version:number,unit_price:number,pub_key:string[
   return tx;
 }
 
-export const SignTx = (tx:T.Tx,my_private:string,my_address:string)=>{
-  const addresses = tx.meta.data.address;
-  const index = addresses.indexOf(my_address);
+export const SignTx = (tx:T.Tx,my_private:string,my_pub:string)=>{
+  const pub_keys = tx.meta.data.pub_key;
+  const index = pub_keys.indexOf(my_pub);
   if(index===-1) return tx;
   const sign = CryptoSet.SignData(tx.hash,my_private);
   return _.new_obj(
@@ -666,9 +669,9 @@ export const SignTx = (tx:T.Tx,my_private:string,my_address:string)=>{
     });
 }
 
-export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
-  if(solvency.owner===validator.owner) return [solvency,validator];
-  console.log(fee);
+export const PayFee = (states:T.State[],sol:string,val:string,fee:number)=>{
+  const solvency = states.filter(s=>s.kind==="state"&&s.owner===sol)[0];
+  const validator = states.filter(s=>s.kind==="state"&&s.owner===val)[0];
   const new_solvency = _.new_obj(
     solvency,
     solvency=>{
@@ -679,15 +682,20 @@ export const PayFee = (solvency:T.State,validator:T.State,fee:number)=>{
   const new_validator= _.new_obj(
     validator,
     validator=>{
-      validator.amount = new BigNumber(validator.amount).minus(fee).toNumber();
+      validator.amount = new BigNumber(validator.amount).plus(fee).toNumber();
       return validator;
     }
   )
-  return [new_solvency,new_validator];
+  return states.map(s=>{
+    if(s.owner===sol) return new_solvency;
+    else if(s.owner===val) return new_validator;
+    else return s;
+  });
 }
 
-export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
-  if(solvency.owner===payee.owner) return [solvency,payee];
+export const PayGas = (states:T.State[],sol:string,pay:string,gas:number)=>{
+  const solvency = states.filter(s=>s.kind==="state"&&s.owner===sol)[0];
+  const payee = states.filter(s=>s.kind==="state"&&s.owner===pay)[0];
   const new_solvency = _.new_obj(
     solvency,
     solvency=>{
@@ -698,32 +706,35 @@ export const PayGas = (solvency:T.State,payee:T.State,gas:number)=>{
   const new_payee = _.new_obj(
     payee,
     payee=>{
-      payee.amount = new BigNumber(payee.amount).minus(gas).toNumber();
+      payee.amount = new BigNumber(payee.amount).plus(gas).toNumber();
       return payee;
     }
   )
-  return [new_solvency,new_payee];
+  return states.map(s=>{
+    if(s.owner===sol) return new_solvency;
+    else if(s.owner===pay) return new_payee;
+    else return s;
+  })
 }
 
 export const PayStates = (solvency_state:T.State,payee_state:T.State,validator_state:T.State,gas:number,fee:number)=>{
-  const after_gas = PayGas(solvency_state,payee_state,gas);
-  const after_fee = PayFee(after_gas[1],validator_state,fee);
-  if(solvency_state.owner===payee_state.owner&&payee_state.owner===validator_state.owner) return [solvency_state];
-  else if(solvency_state.owner===payee_state.owner) return after_fee;
-  else if(payee_state.owner===validator_state.owner) return after_gas;
-  else if(solvency_state.owner===validator_state.owner) return after_fee;
-  return [after_gas[0],after_fee[1],after_fee[2]];
+  const states = [solvency_state].concat(payee_state).concat(validator_state).filter((val,i,array)=>array.map(s=>_.ObjectHash(s)).indexOf(_.ObjectHash(val))===i);
+  const sol = solvency_state.owner;
+  const pay = payee_state.owner;
+  const val = validator_state.owner;
+  return PayFee(PayGas(states,sol,pay,gas),pay,val,fee);
 }
 
 export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:T.State[],LocationData:T.Location[]):[T.State[],T.Location[]]=>{
   const solvency_state:T.State = StateData.filter(s=>s.owner===tx.meta.data.solvency)[0];
   const validator_state:T.State = StateData.filter(s=>s.owner===validator)[0];
   const fee = _.tx_fee(tx);
-  const after = PayFee(solvency_state,validator_state,fee);
+  const after = PayStates(solvency_state,solvency_state,validator_state,0,fee);
+  const fee_owners = after.map(a=>a.owner);
   const StateData_added = StateData.map(s=>{
-    if(s.owner===after[0].owner) return after[0];
-    else if(s.owner===after[1].owner) return after[1];
-    else return s;
+    const index = fee_owners.indexOf(s.owner);
+    if(index===-1) return s;
+    return after[index];
   });
 
   const LocationData_added = tx.meta.data.base.reduce((loc:T.Location[],key):T.Location[]=>{
@@ -791,7 +802,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
     const payee_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===ref_tx.meta.data.payee})[0] || StateSet.CreateState(0,ref_tx.meta.data.payee,native,0,{},[]);
     const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,native,0,{},[]);
     const tx_fee = _.tx_fee(ref_tx);
-    const payed = PayStates(solvency_state,payee_state,validator_state,ref_tx.meta.data.gas,tx_fee);
+    const payed = PayStates(solvency_state,payee_state,validator_state,req_tx.meta.data.gas,tx_fee);
     const payed_owners = payed.map(s=>s.owner);
     const StateData_payed = StateData.map(s=>{
       const index = payed_owners.indexOf(s.owner);
@@ -831,7 +842,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       const remiter_state = StateData.filter(s=>s.kind==="state"&&s.token===native&&s.owner===req_tx.meta.data.address)[0];
       const receiver = req_tx.raw.raw[1];
       const amount = -1*Number(req_tx.raw.raw[2]);
-      if(remiter_state==null||new BigNumber(amount).isLessThan(0)||new BigNumber(remiter_state.amount).plus(amount).isLessThan(0)) return [StateData_added,LocationData_added];
+      if(remiter_state==null||new BigNumber(amount).isLessThan(0)||new BigNumber(remiter_state.amount).minus(amount).isLessThan(0)) return [StateData_added,LocationData_added];
       const remited = _.new_obj(
         remiter_state,
         (state)=>{
@@ -880,7 +891,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       const sellers = units.map(u=>u.payee);
       const unit_address = CryptoSet.GenereateAddress(unit,_.reduce_pub(req_tx.meta.data.pub_key));
       const unit_state = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===unit_address})[0] || StateSet.CreateState(0,unit_address,unit,0,{},[]);
-      const pre_waiting_total_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_total")[0]||JSON.stringify({waiting_total:[block.meta.index,0]}));
+      /*const pre_waiting_total_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_total")[0]||JSON.stringify({waiting_total:[block.meta.index,0]}));
       const pre_waiting_total = Object.values(pre_waiting_total_obj)[0][1];
       const pre_block_index = (()=>{
         for(let block of chain.slice().reverse()){
@@ -901,7 +912,8 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
           new BigNumber(10).exponentiatedBy(7).toNumber()
         ).toNumber()
       ).toNumber(),1).toNumber());
-      const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);
+      const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);*/
+      const unit_sum = units.length
       const new_unit_state = _.new_obj(
         unit_state,
         (state)=>{
@@ -909,8 +921,8 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
           return state;
         }
       );
-      const price_sum = units.reduce((sum,u,i)=>{
-        return new BigNumber(sum).plus(u.unit_price*unit_values[i]).toNumber();
+      const price_sum = units.reduce((sum,u)=>{
+        return new BigNumber(sum).plus(u.unit_price).toNumber();
       },0)
       const remiter_state:T.State = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===remiter})[0];
       const new_remiter:T.State = _.new_obj(
@@ -920,6 +932,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
           return state;
         }
       );
+      if(new BigNumber(new_remiter.amount).isLessThan(0)) return [StateData_added,LocationData_added];
       const owners = StateData_added.map(s=>s.owner);
       const StateData_unit_remit = ((states)=>{
         const index = owners.indexOf(unit_address);
@@ -928,7 +941,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       })(StateData.map((val,i)=>{if(i===owners.indexOf(remiter))return new_remiter;else return val;}));
       const StateData_unit_recieve = sellers.reduce((states:T.State[],seller,i)=>{
         const index = owners.indexOf(seller);
-        const amount = units[index].unit_price * unit_values[i];
+        const amount = units[i].unit_price;
         if(index==-1) return states.concat(StateSet.CreateState(0,seller,native,amount,{},[]));
         const pre = states[index];
         return states.map((val,i)=>{if(index===i)return _.new_obj(val,(state)=>{
@@ -936,20 +949,20 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
           return state
         });else return val;})
       },StateData_unit_remit);
-      const new_waitings = units.map(u=>{
+      /*const new_waitings = units.map(u=>{
         return JSON.stringify({
           [u.payee]:block.meta.index
         })
       });
       const reduced_time = unit_waitings.reduce((sum,time)=>BigNumber.maximum(new BigNumber(sum).minus(time).toNumber(),0).toNumber(),waiting_states);
       const firsters = unit_waitings.filter(time=>new BigNumber(time).isLessThanOrEqualTo(0));
-      const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();
+      const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();*/
       const new_unit = _.new_obj(
         pre_unit,
         (state)=>{
           state.nonce ++;
           state.issued = new BigNumber(state.issued).plus(unit_sum).toNumber();
-          state.committed = state.committed.concat(hashes).concat(new_waitings).concat(JSON.stringify({waiting_total:[block.meta.index,reduced_time]})).concat(JSON.stringify({waiting_states:[block.meta.index,new_wait_states]}))
+          state.committed = state.committed.concat(hashes)/*.concat(new_waitings).concat(JSON.stringify({waiting_total:[block.meta.index,reduced_time]})).concat(JSON.stringify({waiting_states:[block.meta.index,new_wait_states]}))*/
           return state;
         }
       );

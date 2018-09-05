@@ -12,6 +12,7 @@ import { Tx_to_Pool } from '../core/tx_pool';
 import * as fs from 'fs'
 import * as db from './db'
 import { Server } from 'socket.io'
+import {client} from './main'
 
 fs.writeFileSync('./json/tx_pool.json',"{}");
 fs.writeFileSync('./json/root.json',JSON.stringify(gen.roots,null, '    '));
@@ -91,43 +92,58 @@ export const locations_for_tx = async (tx:T.Tx,chain:T.Block[],L_Trie:Trie)=>{
 
 export const states_for_block = async (block:T.Block,chain:T.Block[],S_Trie:Trie)=>{
     const native_validator = CryptoSet.GenereateAddress(native,_.reduce_pub(block.meta.validatorPub));
-    const native_validator_state:T.State = await S_Trie.get(native_validator) || [];
+    const native_validator_state:T.State = await S_Trie.get(native_validator) || StateSet.CreateState(0,native_validator,native);
     const unit_validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(block.meta.validatorPub));
-    const unit_validator_state:T.State = await S_Trie.get(unit_validator) || [];
+    const unit_validator_state:T.State = await S_Trie.get(unit_validator) || StateSet.CreateState(0,unit_validator,unit);
     const targets = block.txs.concat(block.natives).concat(block.units).map(pure=>pure_to_tx(pure,block));
     const tx_states:T.State[] = await P.reduce(targets,async (result:T.State[],tx:T.Tx)=>result.concat(await states_for_tx(tx,chain,S_Trie)),[]);
-    const native_states:T.State[] = await P.map(block.natives,async (tx:T.Tx,i:number)=>{
+    const native_states:T.State[] = await P.map(block.natives,async (tx:T.Tx)=>{
+        const key = (()=>{
+            if(tx.meta.kind==="request") return tx.hash;
+            else return tx.meta.data.request;
+        })()
         const b = (()=>{
             if(tx.meta.kind==="request") return block;
-            else return chain[tx.meta.data.index];
-        })() || BlockSet.empty_block();
-        console.log(tx.meta.data.index)
+            else return chain[tx.meta.data.index] || BlockSet.empty_block();
+        })();
+        const i = b.natives.map(t=>t.hash).indexOf(key);
         const raw = b.raws[b.txs.length+i] || TxSet.empty_tx().raw;
         return await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],native,0);
     });
-    const unit_states:T.State[] = await P.map(block.units,async (tx:T.Tx,i:number)=>{
+    const unit_states:T.State[] = await P.map(block.units,async (tx:T.Tx)=>{
+        const key = (()=>{
+            if(tx.meta.kind==="request") return tx.hash;
+            else return tx.meta.data.request;
+        })()
         const b = (()=>{
             if(tx.meta.kind==="request") return block;
-            else return chain[tx.meta.data.index];
-        })() || BlockSet.empty_block();
-        const remiter:T.State = await S_Trie.get(b.raws[b.txs.length+b.natives.length+i].raw[1])||StateSet.CreateState(0,b.raws[b.txs.length+b.natives.length+i].raw[1],unit,0);
-        const items:T.Tx[] = JSON.parse(b.raws[b.txs.length+b.natives.length+i].raw[2]) || [TxSet.empty_tx()];
+            else return chain[tx.meta.data.index] || BlockSet.empty_block();
+        })();
+        const i = b.units.map(t=>t.hash).indexOf(key);
+        const raw = b.raws[b.txs.length+b.natives.length+i] || TxSet.empty_tx().raw;
+        const remiter:T.State = await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],unit,0);
+        const items:T.Tx[] = JSON.parse(raw.raw[2]) || [TxSet.empty_tx()];
         const sellers:T.State[] = await P.map(items, async (it:T.Tx)=>await S_Trie.get(it.meta.data.payee)||StateSet.CreateState(0,it.meta.data.payee,unit,0));
         return sellers.concat(remiter);
     }) || [];
     const native_token = await S_Trie.get(native);
     const unit_token = await S_Trie.get(unit);
     const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(unit_states).concat(native_token).concat(unit_token);
-    return concated.reduce((result,state,index)=>{
-        if(result.filter(val=>_.ObjectHash(val)===_.ObjectHash(state)).length>=2) return result.filter((val,i)=>index!=i)
-        else return result;
-    },concated);
+    return concated.filter((val,i,array)=>array.map(s=>_.ObjectHash(s)).indexOf(_.ObjectHash(val))===i);
 }
 
 export const locations_for_block = async (block:T.Block,chain:T.Block[],L_Trie:Trie)=>{
     const targets = block.txs.concat(block.natives).concat(block.units);
-    const result:T.Location[] = await P.reduce(targets,async (result:T.Location[],tx:T.Tx)=>result.concat(await locations_for_tx(tx,chain,L_Trie)),[]);
-    return result;
+    const tx_loc:T.Location[] = await P.reduce(targets,async (result:T.Location[],tx:T.Tx)=>result.concat(await locations_for_tx(tx,chain,L_Trie)),[]);
+    const native_validator:T.Location = await L_Trie.get(CryptoSet.GenereateAddress(native,_.reduce_pub(block.meta.validatorPub)));
+    const unit_validator:T.Location = await L_Trie.get(CryptoSet.GenereateAddress(unit,_.reduce_pub(block.meta.validatorPub)));
+    const concated = (()=>{
+        let array = tx_loc.slice();
+        if(native_validator!=null) array.push(native_validator);
+        if(unit_validator!=null) array.push(unit_validator);
+        return array;
+    })();
+    return concated.filter((val,i,array)=>array.map(l=>_.ObjectHash(l)).indexOf(_.ObjectHash(val))===i);
 }
 
 export const tx_accept = async (tx:T.Tx,socket:Server)=>{
@@ -145,7 +161,7 @@ export const tx_accept = async (tx:T.Tx,socket:Server)=>{
     if(_.ObjectHash(new_pool)!=_.ObjectHash(pool)){
         fs.writeFileSync('./json/tx_pool.json',JSON.stringify(_.copy(new_pool),null, '    '));
         console.log("receive valid tx");
-        socket.emit('tx',JSON.stringify(tx))
+        client.publish('/tx',tx)
     }
 }
 
@@ -187,21 +203,24 @@ export const block_accept = async (block:T.Block,socket:Server)=>{
         fs.writeFileSync('./json/candidates.json',JSON.stringify(accepted.candidates.slice(),null, '    '));
         fs.writeFileSync('./json/blockchain.json',JSON.stringify(chain.slice().concat(accepted.block),null, '    '));
         console.log("received valid block")
-        socket.emit('block',JSON.stringify(_.copy(block)));
+        client.publish('/block',_.copy(block));
     }
     else console.log("receive invalid block");
     }
     catch(e){console.log(e)}
 }
 
-const get_pre_info = async (block:T.Block,chain:T.Block[])=>{
-    const pre_block = chain[chain.length-1];
+const get_pre_info = async (chain:T.Block[]):Promise<[{stateroot:string,locationroot:string},T.Candidates[]]>=>{
+    const pre_block = chain[chain.length-1] || BlockSet.empty_block();
     const S_Trie = db.trie_ins(pre_block.meta.stateroot);
-    const StateData = await states_for_block(pre_block,chain,S_Trie);
+    const StateData = await states_for_block(pre_block,chain.slice(0,pre_block.meta.index),S_Trie);
     const L_Trie = db.trie_ins(pre_block.meta.locationroot);
-    const LocationData = await locations_for_block(pre_block,chain,L_Trie);
-    const candidates = BlockSet.NewCandidates(unit,rate,StateData);
-    const accepted = await BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
+    const LocationData = await locations_for_block(pre_block,chain.slice(0,pre_block.meta.index),L_Trie);
+    const pre_block2 = chain[chain.length-2] || BlockSet.empty_block();
+    const pre_S_Trie = db.trie_ins(pre_block2.meta.stateroot);
+    const pre_StateData = await states_for_block(pre_block2,chain.slice(0,pre_block.meta.index-1),pre_S_Trie);
+    const candidates = BlockSet.NewCandidates(unit,rate,pre_StateData);
+    const accepted = await BlockSet.AcceptBlock(pre_block,chain.slice(0,pre_block.meta.index),0,my_version,block_time,max_blocks,block_size,candidates,S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
     await P.forEach(accepted.state, async (state:T.State)=>{
         if(state.kind==="state") await S_Trie.put(state.owner,state);
         else await S_Trie.put(state.token,state);
@@ -213,7 +232,7 @@ const get_pre_info = async (block:T.Block,chain:T.Block[])=>{
         stateroot:S_Trie.now_root(),
         locationroot:L_Trie.now_root()
     }
-    return [pre_root,accepted.candidates];
+    return [_.copy(pre_root),accepted.candidates.slice()];
 }
 
 export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],socket:Server)=>{
@@ -237,7 +256,7 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],socket:
                 }
             }
             console.log(back_chain.length)
-            const pre_info = await get_pre_info(back_chain[back_chain.length-1],back_chain);
+            const pre_info = await get_pre_info(back_chain);
             return {
                 roots:pre_info[0],
                 candidates:pre_info[1]

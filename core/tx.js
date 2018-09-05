@@ -11,7 +11,6 @@ const _ = __importStar(require("./basic"));
 const CryptoSet = __importStar(require("./crypto_set"));
 const StateSet = __importStar(require("./state"));
 const BlockSet = __importStar(require("./block"));
-const genesis_1 = require("../genesis");
 const bignumber_js_1 = require("bignumber.js");
 exports.empty_tx = () => {
     const data = {
@@ -63,6 +62,17 @@ exports.tx_to_pure = (tx) => {
     return {
         hash: tx.hash,
         meta: tx.meta
+    };
+};
+exports.pure_to_tx = (pure, block) => {
+    const index = block.txs.concat(block.natives).concat(block.units).indexOf(pure);
+    if (index === -1)
+        return exports.empty_tx();
+    const raw = block.raws[index];
+    return {
+        hash: pure.hash,
+        meta: pure.meta,
+        raw: raw
     };
 };
 exports.empty_tx_pure = () => {
@@ -159,8 +169,6 @@ const output_check = (type, base_states, output_raw, token_name_maxsize, StateDa
             return true;
         const pre_amount = base_states.reduce((sum, s) => { return new bignumber_js_1.BigNumber(sum).plus(s.amount); }, new bignumber_js_1.BigNumber(0));
         const new_amount = new_states.reduce((sum, s) => { return new bignumber_js_1.BigNumber(sum).plus(s.amount); }, new bignumber_js_1.BigNumber(0));
-        console.log(pre_amount.toNumber());
-        console.log(new_amount.toNumber());
         return (type === "issue" && new bignumber_js_1.BigNumber(pre_amount).isGreaterThanOrEqualTo(new_amount)) || (type === "change" && pre_amount != new_amount) || (type === "scrap" && new bignumber_js_1.BigNumber(pre_amount).isLessThanOrEqualTo(new_amount));
     }
 };
@@ -395,8 +403,6 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
     const solvency_state = StateData.filter(s => {
         return s.kind === "state" && s.token === native && s.owner === solvency && new bignumber_js_1.BigNumber(s.amount).isGreaterThanOrEqualTo(new bignumber_js_1.BigNumber(_.tx_fee(tx)).plus(gas));
     })[0];
-    console.log(_.tx_fee(tx));
-    console.log(gas);
     const base_states = base.map(key => {
         return StateData.filter(s => { return s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
     });
@@ -408,8 +414,6 @@ exports.ValidRequestTx = (tx, my_version, native, unit, StateData, LocationData)
         return false;
     }
     else if (solvency_state == null || hashed_pub_check(solvency_state, pub_key) || exports.requested_check([solvency], LocationData)) {
-        console.log(solvency_state);
-        console.log(exports.requested_check([solvency], LocationData));
         console.log("invalid solvency");
         return false;
     }
@@ -470,7 +474,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     };
     const token = req_tx.meta.data.token;
     const payee_state = StateData.filter(s => {
-        return s.kind === "state" && s.owner === payee && new bignumber_js_1.BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx)) && s.token === native;
+        return s.kind === "state" && s.owner === payee && s.token === native && new bignumber_js_1.BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx));
     })[0];
     const base_states = req_tx.meta.data.base.map(key => {
         return StateData.slice().filter(s => { return s.kind === "state" && s.owner === key; })[0] || StateSet.CreateState();
@@ -517,9 +521,6 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         return false;
     }
     else if (output != _.ObjectHash(base_states.map(s => JSON.stringify(s))) && output_check(req_tx.meta.data.type, base_states, output_raw, token_name_maxsize, StateData)) {
-        console.log(base_states);
-        console.log(output_raw.map(o => JSON.parse(o)));
-        console.log(_.ObjectHash(base_states.slice()) === _.ObjectHash(output_raw.map(o => JSON.parse(o))));
         console.log("invalid output");
         return false;
     }
@@ -640,9 +641,9 @@ exports.CreateRefreshTx = (version, unit_price, pub_key, target, feeprice, reque
     };
     return tx;
 };
-exports.SignTx = (tx, my_private, my_address) => {
-    const addresses = tx.meta.data.address;
-    const index = addresses.indexOf(my_address);
+exports.SignTx = (tx, my_private, my_pub) => {
+    const pub_keys = tx.meta.data.pub_key;
+    const index = pub_keys.indexOf(my_pub);
     if (index === -1)
         return tx;
     const sign = CryptoSet.SignData(tx.hash, my_private);
@@ -651,58 +652,64 @@ exports.SignTx = (tx, my_private, my_address) => {
         return tx;
     });
 };
-exports.PayFee = (solvency, validator, fee) => {
-    if (solvency.owner === validator.owner)
-        return [solvency, validator];
-    console.log(fee);
+exports.PayFee = (states, sol, val, fee) => {
+    const solvency = states.filter(s => s.kind === "state" && s.owner === sol)[0];
+    const validator = states.filter(s => s.kind === "state" && s.owner === val)[0];
     const new_solvency = _.new_obj(solvency, solvency => {
         solvency.amount = new bignumber_js_1.BigNumber(solvency.amount).minus(fee).toNumber();
         return solvency;
     });
     const new_validator = _.new_obj(validator, validator => {
-        validator.amount = new bignumber_js_1.BigNumber(validator.amount).minus(fee).toNumber();
+        validator.amount = new bignumber_js_1.BigNumber(validator.amount).plus(fee).toNumber();
         return validator;
     });
-    return [new_solvency, new_validator];
+    return states.map(s => {
+        if (s.owner === sol)
+            return new_solvency;
+        else if (s.owner === val)
+            return new_validator;
+        else
+            return s;
+    });
 };
-exports.PayGas = (solvency, payee, gas) => {
-    if (solvency.owner === payee.owner)
-        return [solvency, payee];
+exports.PayGas = (states, sol, pay, gas) => {
+    const solvency = states.filter(s => s.kind === "state" && s.owner === sol)[0];
+    const payee = states.filter(s => s.kind === "state" && s.owner === pay)[0];
     const new_solvency = _.new_obj(solvency, solvency => {
         solvency.amount = new bignumber_js_1.BigNumber(solvency.amount).minus(gas).toNumber();
         return solvency;
     });
     const new_payee = _.new_obj(payee, payee => {
-        payee.amount = new bignumber_js_1.BigNumber(payee.amount).minus(gas).toNumber();
+        payee.amount = new bignumber_js_1.BigNumber(payee.amount).plus(gas).toNumber();
         return payee;
     });
-    return [new_solvency, new_payee];
+    return states.map(s => {
+        if (s.owner === sol)
+            return new_solvency;
+        else if (s.owner === pay)
+            return new_payee;
+        else
+            return s;
+    });
 };
 exports.PayStates = (solvency_state, payee_state, validator_state, gas, fee) => {
-    const after_gas = exports.PayGas(solvency_state, payee_state, gas);
-    const after_fee = exports.PayFee(after_gas[1], validator_state, fee);
-    if (solvency_state.owner === payee_state.owner && payee_state.owner === validator_state.owner)
-        return [solvency_state];
-    else if (solvency_state.owner === payee_state.owner)
-        return after_fee;
-    else if (payee_state.owner === validator_state.owner)
-        return after_gas;
-    else if (solvency_state.owner === validator_state.owner)
-        return after_fee;
-    return [after_gas[0], after_fee[1], after_fee[2]];
+    const states = [solvency_state].concat(payee_state).concat(validator_state).filter((val, i, array) => array.map(s => _.ObjectHash(s)).indexOf(_.ObjectHash(val)) === i);
+    const sol = solvency_state.owner;
+    const pay = payee_state.owner;
+    const val = validator_state.owner;
+    return exports.PayFee(exports.PayGas(states, sol, pay, gas), pay, val, fee);
 };
 exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
     const solvency_state = StateData.filter(s => s.owner === tx.meta.data.solvency)[0];
     const validator_state = StateData.filter(s => s.owner === validator)[0];
     const fee = _.tx_fee(tx);
-    const after = exports.PayFee(solvency_state, validator_state, fee);
+    const after = exports.PayStates(solvency_state, solvency_state, validator_state, 0, fee);
+    const fee_owners = after.map(a => a.owner);
     const StateData_added = StateData.map(s => {
-        if (s.owner === after[0].owner)
-            return after[0];
-        else if (s.owner === after[1].owner)
-            return after[1];
-        else
+        const index = fee_owners.indexOf(s.owner);
+        if (index === -1)
             return s;
+        return after[index];
     });
     const LocationData_added = tx.meta.data.base.reduce((loc, key) => {
         const new_loc = {
@@ -769,7 +776,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
         const payee_state = StateData.filter(s => { return s.kind === "state" && s.owner === ref_tx.meta.data.payee; })[0] || StateSet.CreateState(0, ref_tx.meta.data.payee, native, 0, {}, []);
         const validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === validator; })[0] || StateSet.CreateState(0, validator, native, 0, {}, []);
         const tx_fee = _.tx_fee(ref_tx);
-        const payed = exports.PayStates(solvency_state, payee_state, validator_state, ref_tx.meta.data.gas, tx_fee);
+        const payed = exports.PayStates(solvency_state, payee_state, validator_state, req_tx.meta.data.gas, tx_fee);
         const payed_owners = payed.map(s => s.owner);
         const StateData_payed = StateData.map(s => {
             const index = payed_owners.indexOf(s.owner);
@@ -817,7 +824,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             const remiter_state = StateData.filter(s => s.kind === "state" && s.token === native && s.owner === req_tx.meta.data.address)[0];
             const receiver = req_tx.raw.raw[1];
             const amount = -1 * Number(req_tx.raw.raw[2]);
-            if (remiter_state == null || new bignumber_js_1.BigNumber(amount).isLessThan(0) || new bignumber_js_1.BigNumber(remiter_state.amount).plus(amount).isLessThan(0))
+            if (remiter_state == null || new bignumber_js_1.BigNumber(amount).isLessThan(0) || new bignumber_js_1.BigNumber(remiter_state.amount).minus(amount).isLessThan(0))
                 return [StateData_added, LocationData_added];
             const remited = _.new_obj(remiter_state, (state) => {
                 state.nonce++;
@@ -867,37 +874,43 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             const sellers = units.map(u => u.payee);
             const unit_address = CryptoSet.GenereateAddress(unit, _.reduce_pub(req_tx.meta.data.pub_key));
             const unit_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === unit_address; })[0] || StateSet.CreateState(0, unit_address, unit, 0, {}, []);
-            const pre_waiting_total_obj = JSON.parse(pre_unit.committed.slice().reverse().filter(c => Object.keys(JSON.parse(c))[0] === "waiting_total")[0] || JSON.stringify({ waiting_total: [genesis_1.block.meta.index, 0] }));
+            /*const pre_waiting_total_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_total")[0]||JSON.stringify({waiting_total:[block.meta.index,0]}));
             const pre_waiting_total = Object.values(pre_waiting_total_obj)[0][1];
-            const pre_block_index = (() => {
-                for (let block of chain.slice().reverse()) {
-                    if (block.units.length != 0)
-                        return block.meta.index;
-                }
-                return 0;
+            const pre_block_index = (()=>{
+              for(let block of chain.slice().reverse()){
+                if(block.units.length!=0) return block.meta.index;
+              }
+              return 0;
             })();
-            const waiting_states_obj = JSON.parse(pre_unit.committed.slice().reverse().filter(c => Object.keys(JSON.parse(c))[0] === "waiting_states")[0] || JSON.stringify({ waiting_states: [genesis_1.block.meta.index, 0] }));
+            const waiting_states_obj:{[key:string]:number[]} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]==="waiting_states")[0]||JSON.stringify({waiting_states:[block.meta.index,0]}));
             const waiting_states = Object.values(waiting_states_obj)[0][1];
-            const waiting_total = new bignumber_js_1.BigNumber(pre_waiting_total).plus(new bignumber_js_1.BigNumber(genesis_1.block.meta.index).minus(pre_block_index)).times(waiting_states).toNumber();
-            const unit_waitings = units.map(u => {
-                const pre_obj = JSON.parse(pre_unit.committed.slice().reverse().filter(c => Object.keys(JSON.parse(c))[0] === u.payee)[0] || JSON.stringify({ [u.payee]: genesis_1.block.meta.index }));
-                const pre_time = Object.values(pre_obj)[0];
-                return bignumber_js_1.BigNumber.maximum(genesis_1.block.meta.index - pre_time, 0).toNumber();
+            const waiting_total = new BigNumber(pre_waiting_total).plus(new BigNumber(block.meta.index).minus(pre_block_index)).times(waiting_states).toNumber();
+            const unit_waitings = units.map(u=>{
+              const pre_obj:{[key:string]:number} = JSON.parse(pre_unit.committed.slice().reverse().filter(c=>Object.keys(JSON.parse(c))[0]===u.payee)[0]||JSON.stringify({[u.payee]:block.meta.index}));
+              const pre_time = Object.values(pre_obj)[0];
+              return BigNumber.maximum(block.meta.index-pre_time,0).toNumber();
             });
-            const unit_values = unit_waitings.map(time => bignumber_js_1.BigNumber.maximum(new bignumber_js_1.BigNumber(2).exponentiatedBy(new bignumber_js_1.BigNumber(time).div(waiting_total).times(new bignumber_js_1.BigNumber(10).exponentiatedBy(7).toNumber()).toNumber()).toNumber(), 1).toNumber());
-            const unit_sum = unit_values.reduce((sum, u) => new bignumber_js_1.BigNumber(sum).plus(u).toNumber(), 0);
+            const unit_values = unit_waitings.map(time=>BigNumber.maximum(
+              new BigNumber(2).exponentiatedBy(new BigNumber(time).div(waiting_total).times(
+                new BigNumber(10).exponentiatedBy(7).toNumber()
+              ).toNumber()
+            ).toNumber(),1).toNumber());
+            const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);*/
+            const unit_sum = units.length;
             const new_unit_state = _.new_obj(unit_state, (state) => {
                 state.amount = new bignumber_js_1.BigNumber(state.amount).plus(unit_sum).toNumber();
                 return state;
             });
-            const price_sum = units.reduce((sum, u, i) => {
-                return new bignumber_js_1.BigNumber(sum).plus(u.unit_price * unit_values[i]).toNumber();
+            const price_sum = units.reduce((sum, u) => {
+                return new bignumber_js_1.BigNumber(sum).plus(u.unit_price).toNumber();
             }, 0);
             const remiter_state = StateData_added.filter(s => { return s.kind === "state" && s.owner === remiter; })[0];
             const new_remiter = _.new_obj(remiter_state, (state) => {
                 state.amount = new bignumber_js_1.BigNumber(state.amount).minus(price_sum).toNumber();
                 return state;
             });
+            if (new bignumber_js_1.BigNumber(new_remiter.amount).isLessThan(0))
+                return [StateData_added, LocationData_added];
             const owners = StateData_added.map(s => s.owner);
             const StateData_unit_remit = ((states) => {
                 const index = owners.indexOf(unit_address);
@@ -914,7 +927,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                 return val; }));
             const StateData_unit_recieve = sellers.reduce((states, seller, i) => {
                 const index = owners.indexOf(seller);
-                const amount = units[index].unit_price * unit_values[i];
+                const amount = units[i].unit_price;
                 if (index == -1)
                     return states.concat(StateSet.CreateState(0, seller, native, amount, {}, []));
                 const pre = states[index];
@@ -928,18 +941,18 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
                         return val;
                 });
             }, StateData_unit_remit);
-            const new_waitings = units.map(u => {
-                return JSON.stringify({
-                    [u.payee]: genesis_1.block.meta.index
-                });
+            /*const new_waitings = units.map(u=>{
+              return JSON.stringify({
+                [u.payee]:block.meta.index
+              })
             });
-            const reduced_time = unit_waitings.reduce((sum, time) => bignumber_js_1.BigNumber.maximum(new bignumber_js_1.BigNumber(sum).minus(time).toNumber(), 0).toNumber(), waiting_states);
-            const firsters = unit_waitings.filter(time => new bignumber_js_1.BigNumber(time).isLessThanOrEqualTo(0));
-            const new_wait_states = new bignumber_js_1.BigNumber(waiting_states).plus(firsters.length).toNumber();
+            const reduced_time = unit_waitings.reduce((sum,time)=>BigNumber.maximum(new BigNumber(sum).minus(time).toNumber(),0).toNumber(),waiting_states);
+            const firsters = unit_waitings.filter(time=>new BigNumber(time).isLessThanOrEqualTo(0));
+            const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();*/
             const new_unit = _.new_obj(pre_unit, (state) => {
                 state.nonce++;
                 state.issued = new bignumber_js_1.BigNumber(state.issued).plus(unit_sum).toNumber();
-                state.committed = state.committed.concat(hashes).concat(new_waitings).concat(JSON.stringify({ waiting_total: [genesis_1.block.meta.index, reduced_time] })).concat(JSON.stringify({ waiting_states: [genesis_1.block.meta.index, new_wait_states] }));
+                state.committed = state.committed.concat(hashes); /*.concat(new_waitings).concat(JSON.stringify({waiting_total:[block.meta.index,reduced_time]})).concat(JSON.stringify({waiting_states:[block.meta.index,new_wait_states]}))*/
                 return state;
             });
             const StateData_unit = StateData_unit_recieve.map((val, i) => { if (i === owners.indexOf(unit))

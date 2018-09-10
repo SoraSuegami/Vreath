@@ -4,7 +4,6 @@ import * as T from './types'
 import * as StateSet from './state'
 import * as TxSet from './tx'
 import {RunVM} from './code'
-import dgw from 'dark-gravity-wave-js'
 import {BigNumber} from 'bignumber.js'
 
 export const empty_block = ():T.Block=>{

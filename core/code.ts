@@ -6,7 +6,6 @@ import {vreath_vm_state} from './vm_class';
 import * as _ from './basic';
 import * as T from './types';
 import vm from 'js-vm';
-import { state } from '../genesis';
 
 //const code = "var a=23; let a_1 = 10; const b =10;function c(x,y){return x+y;} const fn = ()=>{return 1}; fn(); if(a>1){a_1=10} for(let i=0;i<10;i++){a_1=i} class d{constructor(z){this.z=z;}} const cl = new d(2);";
 const code = "const a = 11;";

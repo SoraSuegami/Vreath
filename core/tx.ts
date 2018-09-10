@@ -3,9 +3,7 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import * as StateSet from './state'
 import * as BlockSet from './block'
-import { block } from '../genesis';
 import {BigNumber} from 'bignumber.js'
-import { stat } from 'fs';
 
 export const empty_tx = ():T.Tx=>{
   const data:T.TxData = {

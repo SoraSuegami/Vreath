@@ -33,7 +33,6 @@
     "at-ui-style": "^1.5.1",
     "bignumber.js": "^7.2.1",
     "body-parser": "^1.18.3",
-    "dark-gravity-wave-js": "file:dark-gravity-wave-js",
     "escodegen": "^1.11.0",
     "esprima": "^4.0.1",
     "estraverse": "^4.2.0",

@@ -1,6 +1,6 @@
 import * as rx from 'rxjs'
 import {IO, ioEvent} from 'rxjs-socket.io'
-import {tx_accept,block_accept,get_balance,send_request_tx,trie_ins,check_chain,send_key_block,send_micro_block,random_chose,unit_buying} from './index'
+import {tx_accept,block_accept,get_balance,send_request_tx,send_refresh_tx,trie_ins,check_chain,send_key_block,send_micro_block,random_chose,unit_buying} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
@@ -14,8 +14,22 @@ import vm from 'js-vm';
 import * as P from 'p-iteration'
 import faye from 'faye'
 import { setInterval } from 'timers';
+import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
+import * as StateSet from '../../core/state'
 
+type Data = {
+    type:'tx'|'block';
+    tx:T.Tx[];
+    block:T.Block[];
+}
+
+type Installed = {
+    name:string;
+    icon:string;
+    pub_keys:string[][];
+    deposited:number;
+}
 
 
 const port = process.env.vreath_port || "57750";
@@ -27,27 +41,167 @@ socket.connect('http://'+ip+':'+port);*/
 
 export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
 
+const send_blocks = async ()=>{
+    const S_Trie = trie_ins(store.state.roots.stateroot);
+    const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
+    const unit_state:T.State = await S_Trie.get(unit_address) || StateSet.CreateState(0,unit_address,unit,0);
+    const unit_amount = unit_state.amount || 0;
+    const last_key = BlockSet.search_key_block(store.state.chain.slice());
+    const last_micros = BlockSet.search_micro_block(store.state.chain.slice(),last_key);
+    const date = new Date();
 
-client.subscribe('/tx',async (tx:T.Tx)=>{
-    try{
-        console.log(tx)
-        await store.dispatch("tx_accept",_.copy(tx));
+    if(!store.state.check_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.state.pool),store.state.secret,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),store.state.unit_store);
+    else if(!store.state.check_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(store.state.chain.slice(),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots));
+}
+
+const compute_yet = async ()=>{
+    const data:Data = store.state.yet_data[0];
+    if(data==null){
+        await send_blocks();
+        return 0;
     }
-    catch(e){console.log(e);}
+    else if(data.type==="tx"&&data.tx.length>0){
+        const target:T.Tx = store.state.yet_data[0].tx[0];
+        await tx_accept(target,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.candidates.slice(),_.copy(store.state.unit_store));
+        const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
+        const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
+        const reduced = txs.concat(blocks);
+        store.commit("refresh_yet_data",reduced);
+        console.log(reduced);
+        await send_blocks();
+        return 1;
+    }
+    else if(data.type==="block"&&data.block.length>0){
+        const block = data.block[0];
+        console.log(block);
+        const chain:T.Block[] = store.state.chain;
+        if(block.meta.version>=compatible_version){
+            const yet_blocks = store.state.yet_data.filter((d:Data)=>d.type==="block");
+            const last_data = yet_blocks[yet_blocks.length-1] || {type:'block',tx:[],block:[]};
+            const last_yet:T.Block = last_data.block[0] || chain[store.state.chain.length-1];
+            if(block.meta.index>chain.length){
+                client.publish("/checkchain","");
+                console.log(last_yet.meta.index)
+            }
+            else if(block.meta.index===chain.length){
+                //if(store.state.check_mode&&block.meta.index>=store.state.check_index) store.commit('checking',false);
+                await block_accept(block,chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store))
+                const txs = store.state.yet_data.filter((d:Data)=>d.type==="tx");
+                const blocks= store.state.yet_data.filter((d:Data)=>d.type==="block"&&d.block[0]!=null&&d.block[0].meta.index!=block.meta.index)/*.sort((a:Data,b:Data)=>{
+                    return a.block[0].meta.index - b.block[0].meta.index;
+                });*/
+                const reduced = txs.concat(blocks);
+                console.log(reduced);
+                store.commit("refresh_yet_data",reduced);
+                const balance = await get_balance(store.getters.my_address);
+                store.commit("refresh_balance",balance);
+                await send_blocks();
+                const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
+                const refs_pure = block.txs.filter(tx=>tx.meta.kind==="refresh").concat(block.natives.filter(tx=>tx.meta.kind==="refresh")).concat(block.units.filter(tx=>tx.meta.kind==="refresh"));
+
+                await P.forEach(reqs_pure,async (pure:T.TxPure)=>{
+                    console.log("refresh!")
+                    const req_tx = TxSet.pure_to_tx(pure,block);
+                    const code:string = store.state.code[req_tx.meta.data.token]
+                    await send_refresh_tx(_.copy(store.state.roots),store.state.secret,req_tx,block.meta.index,code,store.state.chain.slice());
+                });
+                /*if(refs_pure.length>0){
+                    await P.forEach(refs_pure, async (pure:T.TxPure)=>{
+                        const req = pure.meta.data.request;
+                        const buy_units:T.Unit[] = store.state.unit_store[req];
+                        await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
+                    })
+                }*/
+                const bought_units = block.units.reduce((result:T.Unit[],u)=>{
+                    if(u.meta.kind==="request") return result;
+                    const ref_tx = TxSet.pure_to_tx(u,block);
+                    const req_tx = TxSet.find_req_tx(ref_tx,chain);
+                    const raw = req_tx.raw || TxSet.empty_tx().raw;
+                    const this_units:T.Unit[] = JSON.parse(raw.raw[2])||[];
+                    return result.concat(this_units);
+                },[]);
+                const new_unit_store = _.new_obj(
+                    store.state.unit_store,
+                    (store:{[key:string]:T.Unit[]})=>{
+                        bought_units.forEach(unit=>{
+                            const com = store[unit.request] || [];
+                            const deleted = com.filter(c=>_.ObjectHash(c)!=_.ObjectHash(unit))
+                            store[unit.request] = deleted;
+                        });
+                        return store;
+                    }
+                )
+                store.commit("refresh_unit_store",new_unit_store);
+
+                const unit_store_values:T.Unit[][] = Object.values(store.state.unit_store);
+                const units_sum = unit_store_values.reduce((sum,us)=>sum+us.length,0);
+                if(unit_store_values.length>0){
+                    const refreshed = (()=>{
+                        let result:T.Unit[] = [];
+                        const reversed_chain:T.Block[] = store.state.chain.slice().reverse()
+                        for(let block of reversed_chain){
+                            for(let tx of block.txs.concat(block.natives).concat(block.units)){
+                                if(tx.meta.kind==="refresh"){
+                                    result = result.concat(unit_store_values.reduce((result,us)=>{
+                                        if(us.length>0&&us[0].request===tx.meta.data.request) return result.concat(us);
+                                        else return result;
+                                    },[]));
+                                }
+                                if(result.length===units_sum) break;
+                            }
+                        }
+                        return result;
+                    })();
+                    const buy_units = random_chose(refreshed,10);
+                    await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
+                }
+                return 1;
+            }
+            else{
+                const txs = store.state.yet_data.filter((d:Data)=>d.type==="tx");
+                const blocks= store.state.yet_data.filter((d:Data)=>d.type==="block"&&d.block[0]!=null&&d.block[0].meta.index!=block.meta.index)/*.sort((a:Data,b:Data)=>{
+                    return a.block[0].meta.index - b.block[0].meta.index;
+                });*/
+                const reduced = txs.concat(blocks);
+                console.log(reduced);
+                store.commit("refresh_yet_data",reduced);
+            }
+        }
+    }
+}
+
+client.subscribe('/data',async (data:Data)=>{
+    store.commit('push_yet_data',data);
 });
 
-client.subscribe('/block',async (block:T.Block)=>{
+/*client.subscribe('/block',async (block:T.Block)=>{
+    console.log('block_sub');
+    console.log(store.state.yet_block);
     try{
         const chain:T.Block[] = store.state.chain;
         if(block.meta.version>=compatible_version){
-            if(block.meta.index>chain.length) client.publish("/checkchain","");
-            else if(block.meta.index===chain.length) await store.dispatch("block_accept",_.copy(block));
+            const last_yet:T.Block = store.state.yet_block[store.state.yet_block.length-1] || store.state.chain[store.state.chain.length-1];
+            if(block.meta.index>last_yet.meta.index+1) client.publish("/checkchain","");
+            else if(block.meta.index===last_yet.meta.index+1){
+                store.commit('push_yet_block',block);
+                const target:T.Block = store.state.yet_block[0];
+                await block_accept(target,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store))
+                const reduced= store.state.yet_block.filter((b:T.Block)=>b.hash!=target.hash).sort((a:T.Block,b:T.Block)=>{
+                    return a.meta.index - b.meta.index;
+                });
+                console.log(reduced);
+                store.commit("refresh_yet_block",reduced);
+                const balance = await get_balance(store.getters.my_address);
+                store.commit("refresh_balance",balance);
+                if(store.state.yet_tx.length>0) client.publish('/tx',store.state.yet_tx[0]);
+                if(reduced.length>0) client.publish('/block',reduced[0]);
+            }
         }
     }
     catch(e){console.log(e);}
-})
+})*/
 
-client.subscribe('/checkchain',async (data:string)=>{
+client.subscribe('/checkchain',(data:string)=>{
     console.log('checked')
     client.publish('/replacechain',store.state.chain.slice());
 });
@@ -55,77 +209,20 @@ client.subscribe('/checkchain',async (data:string)=>{
 client.subscribe('/replacechain',async (chain:T.Block[])=>{
     try{
         console.log("replace:")
-        console.log(chain)
-        if(!store.state.check_mode){
-            store.commit("check",true);
-            await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.roots),store.state.candidates.slice(),_.copy(store.state.code),store.state.secret,store.state.validator_mode,store.state.unit_store);
-            store.commit("check",false);
-            if(store.state.yet_block.length>0) await store.dispatch("block_accept",_.copy(store.state.yet_block[0]))
-            const S_Trie = trie_ins(store.state.roots.stateroot);
-            const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
-            if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.validator_mode);
-        }
-    }
-    catch(e){console.log(e);}
-})
-
-/*
-const onTx: ioEvent = new ioEvent('tx');
-const onBlock: ioEvent = new ioEvent('block');
-const checkChain: ioEvent = new ioEvent('checkchain');
-const replaceChain: ioEvent = new ioEvent('replacechain');
-
-
-const tx$: rx.Subscription = socket.listenToEvent(onTx).event$.subscribe(async (data:string)=>{
-    try{
-        const tx:T.Tx = JSON.parse(data);
-        console.log(tx)
-        await store.dispatch("tx_accept",_.copy(tx));
-    }
-    catch(e){console.log(e);}
-});
-
-const block$: rx.Subscription = socket.listenToEvent(onBlock).event$.subscribe(async (data:string)=>{
-    try{
-        const block:T.Block = JSON.parse(data);
-        const chain:T.Block[] = store.state.chain;
-        if(block.meta.version>=compatible_version){
-            if(block.meta.index>chain.length) socket.emit("checkchain");
-            else if(block.meta.index===chain.length) await store.dispatch("block_accept",_.copy(block));
-            console.log(block)
-        }
-    }
-    catch(e){console.log(e);}
-});
-
-const checkchain$: rx.Subscription = socket.listenToEvent(checkChain).event$.subscribe(async (data:string)=>{
-    socket.emit('replacechain',JSON.stringify(store.state.chain.slice()));
-});
-
-const replacehain$: rx.Subscription = socket.listenToEvent(replaceChain).event$.subscribe(async (data:string)=>{
-    try{
-        const chain:T.Block[] = JSON.parse(data);
-        console.log("replace:")
-        console.log(chain)
-        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.roots),store.state.candidates.slice(),_.copy(store.state.code),store.state.secret,store.state.validator_mode,store.state.unit_store,socket);
+        console.log(chain);
+        await check_chain(chain.slice(),JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store));
         const S_Trie = trie_ins(store.state.roots.stateroot);
         const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
-        if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.validator_mode,socket);
+        console.log(await S_Trie.filter());
+        if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots));
     }
     catch(e){console.log(e);}
 });
-*/
 
 Vue.use(Vuex)
 Vue.use(VueRouter)
 Vue.use(AtComponents)
 
-type Installed = {
-    name:string;
-    icon:string;
-    pub_keys:string[][];
-    deposited:number;
-}
 
 const wallet:Installed = {
     name:"wallet",
@@ -173,10 +270,9 @@ export const store = new Vuex.Store({
         unit_store:JSON.parse(localStorage.getItem("unit_store")||JSON.stringify({})),
         secret:localStorage.getItem("secret")||CryptoSet.GenerateKeys(),
         balance:0,
-        validator_mode:false,
+        yet_data:[],
         check_mode:false,
-        yet_tx:[],
-        yet_block:[]
+        check_index:0
     },
     mutations:{
         add_app(state,obj:Installed){
@@ -222,24 +318,27 @@ export const store = new Vuex.Store({
         refresh_balance(state,amount:number){
             state.balance = amount;
         },
-        validator_time(state,bool:boolean){
-            state.validator_mode = bool;
+        push_yet_data(state,data:Data){
+            state.yet_data.push(data);
         },
-        check(state,bool:boolean){
+        unshift_yet_data(state,data:Data){
+            state.yet_data.unshift(data);
+        },
+        refresh_yet_data(state,data:Data[]){
+            state.yet_data = data.slice();
+        },
+        checking(state,bool:boolean){
             state.check_mode = bool;
         },
-        refresh_yet_tx(state,txs:T.Tx[]){
-            state.yet_tx = txs.slice();
-        },
-        refresh_yet_block(state,blocks:T.Block[]){
-            state.yet_block = blocks.slice();
+        check_limit(state,index:number){
+            state.check_index = index;
         }
     },
     getters:{
         my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
     },
     actions:{
-        tx_accept(commit,tx:T.Tx){
+        /*tx_accept(commit,tx:T.Tx){
             try{
                 console.log(store.state.yet_tx)
                 console.log(store.state.check_mode)
@@ -289,73 +388,10 @@ export const store = new Vuex.Store({
                 console.log(store.state.check_mode)
             }
             catch(e){console.log(e);}
-        },
+        },*/
     }
 });
 
-(async ()=>{
-    const gen_S_Trie = trie_ins("");
-    await P.forEach(gen.state,async (s:T.State)=>{
-        if(s.kind==="state") await gen_S_Trie.put(s.owner,s);
-        else await gen_S_Trie.put(s.token,s);
-    });
-    console.log(gen.candidates)
-    console.log(_.ObjectHash(gen.candidates))
-    console.log("stateroot:")
-    console.log(gen_S_Trie.now_root());
-    let pre_length = 0;
-    let new_length = store.state.chain.length;
-    let S_Trie;
-    let my_unit_state:T.State
-    let now_units:{[key:string]:T.Unit[]}
-    let unit_array:T.Unit[]
-    let buy_units:T.Unit[]
-    /*setInterval(()=>{
-        if(!store.state.check_mode)socket.emit("checkchain");
-    },10000)*/
-    setInterval(async ()=>{
-        pre_length = new_length;
-        new_length = store.state.chain.length;
-        S_Trie = trie_ins(store.state.roots.stateroot);
-        my_unit_state = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
-        if(store.state.yet_block.length>0) await store.dispatch('block_accept',store.state.yet_block[0]);
-        if(store.state.yet_tx.length>0) await store.dispatch('tx_accept',store.state.yet_tx[0]);
-
-        now_units = store.state.unit_store;
-        unit_array = Object.values(now_units).reduce((result,us)=>result.concat(us),[]).filter(u=>{
-            for(let block of store.state.chain.slice(u.index).reverse()){
-                for(let tx of block.txs.concat(block.natives).concat(block.units)){
-                    if(tx.meta.kind==="refresh"&&tx.meta.data.request===u.request&&tx.meta.data.index===u.index) return true;
-                }
-            }
-            return false;
-        });
-        buy_units = random_chose(unit_array,10);
-        console.log("buy_units:");
-        console.log(buy_units);
-        console.log(now_units);
-        console.log(["Vr:native:35bb582aaadec913443bf0370dd17c22fd53c7096538951bf58cd20dae460f75","Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b"].indexOf(store.getters.my_address))
-        if(buy_units.length>=1&&["Vr:native:35bb582aaadec913443bf0370dd17c22fd53c7096538951bf58cd20dae460f75","Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b"].indexOf(store.getters.my_address)===-1){
-            console.log("unit mode")
-            await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
-        }
-        const last_key = BlockSet.search_key_block(store.state.chain.slice());
-        const last_micros = BlockSet.search_micro_block(store.state.chain.slice(),last_key);
-        const date = new Date();
-        if(!store.state.check_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.state.pool),store.state.secret,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),store.state.unit_store);
-        else if(!store.state.check_mode&&my_unit_state!=null&&my_unit_state.amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(store.state.chain.slice(),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),codes,store.state.validator_mode);
-        /*if(pre_length===new_length&&!store.state.check_mode&&unit_state!=null&&unit_state.amount>0){
-            console.log(pre_length)
-            console.log(new_length);
-            console.log(store.state.yet_tx.length)
-            console.log(store.state.yet_block.length)
-            if(store.state.yet_block.length>0) await store.dispatch('block_accept',store.state.yet_block[0]);
-            if(store.state.yet_tx.length>0) await store.dispatch('tx_accept',store.state.yet_tx[0]);
-            //client.publish('/checkchain',"");
-            //await send_key_block(store.state.chain.slice(),store.state.secret,store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.validator_mode);
-        }*/
-    },block_time);
-})();
 
 const Home = {
     data:function(){
@@ -392,16 +428,61 @@ const Wallet = {
         }
     },
     created:async function(){
+        const gen_S_Trie = trie_ins("");
+        await P.forEach(gen.state,async (s:T.State)=>{
+            if(s.kind==="state") await gen_S_Trie.put(s.owner,s);
+            else await gen_S_Trie.put(s.token,s);
+        });
         client.publish("/checkchain","");
         const balance = await get_balance(this.from);
         console.log(balance);
-        store.commit("refresh_balance",balance);
+        this.$store.commit("refresh_balance",balance);
+        setInterval(async ()=>{
+            await compute_yet();
+            console.log('yet:')
+            console.log(store.state.yet_data);
+        },block_time);
+       /* setInterval(async ()=>{
+            pre_length = new_length;
+            new_length = this.$store.state.chain.length;
+            const S_Trie = trie_ins(this.$store.state.roots.stateroot);
+            const my_unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(this.$store.state.secret)));
+            console.log(my_unit_state)
+            //await P.forEach(store.state.yet_block,async (block:T.Block)=>await block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store)));
+            console.log('yet_block:')
+            console.log(this.$store.state.yet_block);
+            //store.commit("refresh_yet_block",[]);
+            //await P.forEach(store.state.yet_tx,async (tx:T.Tx)=>await tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,_.copy(store.state.unit_store)));
+            //store.commit("refresh_yet_tx",[]);
+            const now_units:{[key:string]:T.Unit[]} = this.$store.state.unit_store;
+            const unit_array:T.Unit[] = Object.values(now_units).reduce((result,us)=>result.concat(us),[]).filter(u=>{
+                for(let block of this.$store.state.chain.slice(u.index).reverse()){
+                    for(let tx of block.txs.concat(block.natives).concat(block.units)){
+                        if(tx.meta.kind==="refresh"&&tx.meta.data.request===u.request&&tx.meta.data.index===u.index) return true;
+                    }
+                }
+                return false;
+            });
+            const buy_units:T.Unit[] = random_chose(unit_array,10);
+            console.log("buy_units:");
+            console.log(buy_units);
+            console.log(["Vr:native:35bb582aaadec913443bf0370dd17c22fd53c7096538951bf58cd20dae460f75","Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b"].indexOf(store.getters.my_address))
+            if(buy_units.length>=1&&["Vr:native:35bb582aaadec913443bf0370dd17c22fd53c7096538951bf58cd20dae460f75","Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b"].indexOf(store.getters.my_address)===-1){
+                console.log("unit mode")
+                await unit_buying(this.$store.state.secret,buy_units.slice(),_.copy(this.$store.state.roots),this.$store.state.chain.slice());
+            }
+            const last_key = BlockSet.search_key_block(this.$store.state.chain.slice());
+            const last_micros = BlockSet.search_micro_block(this.$store.state.chain.slice(),last_key);
+            const date = new Date();
+            if(!this.$store.state.check_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(this.$store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(this.$store.state.pool),this.$store.state.secret,this.$store.state.chain.slice(),this.$store.state.candidates.slice(),_.copy(this.$store.state.roots),this.$store.state.unit_store);
+            else if(!this.$store.state.check_mode&&my_unit_state!=null&&my_unit_state.amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(this.$store.state.chain.slice(),this.$store.state.secret,this.$store.state.candidates.slice(),_.copy(this.$store.state.roots));
+        },block_time);*/
     },
     watch:{
         refresh_balance:async function(){
             const balance = await get_balance(this.from);
             console.log(balance);
-            store.commit("refresh_balance",balance);
+            this.$store.commit("refresh_balance",balance);
         }
     },
     computed:{
@@ -420,7 +501,7 @@ const Wallet = {
         remit:async function(){
             try{
                 console.log("request");
-                await send_request_tx(this.$store.state.secret,this.to,this.amount,_.copy(this.$store.state.roots),this.$store.state.chain.slice(),_.copy(this.$store.state.pool),this.$store.state.validator_mode,this.$store.state.candidates.slice(),this.$store.state.code);
+                await send_request_tx(this.$store.state.secret,this.to,this.amount,_.copy(this.$store.state.roots),this.$store.state.chain.slice());
             }
             catch(e){console.log(e)}
         }

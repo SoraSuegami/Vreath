@@ -5,6 +5,7 @@ import * as StateSet from './state'
 import * as BlockSet from './block'
 import { block } from '../genesis';
 import {BigNumber} from 'bignumber.js'
+import { stat } from 'fs';
 
 export const empty_tx = ():T.Tx=>{
   const data:T.TxData = {
@@ -914,41 +915,78 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       ).toNumber(),1).toNumber());
       const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);*/
       const unit_sum = units.length
-      const new_unit_state = _.new_obj(
-        unit_state,
-        (state)=>{
-          state.amount = new BigNumber(state.amount).plus(unit_sum).toNumber();
-          return state;
+      const StateData_unit_bought = StateData_added.map(s=>{
+        if(s.kind==="state"&&s.token===unit&&s.owner===unit_address){
+          return _.new_obj(
+            s,
+            (state)=>{
+              state.amount = new BigNumber(state.amount).plus(unit_sum).toNumber();
+              return state;
+            }
+          )
         }
-      );
+        else return s;
+      });
       const price_sum = units.reduce((sum,u)=>{
         return new BigNumber(sum).plus(u.unit_price).toNumber();
       },0)
       const remiter_state:T.State = StateData_added.filter(s=>{return s.kind==="state"&&s.owner===remiter})[0];
-      const new_remiter:T.State = _.new_obj(
-        remiter_state,
-        (state)=>{
-          state.amount = new BigNumber(state.amount).minus(price_sum).toNumber();
-          return state;
+      if(new BigNumber(remiter_state.amount).minus(price_sum).isLessThan(0)) return [StateData_added,LocationData_added];
+      const StateData_unit_remited = StateData_unit_bought.map(s=>{
+        if(s.kind==="state"&&s.token===native&&s.owner===remiter){
+          return _.new_obj(
+            s,
+            (state)=>{
+              state.amount = new BigNumber(state.amount).minus(price_sum).toNumber();
+              return state;
+            }
+          )
         }
-      );
-      if(new BigNumber(new_remiter.amount).isLessThan(0)) return [StateData_added,LocationData_added];
-      const owners = StateData_added.map(s=>s.owner);
-      const StateData_unit_remit = ((states)=>{
-        const index = owners.indexOf(unit_address);
-        if(index!=-1) return states.map((val,i)=>{if(index===i)return new_unit_state;else return val;})
-        else return states.concat(new_unit_state);
-      })(StateData.map((val,i)=>{if(i===owners.indexOf(remiter))return new_remiter;else return val;}));
-      const StateData_unit_recieve = sellers.reduce((states:T.State[],seller,i)=>{
+        else return s;
+      });
+      const StateData_unit_recieve = StateData_unit_remited.map(s=>{
+        if(s.kind==="state"&&s.token===native){
+          const index = sellers.indexOf(s.owner);
+          if(index===-1) return s;
+          return _.new_obj(
+            s,
+            (state)=>{
+              state.amount = new BigNumber(state.amount).plus(units[index].unit_price).toNumber();
+              return state;
+            }
+          )
+        }
+        else return s;
+      });
+      const StateData_unit_token = StateData_unit_recieve.map(s=>{
+        if(s.kind==="token"&&s.token===unit){
+          return _.new_obj(
+            s,
+            (state)=>{
+              state.nonce ++;
+              state.issued = new BigNumber(state.issued).plus(unit_sum).toNumber();
+              state.committed = state.committed.concat(hashes);
+              return state;
+            }
+          )
+        }
+        else return s;
+      });
+      /*sellers.reduce((states:T.State[],seller,i)=>{
         const index = owners.indexOf(seller);
         const amount = units[i].unit_price;
         if(index==-1) return states.concat(StateSet.CreateState(0,seller,native,amount,{},[]));
         const pre = states[index];
-        return states.map((val,i)=>{if(index===i)return _.new_obj(val,(state)=>{
-          state.amount = new BigNumber(state.amount).plus(amount).toNumber();
-          return state
-        });else return val;})
-      },StateData_unit_remit);
+        return states.map((val,i)=>{
+          if(index===i){
+            return _.new_obj(val,
+              (state)=>{
+                state.amount = new BigNumber(state.amount).plus(amount).toNumber();
+                return state
+              });
+          }
+          else return val;})
+      },StateData_unit_remit);*/
       /*const new_waitings = units.map(u=>{
         return JSON.stringify({
           [u.payee]:block.meta.index
@@ -957,17 +995,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       const reduced_time = unit_waitings.reduce((sum,time)=>BigNumber.maximum(new BigNumber(sum).minus(time).toNumber(),0).toNumber(),waiting_states);
       const firsters = unit_waitings.filter(time=>new BigNumber(time).isLessThanOrEqualTo(0));
       const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();*/
-      const new_unit = _.new_obj(
-        pre_unit,
-        (state)=>{
-          state.nonce ++;
-          state.issued = new BigNumber(state.issued).plus(unit_sum).toNumber();
-          state.committed = state.committed.concat(hashes)/*.concat(new_waitings).concat(JSON.stringify({waiting_total:[block.meta.index,reduced_time]})).concat(JSON.stringify({waiting_states:[block.meta.index,new_wait_states]}))*/
-          return state;
-        }
-      );
-      const StateData_unit = StateData_unit_recieve.map((val,i)=>{if(i===owners.indexOf(unit))return new_unit;else return val;})
-      return [StateData_unit,LocationData_added];
+      return [StateData_unit_token,LocationData_added];
     }
     return [StateData_added,LocationData_added];
   }

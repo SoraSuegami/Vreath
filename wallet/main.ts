@@ -11,7 +11,7 @@ import {compatible_version} from './con'
 import deflate from 'permessage-deflate'
 
 export const port = process.env.vreath_port || "57750";
-export const ip = process.env.vreath_port || "localhost";
+export const ip = process.env.vreath_ip || "localhost";
 
 const app = express();
 const server = http.createServer(app);
@@ -28,13 +28,10 @@ app.get('/',(req, res) => {
 
 export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
 
-client.subscribe('/tx',async (tx:T.Tx)=>{
-    console.log(tx)
+client.subscribe('/data',async (data)=>{
+    console.log(data)
 });
 
-client.subscribe('/block',async (block:T.Block)=>{
-    console.log(block)
-})
 /*
 const client = redis.createClient({host:ip,port:Number(port)});
 

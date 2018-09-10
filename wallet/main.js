@@ -16,7 +16,7 @@ const express_1 = __importDefault(require("express"));
 const faye_1 = __importDefault(require("faye"));
 const permessage_deflate_1 = __importDefault(require("permessage-deflate"));
 exports.port = process.env.vreath_port || "57750";
-exports.ip = process.env.vreath_port || "localhost";
+exports.ip = process.env.vreath_ip || "localhost";
 const app = express_1.default();
 const server = http.createServer(app);
 const io = socket_io_1.default(server);
@@ -28,11 +28,8 @@ app.get('/', (req, res) => {
     res.sendFile(__dirname + '/client/index.html');
 });
 exports.client = new faye_1.default.Client('http://' + exports.ip + ':' + exports.port + '/vreath');
-exports.client.subscribe('/tx', async (tx) => {
-    console.log(tx);
-});
-exports.client.subscribe('/block', async (block) => {
-    console.log(block);
+exports.client.subscribe('/data', async (data) => {
+    console.log(data);
 });
 /*
 const client = redis.createClient({host:ip,port:Number(port)});

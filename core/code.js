@@ -123,6 +123,10 @@ exports.RunVM = (code, states, input, tx, token_state, chain, pre_tx, next_tx, g
         return vreath.states;
     }
 };
-(async () => {
-    //console.log(await RunVM("",[],[],10));
-})();
+/*(async ()=>{
+   const checked = check(esp.parse("a = Math['ran'+'dom']()"),['Math','a'],{})
+   const generated = esc.generate(checked);
+   let sandbox = {a:0}
+   vm.runInNewContext(generated,sandbox);
+   console.log(sandbox.a)
+})();*/

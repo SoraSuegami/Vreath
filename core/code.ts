@@ -115,6 +115,11 @@ export const RunVM = (code:string,states:T.State[],input:string[],tx:T.TxPure,to
     }
 };
 
-(async ()=>{
-    //console.log(await RunVM("",[],[],10));
-})();
+/*(async ()=>{
+   const checked = check(esp.parse("a = Math['ran'+'dom']()"),['Math','a'],{})
+   const generated = esc.generate(checked);
+   let sandbox = {a:0}
+   vm.runInNewContext(generated,sandbox);
+   console.log(sandbox.a)
+})();*/
+

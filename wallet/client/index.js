@@ -57,23 +57,32 @@ const pays = (tx, chain) => {
 };
 exports.states_for_tx = async (tx, chain, S_Trie) => {
     const base = tx.meta.data.base;
-    const outputs = output_keys(tx);
-    const payes = pays(tx, chain);
-    const concated = base.concat(outputs).concat(payes);
-    const target = concated.reduce((result, key, index) => {
-        if (result.filter(val => val === key).length >= 2)
-            return result.filter((key, i) => index != i);
-        else
+    const base_states = await P.reduce(base, async (result, key) => {
+        const getted = await S_Trie.get(key);
+        if (getted == null)
             return result;
-    }, concated);
-    const states = Object.values(await S_Trie.filter((key) => {
-        const i = target.indexOf(key);
-        if (i != -1)
-            return true;
         else
-            return false;
-    }));
-    return states;
+            return result.concat(getted);
+    }, []);
+    const outputs = output_keys(tx);
+    const output_states = await P.reduce(outputs, async (result, key) => {
+        const getted = await S_Trie.get(key);
+        if (getted == null)
+            return result;
+        else
+            return result.concat(getted);
+    }, []);
+    const payes = pays(tx, chain);
+    const pay_states = await P.reduce(payes, async (result, key) => {
+        const getted = await S_Trie.get(key);
+        if (getted == null)
+            return result.concat(StateSet.CreateState(0, key, con_1.native, 0));
+        else
+            return result.concat(getted);
+    }, []);
+    const concated = base_states.concat(output_states).concat(pay_states);
+    const hashes = concated.map(state => _.ObjectHash(state));
+    return concated.filter((val, i) => hashes.indexOf(_.ObjectHash(val)) === i);
 };
 exports.locations_for_tx = async (tx, chain, L_Trie) => {
     const target = (() => {
@@ -116,28 +125,32 @@ exports.states_for_block = async (block, chain, S_Trie) => {
         const raw = b.raws[b.txs.length + i] || TxSet.empty_tx().raw;
         return await S_Trie.get(raw.raw[1]) || StateSet.CreateState(0, raw.raw[1], con_1.native, 0);
     });
-    /*const unit_states:T.State[] = await P.reduce(block.units,async (result:T.State[],tx:T.Tx)=>{
-        const key = (()=>{
-            if(tx.meta.kind==="request") return tx.hash;
-            else return tx.meta.data.request;
-        })()
-        const b = (()=>{
-            if(tx.meta.kind==="request") return block;
-            else return chain[tx.meta.data.index] || BlockSet.empty_block();
+    const unit_states = await P.reduce(block.units, async (result, tx) => {
+        const key = (() => {
+            if (tx.meta.kind === "request")
+                return tx.hash;
+            else
+                return tx.meta.data.request;
         })();
-        const i = b.units.map(t=>t.hash).indexOf(key);
-        const raw = b.raws[b.txs.length+b.natives.length+i] || TxSet.empty_tx().raw;
-        const remiter:T.State = await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],unit,0);
-        const units:T.Unit[] = JSON.parse(raw.raw[2]) || [TxSet.empty_tx()];
-        const sellers:T.State[] = await P.map(units, async (u:T.Unit)=>await S_Trie.get(u.payee)||StateSet.CreateState(0,u.payee,unit,0));
+        const b = (() => {
+            if (tx.meta.kind === "request")
+                return block;
+            else
+                return chain[tx.meta.data.index] || BlockSet.empty_block();
+        })();
+        const i = b.units.map(t => t.hash).indexOf(key);
+        const raw = b.raws[b.txs.length + b.natives.length + i] || TxSet.empty_tx().raw;
+        const remiter = await S_Trie.get(raw.raw[1]) || StateSet.CreateState(0, raw.raw[1], con_1.native, 0);
+        const units = JSON.parse(raw.raw[2]);
+        const sellers = await P.map(units, async (u) => await S_Trie.get(u.payee) || StateSet.CreateState(0, u.payee, con_1.native, 0));
         return result.concat(sellers).concat(remiter);
-    },[]) || [];*/
+    }, []) || [];
     const all_units = Object.values(await S_Trie.filter((key, state) => {
         return state.kind === "state" && state.token === con_1.unit;
     }));
     const native_token = await S_Trie.get(con_1.native);
     const unit_token = await S_Trie.get(con_1.unit);
-    const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(all_units).concat(native_token).concat(unit_token);
+    const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(unit_states).concat(all_units).concat(native_token).concat(unit_token);
     console.log(concated);
     return concated.filter((val, i, array) => array.map(s => _.ObjectHash(s)).indexOf(_.ObjectHash(val)) === i);
 };
@@ -165,7 +178,7 @@ exports.random_chose = (array, num) => {
     }
     return array.slice(0, num);
 };
-exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candidates, codes, unit_store) => {
+exports.tx_accept = async (tx, chain, roots, pool, secret, candidates, unit_store) => {
     console.log("tx_accept");
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
@@ -204,9 +217,6 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candi
     }
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
         script_1.store.commit("refresh_pool", _.copy(new_pool));
-        const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(secret));
-        const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0, {}, []);
-        const unit_amount = unit_state.amount;
         /*if(Object.keys(new_pool).length>=1&&unit_amount>0){
             await send_key_block(chain.slice(),secret,candidates.slice(),_.copy(roots),_.copy(new_pool),codes,validator_mode);
         }*/
@@ -215,7 +225,7 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, validator_mode, candi
     else
         return _.copy(pool);
 };
-exports.block_accept = async (block, chain, candidates, roots, pool, codes, secret, mode, unit_store) => {
+exports.block_accept = async (block, chain, candidates, roots, pool, codes, secret, unit_store) => {
     console.log("block_accept");
     const stateroot = roots.stateroot;
     const S_Trie = exports.trie_ins(stateroot);
@@ -235,10 +245,7 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
             await L_Trie.put(loc.address, loc);
         });
         console.log(await S_Trie.filter());
-        if (accepted.state.some(s => s.amount == null)) {
-            console.log(accepted.state);
-            throw Error;
-        }
+        console.log(await L_Trie.filter());
         const new_roots = {
             stateroot: S_Trie.now_root(),
             locationroot: L_Trie.now_root()
@@ -249,54 +256,28 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
             });
             return p;
         })(_.copy(pool));
+        const new_chain = chain.slice().concat(accepted.block[0]);
         await script_1.store.commit('refresh_pool', _.copy(new_pool));
         await script_1.store.commit("refresh_roots", _.copy(new_roots));
         await script_1.store.commit("refresh_candidates", accepted.candidates.slice());
         await script_1.store.commit("add_block", _.copy(accepted.block[0]));
-        //socket.emit('block',JSON.stringify(block));
-        const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
-        const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
-        if (reqs_pure.length > 0) {
-            await P.forEach(reqs_pure, async (pure) => {
-                console.log("refresh!");
-                const req_tx = TxSet.pure_to_tx(pure, block);
-                const code = codes[req_tx.meta.data.token];
-                await exports.send_refresh_tx(_.copy(new_roots), secret, req_tx, block.meta.index, code, chain.slice().concat(accepted.block[0]), _.copy(new_pool), mode, accepted.candidates.slice(), codes);
-            });
-        }
-        if (refs_pure.length > 0) {
-            /*await P.forEach(refs_pure, async (pure:T.TxPure)=>{
-                const units = unit_store[pure.meta.data.request] || [];
-                if(units.length>0) await unit_buying(secret,units.slice(),_.copy(roots),chain.slice(),_.copy(pool),mode,candidates.slice(),_.copy(codes),socket);
-            });*/
-            const bought_units = block.units.reduce((result, u) => {
-                if (u.meta.kind === "request")
-                    return result;
-                const ref_tx = TxSet.pure_to_tx(u, block);
-                const req_tx = TxSet.find_req_tx(ref_tx, chain);
-                const raw = req_tx.raw || TxSet.empty_tx().raw;
-                const this_units = JSON.parse(raw.raw[2]) || [];
-                return result.concat(this_units);
-            }, []);
-            const new_unit_store = _.new_obj(unit_store, (store) => {
-                bought_units.forEach(unit => {
-                    const com = store[unit.request] || [];
-                    const deleted = com.filter(c => _.ObjectHash(c) != _.ObjectHash(unit));
-                    store[unit.request] = deleted;
-                });
-                return store;
-            });
-            script_1.store.commit("refresh_unit_store", new_unit_store);
-        }
         return {
             pool: _.copy(new_pool),
             roots: _.copy(new_roots),
             candidates: accepted.candidates.slice(),
-            chain: chain.slice().concat(accepted.block[0]),
+            chain: new_chain,
         };
     }
     else {
         console.log("receive invalid block");
+        /*const last_key = BlockSet.search_key_block(chain);
+        const last_micros = BlockSet.search_micro_block(chain,last_key);
+
+        const my_unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(secret)));
+        const date = new Date();
+
+        if(!store.state.check_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(pool),secret,chain.slice(),accepted.candidates.slice(),_.copy(roots),unit_store);
+        else if(!store.state.check_mode&&my_unit_state!=null&&my_unit_state.amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(chain.slice(),secret,accepted.candidates.slice(),_.copy(roots));*/
         return {
             pool: _.copy(pool),
             roots: _.copy(roots),
@@ -346,7 +327,7 @@ exports.get_balance = async (address) => {
         return 0;
     return state.amount;
 };
-exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, candidates, codes) => {
+exports.send_request_tx = async (secret, to, amount, roots, chain) => {
     try {
         console.log("send_request_tx");
         const pub_key = [CryptoSet.PublicFromPrivate(secret)];
@@ -363,7 +344,7 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, c
             alert("invalid infomations");
         else {
             alert("remit!");
-            script_2.client.publish('/tx', tx);
+            script_2.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
@@ -377,7 +358,7 @@ exports.send_request_tx = async (secret, to, amount, roots, chain, pool, mode, c
         console.log(e);
     }
 };
-exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool, mode, candidates, codes) => {
+exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain) => {
     try {
         console.log("send_refresh_tx");
         const stateroot = roots.stateroot;
@@ -426,7 +407,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool
         })();
         const output_states = code_1.RunVM(code, pre_states, req_tx.raw.raw, req_pure, token_state, pure_chain, relate_pre_tx, relate_next_tx, con_1.gas_limit);
         const output_raws = output_states.map(state => JSON.stringify(state));
-        const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 10, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
+        const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 0.1, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
         const tx = TxSet.SignTx(pre_tx, secret, pub_key[0]);
         const StateData = await exports.states_for_tx(tx, chain, S_Trie);
         const LocationData = await exports.locations_for_tx(tx, chain, L_Trie);
@@ -434,7 +415,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool
             console.log("fail to create valid refresh");
         else {
             console.log("create valid refresh tx");
-            script_2.client.publish('/tx', tx);
+            script_2.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
@@ -446,7 +427,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain, pool
         console.log(e);
     }
 };
-exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, mode) => {
+exports.send_key_block = async (chain, secret, candidates, roots) => {
     console.log("send_key_block");
     const pub_key = [CryptoSet.PublicFromPrivate(secret)];
     const stateroot = roots.stateroot;
@@ -463,7 +444,7 @@ exports.send_key_block = async (chain, secret, candidates, roots, pool, codes, m
     if (!check)
         console.log("fail to create valid block");
     else {
-        script_2.client.publish('/block', key_block);
+        script_2.client.publish('/data', { type: 'block', tx: [], block: [key_block] });
         //await store.dispatch("block_accept",_.copy(key_block));
         //await block_accept(key_block,chain,candidates,roots,pool,codes,secret,mode,socket);
     }
@@ -524,7 +505,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
                 return p;
             })(pool);
             store.commit('refresh_pool',new_pool);*/
-        script_2.client.publish('/block', micro_block);
+        script_2.client.publish('/data', { type: 'block', tx: [], block: [micro_block] });
         //await store.dispatch("block_accept",_.copy(micro_block));
         //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
         console.log("create micro block");
@@ -555,7 +536,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
         })(_.copy(unit_store));
         script_1.store.commit("refresh_pool", _.copy(del_pool));
         script_1.store.commit("refresh_unit_store", _.copy(add_unit_store));
-        //await send_micro_block(_.copy(del_pool),secret,chain.slice(),candidates.slice(),_.copy(roots),codes,mode,socket);
+        await exports.send_micro_block(_.copy(del_pool), secret, chain.slice(), candidates.slice(), _.copy(roots), _.copy(unit_store));
     }
     else {
         console.log("fall to create micro block;");
@@ -587,7 +568,7 @@ const get_pre_info = async (chain) => {
     };
     return [_.copy(pre_root), accepted.candidates.slice()];
 };
-exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes, secret, mode, unit_store) => {
+exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_store) => {
     if (new_chain.length > my_chain.length) {
         const news = new_chain.slice().reverse();
         let target = [];
@@ -624,15 +605,25 @@ exports.check_chain = async (new_chain, my_chain, pool, roots, candidates, codes
                 chain: back_chain.slice()
             };
         })();
-        await script_1.store.commit("refresh_roots", _.copy(info.roots));
-        await script_1.store.commit("refresh_candidates", info.candidates.slice());
-        await P.forEach(add_blocks, async (block) => {
-            await script_1.store.dispatch('block_accept', block);
+        const add_blocks_data = add_blocks.map(block => {
+            return {
+                type: 'block',
+                tx: [],
+                block: [block]
+            };
         });
-        /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
-            const accepted = await block_accept(block,result.chain,result.candidates,result.roots,result.pool,codes,secret,mode,unit_store);
+        script_1.store.commit("refresh_roots", _.copy(info.roots));
+        script_1.store.commit("refresh_candidates", info.candidates.slice());
+        //store.commit('checking',true);
+        //store.commit('check_limit',add_blocks[add_blocks.length-1].meta.index);
+        script_1.store.commit('refresh_yet_data', add_blocks_data);
+        //add_blocks.forEach(block=>store.commit('push_yet_block',block));
+        /*store.commit("checking",true);
+        await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
+            const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
-        },info);*/
+        },info);
+        store.commit("checking",false);*/
         const amount = await exports.get_balance(script_1.store.getters.my_address);
         script_1.store.commit("refresh_balance", amount);
     }
@@ -657,7 +648,7 @@ exports.unit_buying = async (secret, units, roots, chain) => {
             console.log("fail to buy units");
         else {
             console.log("buy unit!");
-            script_2.client.publish('/tx', tx);
+            script_2.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
         }
     }
     catch (e) {

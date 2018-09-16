@@ -14,6 +14,7 @@ const index_1 = require("./index");
 const CryptoSet = __importStar(require("../../core/crypto_set"));
 const _ = __importStar(require("../../core/basic"));
 const con_1 = require("../con");
+const peer_list_1 = require("./peer_list");
 const vue_1 = __importDefault(require("vue"));
 const vuex_1 = __importDefault(require("vuex"));
 const at_ui_1 = __importDefault(require("at-ui"));
@@ -25,8 +26,8 @@ const timers_1 = require("timers");
 const TxSet = __importStar(require("../../core/tx"));
 const BlockSet = __importStar(require("../../core/block"));
 const StateSet = __importStar(require("../../core/state"));
-const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_ip || "localhost";
+const port = peer_list_1.peer_list[0].port || "57750";
+const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
 /*const socket = new IO();
 socket.connect('http://'+ip+':'+port);*/

@@ -3,6 +3,7 @@ import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate,compatible_version} from '../con'
+import {peer_list} from './peer_list'
 import Vue from 'vue'
 import Vuex from 'vuex'
 import AtComponents from 'at-ui'
@@ -30,8 +31,8 @@ type Installed = {
 }
 
 
-const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_ip || "localhost";
+const port = peer_list[0].port || "57750";
+const ip = peer_list[0].ip || "localhost";
 console.log(ip)
 
 /*const socket = new IO();

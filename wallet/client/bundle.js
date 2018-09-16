@@ -96155,6 +96155,26 @@ exports.unit_buying = async (secret, units, roots, chain) => {
 
 /***/ }),
 
+/***/ "./wallet/client/peer_list.js":
+/*!************************************!*\
+  !*** ./wallet/client/peer_list.js ***!
+  \************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.peer_list = [
+    {
+        ip: "localhost",
+        port: "57750"
+    }
+];
+
+
+/***/ }),
+
 /***/ "./wallet/client/script.js":
 /*!*********************************!*\
   !*** ./wallet/client/script.js ***!
@@ -96163,7 +96183,7 @@ exports.unit_buying = async (secret, units, roots, chain) => {
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(process) {
+
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -96179,6 +96199,7 @@ const index_1 = __webpack_require__(/*! ./index */ "./wallet/client/index.js");
 const CryptoSet = __importStar(__webpack_require__(/*! ../../core/crypto_set */ "./core/crypto_set.js"));
 const _ = __importStar(__webpack_require__(/*! ../../core/basic */ "./core/basic.js"));
 const con_1 = __webpack_require__(/*! ../con */ "./wallet/con.js");
+const peer_list_1 = __webpack_require__(/*! ./peer_list */ "./wallet/client/peer_list.js");
 const vue_1 = __importDefault(__webpack_require__(/*! vue */ "./node_modules/vue/dist/vue.js"));
 const vuex_1 = __importDefault(__webpack_require__(/*! vuex */ "./node_modules/vuex/dist/vuex.esm.js"));
 const at_ui_1 = __importDefault(__webpack_require__(/*! at-ui */ "./node_modules/at-ui/dist/at.js"));
@@ -96190,8 +96211,8 @@ const timers_1 = __webpack_require__(/*! timers */ "./node_modules/timers-browse
 const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
 const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
 const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
-const port = process.env.vreath_port || "57750";
-const ip = process.env.vreath_ip || "localhost";
+const port = peer_list_1.peer_list[0].port || "57750";
+const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
 /*const socket = new IO();
 socket.connect('http://'+ip+':'+port);*/
@@ -96849,7 +96870,6 @@ const app = new vue_1.default({
     router: router
 }).$mount('#app');
 
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/process/browser.js */ "./node_modules/process/browser.js")))
 
 /***/ }),
 

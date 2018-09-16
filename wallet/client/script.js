@@ -31,6 +31,15 @@ console.log(ip);
 /*const socket = new IO();
 socket.connect('http://'+ip+':'+port);*/
 exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
+localStorage.removeItem("data");
+localStorage.removeItem("apps");
+localStorage.removeItem("code");
+localStorage.removeItem("pool");
+localStorage.removeItem("chain");
+localStorage.removeItem("roots");
+localStorage.removeItem("candidates");
+localStorage.removeItem("unit_store");
+localStorage.removeItem("yet_data");
 const send_blocks = async () => {
     const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
     const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret));
@@ -39,9 +48,9 @@ const send_blocks = async () => {
     const last_key = BlockSet.search_key_block(exports.store.state.chain.slice());
     const last_micros = BlockSet.search_micro_block(exports.store.state.chain.slice(), last_key);
     const date = new Date();
-    if (!exports.store.state.check_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.state.secret) && last_micros.length <= con_1.max_blocks)
+    if (!exports.store.state.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.state.secret) && last_micros.length <= con_1.max_blocks)
         await index_1.send_micro_block(_.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), exports.store.state.unit_store);
-    else if (!exports.store.state.check_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
+    else if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
         await index_1.send_key_block(exports.store.state.chain.slice(), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots));
 };
 const compute_yet = async () => {
@@ -52,7 +61,8 @@ const compute_yet = async () => {
     }
     else if (data.type === "tx" && data.tx.length > 0) {
         const target = exports.store.state.yet_data[0].tx[0];
-        await index_1.tx_accept(target, exports.store.state.chain.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.unit_store));
+        //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
+        await index_1.tx_accept(_.copy(target), exports.store.state.chain.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.unit_store));
         const txs = exports.store.state.yet_data.filter((d) => d.type === "tx" && d.tx[0] != null && d.tx[0].hash != target.hash);
         const blocks = exports.store.state.yet_data.filter((d) => d.type === "block");
         const reduced = txs.concat(blocks);
@@ -60,21 +70,28 @@ const compute_yet = async () => {
         console.log(reduced);
         await send_blocks();
         return 1;
+        /*}
+        else{
+            const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
+            const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
+            const reduced = txs.concat(blocks);
+            const concated = reduced.concat(store.state.yet_data[0]);
+            store.commit("refresh_yet_data",concated);
+        }*/
     }
     else if (data.type === "block" && data.block.length > 0) {
         const block = data.block[0];
         console.log(block);
         const chain = exports.store.state.chain;
         if (block.meta.version >= con_1.compatible_version) {
-            const yet_blocks = exports.store.state.yet_data.filter((d) => d.type === "block");
-            const last_data = yet_blocks[yet_blocks.length - 1] || { type: 'block', tx: [], block: [] };
-            const last_yet = last_data.block[0] || chain[exports.store.state.chain.length - 1];
             if (block.meta.index > chain.length) {
+                exports.store.commit('checking', true);
                 exports.client.publish("/checkchain", "");
-                console.log(last_yet.meta.index);
             }
             else if (block.meta.index === chain.length) {
-                //if(store.state.check_mode&&block.meta.index>=store.state.check_index) store.commit('checking',false);
+                if (exports.store.state.replace_mode && block.meta.index >= exports.store.state.replace_index)
+                    exports.store.commit('replaceing', false);
+                const pre_chain_index = exports.store.state.chain.length;
                 await index_1.block_accept(block, chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
                 const txs = exports.store.state.yet_data.filter((d) => d.type === "tx");
                 const blocks = exports.store.state.yet_data.filter((d) => d.type === "block" && d.block[0] != null && d.block[0].meta.index != block.meta.index); /*.sort((a:Data,b:Data)=>{
@@ -85,15 +102,37 @@ const compute_yet = async () => {
                 exports.store.commit("refresh_yet_data", reduced);
                 const balance = await index_1.get_balance(exports.store.getters.my_address);
                 exports.store.commit("refresh_balance", balance);
-                await send_blocks();
-                const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
-                const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
-                await P.forEach(reqs_pure, async (pure) => {
-                    console.log("refresh!");
-                    const req_tx = TxSet.pure_to_tx(pure, block);
+                const new_chain_index = exports.store.state.chain.length;
+                if (new_chain_index === pre_chain_index + 1) {
+                    const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+                    const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
+                    reqs_pure.forEach(pure => {
+                        const full_tx = TxSet.pure_to_tx(pure, block);
+                        console.log(full_tx);
+                        exports.store.commit('add_not_refreshed', full_tx);
+                    });
+                    if (refs_pure.length > 0) {
+                        console.log(refs_pure);
+                        exports.store.commit('del_not_refreshed', refs_pure.map(pure => pure.meta.data.request));
+                    }
+                }
+                if (exports.store.state.not_refreshed_tx.length > 0 && !exports.store.state.replace_mode) {
+                    const req_tx = exports.store.state.not_refreshed_tx[0];
+                    const chain = exports.store.state.chain.slice();
+                    const index = (() => {
+                        for (let block of chain.slice().reverse()) {
+                            const txs = block.txs.concat(block.natives).concat(block.units);
+                            for (let tx of txs) {
+                                if (tx.hash === req_tx.hash)
+                                    return block.meta.index;
+                            }
+                        }
+                        return 0;
+                    })();
                     const code = exports.store.state.code[req_tx.meta.data.token];
-                    await index_1.send_refresh_tx(_.copy(exports.store.state.roots), exports.store.state.secret, req_tx, block.meta.index, code, exports.store.state.chain.slice());
-                });
+                    await index_1.send_refresh_tx(_.copy(exports.store.state.roots), exports.store.state.secret, req_tx, index, code, exports.store.state.chain.slice());
+                    await send_blocks();
+                }
                 /*if(refs_pure.length>0){
                     await P.forEach(refs_pure, async (pure:T.TxPure)=>{
                         const req = pure.meta.data.request;
@@ -107,9 +146,11 @@ const compute_yet = async () => {
                     const ref_tx = TxSet.pure_to_tx(u, block);
                     const req_tx = TxSet.find_req_tx(ref_tx, chain);
                     const raw = req_tx.raw || TxSet.empty_tx().raw;
-                    const this_units = JSON.parse(raw.raw[2]) || [];
+                    const this_units = JSON.parse(raw.raw[2] || "[]") || [];
                     return result.concat(this_units);
                 }, []);
+                if (bought_units.some(unit => unit.request === exports.store.state.now_buying))
+                    exports.store.commit('unit_buying', "");
                 const new_unit_store = _.new_obj(exports.store.state.unit_store, (store) => {
                     bought_units.forEach(unit => {
                         const com = store[unit.request] || [];
@@ -121,10 +162,10 @@ const compute_yet = async () => {
                 exports.store.commit("refresh_unit_store", new_unit_store);
                 const unit_store_values = Object.values(exports.store.state.unit_store);
                 const units_sum = unit_store_values.reduce((sum, us) => sum + us.length, 0);
-                if (unit_store_values.length > 0) {
+                if (unit_store_values.length > 0 && exports.store.state.now_buying === "" && !exports.store.state.replace_mode) {
+                    const reversed_chain = exports.store.state.chain.slice().reverse();
                     const refreshed = (() => {
                         let result = [];
-                        const reversed_chain = exports.store.state.chain.slice().reverse();
                         for (let block of reversed_chain) {
                             for (let tx of block.txs.concat(block.natives).concat(block.units)) {
                                 if (tx.meta.kind === "refresh") {
@@ -141,8 +182,11 @@ const compute_yet = async () => {
                         }
                         return result;
                     })();
+                    const validatorPub = BlockSet.search_key_block(reversed_chain.slice().reverse()).meta.validatorPub;
+                    const validator_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(validatorPub));
                     const buy_units = index_1.random_chose(refreshed, 10);
                     await index_1.unit_buying(exports.store.state.secret, buy_units.slice(), _.copy(exports.store.state.roots), exports.store.state.chain.slice());
+                    await send_blocks();
                 }
                 return 1;
             }
@@ -159,6 +203,7 @@ const compute_yet = async () => {
     }
 };
 exports.client.subscribe('/data', async (data) => {
+    console.log('data!');
     exports.store.commit('push_yet_data', data);
 });
 /*client.subscribe('/block',async (block:T.Block)=>{
@@ -195,15 +240,18 @@ exports.client.subscribe('/replacechain', async (chain) => {
     try {
         console.log("replace:");
         console.log(chain);
-        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
-        const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
-        const unit_state = await S_Trie.get(CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret)));
-        console.log(await S_Trie.filter());
-        if (chain.length === 1 && unit_state != null && unit_state.amount > 0)
-            await index_1.send_key_block(JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots));
+        if (exports.store.state.check_mode) {
+            await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
+            exports.store.commit('checking', false);
+            const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
+            const unit_state = await S_Trie.get(CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret)));
+            console.log(await S_Trie.filter());
+            if (chain.length === 1 && unit_state != null && unit_state.amount > 0)
+                await index_1.send_key_block(JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots));
+        }
     }
     catch (e) {
-        console.log(e);
+        throw new Error(e);
     }
 });
 vue_1.default.use(vuex_1.default);
@@ -229,14 +277,6 @@ const codes = {
     "native": "const main = () => {};",
     "unit": "const main = () => {};"
 };
-localStorage.removeItem("data");
-localStorage.removeItem("apps");
-localStorage.removeItem("code");
-localStorage.removeItem("pool");
-localStorage.removeItem("chain");
-localStorage.removeItem("roots");
-localStorage.removeItem("candidates");
-localStorage.removeItem("unit_store");
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
 exports.store = new vuex_1.default.Store({
     state: {
@@ -250,9 +290,12 @@ exports.store = new vuex_1.default.Store({
         unit_store: JSON.parse(localStorage.getItem("unit_store") || JSON.stringify({})),
         secret: localStorage.getItem("secret") || CryptoSet.GenerateKeys(),
         balance: 0,
-        yet_data: [],
+        yet_data: JSON.parse(localStorage.getItem("yet_data") || "[]"),
         check_mode: false,
-        check_index: 0
+        replace_mode: false,
+        replace_index: 0,
+        not_refreshed_tx: [],
+        now_buying: ""
     },
     mutations: {
         add_app(state, obj) {
@@ -300,18 +343,33 @@ exports.store = new vuex_1.default.Store({
         },
         push_yet_data(state, data) {
             state.yet_data.push(data);
+            localStorage.setItem('yet_data', state.yet_data);
         },
         unshift_yet_data(state, data) {
             state.yet_data.unshift(data);
+            localStorage.setItem('yet_data', state.yet_data);
         },
         refresh_yet_data(state, data) {
             state.yet_data = data.slice();
+            localStorage.setItem('yet_data', state.yet_data);
         },
         checking(state, bool) {
             state.check_mode = bool;
         },
-        check_limit(state, index) {
-            state.check_index = index;
+        replaceing(state, bool) {
+            state.replace_mode = bool;
+        },
+        rep_limit(state, index) {
+            state.replace_index = index;
+        },
+        add_not_refreshed(state, tx) {
+            state.not_refreshed_tx = state.not_refreshed_tx.concat(tx);
+        },
+        del_not_refreshed(state, hashes) {
+            state.not_refreshed_tx = state.not_refreshed_tx.filter((tx) => hashes.indexOf(tx.hash) === -1);
+        },
+        buying_unit(state, hash) {
+            state.now_buying = hash;
         }
     },
     getters: {
@@ -407,19 +465,29 @@ const Wallet = {
     created: async function () {
         const gen_S_Trie = index_1.trie_ins("");
         await P.forEach(gen.state, async (s) => {
-            if (s.kind === "state")
-                await gen_S_Trie.put(s.owner, s);
-            else
-                await gen_S_Trie.put(s.token, s);
+            await gen_S_Trie.put(s.owner, s);
         });
+        exports.store.commit('checking', true);
         exports.client.publish("/checkchain", "");
         const balance = await index_1.get_balance(this.from);
         console.log(balance);
         this.$store.commit("refresh_balance", balance);
+        exports.client.bind('transport:down', () => {
+            console.log('lose connection');
+            localStorage.removeItem("data");
+            localStorage.removeItem("apps");
+            localStorage.removeItem("code");
+            localStorage.removeItem("pool");
+            localStorage.removeItem("chain");
+            localStorage.removeItem("roots");
+            localStorage.removeItem("candidates");
+            localStorage.removeItem("unit_store");
+            localStorage.removeItem("yet_data");
+        });
         timers_1.setInterval(async () => {
             await compute_yet();
             console.log('yet:');
-            console.log(exports.store.state.yet_data);
+            console.log(exports.store.state.yet_data.filter(data => data.block.length > 0));
         }, con_1.block_time);
         /* setInterval(async ()=>{
              pre_length = new_length;
@@ -480,7 +548,8 @@ const Wallet = {
         remit: async function () {
             try {
                 console.log("request");
-                await index_1.send_request_tx(this.$store.state.secret, this.to, this.amount, _.copy(this.$store.state.roots), this.$store.state.chain.slice());
+                await index_1.send_request_tx(this.$store.state.secret, "issue", con_1.native, [this.from, this.to], ["remit", JSON.stringify([this.amount])], [], _.copy(this.$store.state.roots), this.$store.state.chain.slice());
+                alert('remit!');
             }
             catch (e) {
                 console.log(e);

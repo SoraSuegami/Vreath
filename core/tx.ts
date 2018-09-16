@@ -118,15 +118,12 @@ export const refreshed_check = (base:string[],index:number,tx_hash:string,Locati
 }
 
 const state_check = (state:T.State,token_name_maxsize:number)=>{
-  const hash_size = Buffer.from(_.toHash("")).length;
-  const copy_state = state;
-  return _.address_form_check(copy_state.owner,token_name_maxsize) || new BigNumber(copy_state.amount).isLessThan(0) ||
-  Object.entries(copy_state.data).some(([val,key])=>{return new BigNumber(Buffer.from(key).length).isGreaterThan(hash_size) || new BigNumber(Buffer.from(val).length).isGreaterThan(hash_size)}) ||
-  copy_state.product.some(pro=>new BigNumber(Buffer.from(pro).length).isGreaterThan(token_name_maxsize));
+  return _.address_form_check(state.owner,token_name_maxsize) || new BigNumber(state.amount).isLessThan(0) ||
+  state.product.some(pro=>new BigNumber(Buffer.from(pro).length).isGreaterThan(token_name_maxsize));
 }
 
 const base_declaration_check = (target:T.State,bases:string[],StateData:T.State[])=>{
-  const getted = StateData.filter(s=>{return s.kind==="state"&&s.owner===target.owner})[0];
+  const getted = StateData.filter(s=>{return s.owner===target.owner})[0];
   return getted!=null && bases.indexOf(target.owner)===-1;
 }
 
@@ -160,18 +157,21 @@ const output_check = (type:T.TxTypes,base_states:T.State[],output_raw:string[],t
       return arr.concat(JSON.parse(o));
     },[]);
     const bases = base_states.map(s=>s.owner);
-    const nonce_check = base_states.some((b,i)=>b.nonce+1!=new_states[i].nonce);
+    const nonce_check = base_states.some((b,i)=>b.nonce>new_states[i].nonce);
     if(new_states.some((s:T.State)=>{return state_check(s,token_name_maxsize)||base_declaration_check(s,bases,StateData)})||nonce_check) return true;
-    const pre_amount = base_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
-    const new_amount = new_states.reduce((sum,s)=>{return new BigNumber(sum).plus(s.amount)},new BigNumber(0));
-    return (type==="issue"&&new BigNumber(pre_amount).isGreaterThanOrEqualTo(new_amount)) || (type==="change"&&pre_amount!=new_amount) || (type==="scrap"&&new BigNumber(pre_amount).isLessThanOrEqualTo(new_amount));
+    return false;
+    /*const pre_amount = base_states.reduce((sum,s)=>new BigNumber(sum).plus(s.amount).toNumber(),0);
+    const new_amount = new_states.reduce((sum,s)=>new BigNumber(sum).plus(s.amount).toNumber(),0);
+    console.log(pre_amount);
+    console.log(new_amount)
+    return (type==="issue"&&new BigNumber(pre_amount).isGreaterThan(new_amount)) || (type==="change"&&!(new BigNumber(pre_amount).isEqualTo(new_amount))) || (type==="scrap"&&new BigNumber(pre_amount).isLessThan(new_amount));*/
   }
 }
 
 const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller_hash:string):T.TxMeta=>{
   for(let block of chain){
     if(block.meta.kind==="key") continue;
-    for(let tx of block.txs){
+    for(let tx of block.txs.concat(block.natives).concat(block.units)){
       if(tx.meta.kind=="request"&&tx.meta.purehash===hash&&tx.meta[order].flag===true&&tx.meta[order].hash===caller_hash) return tx.meta;
     }
   }
@@ -179,12 +179,18 @@ const search_related_tx = (chain:T.Block[],hash:string,order:'pre'|'next',caller
 }
 
 const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next',result:T.TxMeta[]=[]):T.TxMeta[]=>{
-  if(tx.pre.flag===false) return result;
-  const ori_order = order;
-  if(order=='pre') order = 'next';
-  else order = 'pre';
-  const searched = search_related_tx(chain,tx.pre.hash,order,tx.purehash);
-  if(searched===empty_tx_pure().meta||searched.kind!="request") return [];
+  if(tx[order].flag===false) return result;
+  const ori_order = (()=>{
+    if(order==='pre') return 'pre';
+    else return 'next'
+  })();
+  const count_order = (()=>{
+    if(order==='pre') return 'next';
+    else return 'pre'
+  })();
+  console.log(ori_order);
+  const searched = search_related_tx(chain,tx[ori_order].hash,count_order,tx.purehash);
+  if(searched.purehash===empty_tx_pure().meta.purehash||searched.kind!="request") return result;
   const new_pres = result.concat(searched);
   return list_up_related(chain,searched,ori_order,new_pres);
 }
@@ -233,6 +239,75 @@ const search_related_raw = (chain:T.Block[],hash:string,order:'pre'|'next',calle
     }
   }
   return empty_tx().raw;
+}
+
+const compute_new_state = (state_raw:string[],solvency:string,payee:string,fee:number,gas:number)=>{
+  const output_states:T.State[] = state_raw.map(s=>JSON.parse(s||JSON.stringify(StateSet.CreateState())));
+  const output_owners = output_states.map(o=>o.owner);
+  const outputed = output_states.map(s=>{
+    const i = output_owners.indexOf(s.owner);
+    if(i!=-1) return output_states[i];
+    else return s;
+  });
+  const solvencied = outputed.map(s=>{
+    if(s.owner===solvency){
+      return _.new_obj(
+        s,
+        s=>{
+          s.amount = new BigNumber(s.amount).minus(gas).toNumber();
+          return s;
+        }
+      )
+    }
+    else return s;
+  });
+  const payed = solvencied.map(s=>{
+    if(s.owner===payee){
+      return _.new_obj(
+        s,
+        s=>{
+          s.amount = new BigNumber(s.amount).plus(gas).minus(fee).toNumber();
+          return s;
+        }
+      )
+    }
+    else return s;
+  });
+  const issued = payed.map(s=>{
+    const issue = Number(s.data.issue||"0");
+    return _.new_obj(
+      s,
+      s=>{
+        s.amount = new BigNumber(s.amount).plus(issue).toNumber();
+        s.data.issue = (0).toFixed(18);
+        return s;
+      }
+    )
+  });
+  console.log(issued);
+  const token_changed = issued.map(s=>{
+    if(s.kind!="token") return s;
+    const i = output_owners.indexOf(s.owner);
+    if(i===-1) return s;
+    const change = output_states[i];
+    if(change.kind!="token") return s;
+    return _.new_obj(
+      s,
+      s=>{
+        s.nonce += change.nonce;
+        s.deposited = new BigNumber(s.deposited).plus(change.deposited).toNumber();
+        s.issued = new BigNumber(s.issued).plus(change.issued).toNumber();
+        s.committed = s.committed.concat(change.committed);
+        return s;
+      }
+    )
+  })
+  const pretty = token_changed.map((s,i)=>{
+    const index = output_owners.indexOf(s.owner);
+    if(index!=i) return issued[index];
+    else return s;
+  });
+  return pretty;
 }
 
 /*const ValidNative = (req_tx:T.Tx,ref_tx:T.Tx,chain:T.Block[],StateData:T.State[])=>{
@@ -367,7 +442,7 @@ export const ValidTxBasic = (tx:T.Tx,my_version:number)=>{
     console.log("invalid timestamp");
     return false;
   }
-  else if(sign.length===0||sign.some((s,i)=>{return _.sign_check(hash,s,pub_key[i])})){
+  else if(sign.length===0||sign.some((s,i)=>_.sign_check(hash,s,pub_key[i]))){
     console.log("invalid signature");
     return false;
   }
@@ -398,7 +473,7 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   })[0];
 
   const base_states = base.map(key=>{
-    return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
+    return StateData.filter(s=>{return s.owner===key})[0] || StateSet.CreateState();
   });
 
   if(!ValidTxBasic(tx,my_version)){
@@ -408,7 +483,7 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
     console.log("invalid kind");
     return false;
   }
-  else if(solvency_state==null||hashed_pub_check(solvency_state,pub_key)||requested_check([solvency],LocationData)){
+  else if(solvency_state==null||hashed_pub_check(solvency_state,pub_key)){
     console.log("invalid solvency");
     return false;
   }
@@ -422,10 +497,6 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   }
   else if(input!=_.ObjectHash(raw_data)){
     console.log("invalid input hash");
-    return false;
-  }
-  else if((token===native||token===unit)&&base.length!=1){
-    console.log("invalid natives txs");
     return false;
   }
   else{
@@ -453,15 +524,7 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
   const pow_target = block.meta.pow_target;
   const req_tx = _.find_tx(chain,request);
 
-  const req_raw = (()=>{
-    const txs_index = block.txs.indexOf(req_tx);
-    if(txs_index!=-1) return block.raws[txs_index];
-    const natives_index = block.natives.indexOf(req_tx);
-    if(natives_index!=-1) return block.raws[natives_index];
-    const units_index = block.units.indexOf(req_tx);
-    if(units_index!=-1) return block.raws[units_index];
-    return empty_tx().raw;
-  })()
+  const req_raw = block.raws[block.txs.concat(block.natives).concat(block.units).map(tx=>tx.hash).indexOf(req_tx.hash)] || empty_tx().raw;
 
   const req_tx_full:T.Tx = {
     hash:req_tx.hash,
@@ -471,14 +534,19 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
 
   const token = req_tx.meta.data.token;
 
-  const payee_state:T.State = StateData.filter(s=>{
-    return s.kind==="state"&&s.owner===payee&&s.token===native&&new BigNumber(s.amount).plus(req_tx.meta.data.gas).isGreaterThanOrEqualTo(_.tx_fee(tx))
-  })[0];
+  const fee = _.tx_fee(tx);
+
+  const new_states_raw:string[] = (()=>{
+    if(req_tx.meta.data.type==="create") return output_raw.concat(compute_new_state([],req_tx.meta.data.solvency,payee,_.tx_fee(tx),req_tx.meta.data.gas).map(s=>JSON.stringify(s)));
+    else return compute_new_state(output_raw,req_tx.meta.data.solvency,payee,fee,req_tx.meta.data.gas).map(s=>JSON.stringify(s));
+  })();
+
+  const payee_state:T.State = StateData.filter(s=>s.kind==="state"&&s.owner===payee&&s.token===native&&new BigNumber(s.amount).plus(req_tx.meta.data.gas).minus(fee).isGreaterThanOrEqualTo(0))[0];
 
 
 
   const base_states:T.State[] = req_tx.meta.data.base.map(key=>{
-    return StateData.slice().filter(s=>{return s.kind==="state"&&s.owner===key})[0] || StateSet.CreateState();
+    return StateData.slice().filter(s=>{return s.owner===key})[0] || StateSet.CreateState();
   });
 
 
@@ -513,10 +581,6 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
     console.log("base states are already refreshed");
     return false;
   }
-  else if(refreshed_check([req_tx.meta.data.solvency],index,request,LocationData)){
-    console.log("invalid solvency");
-    return false;
-  }
   else if(payee_state==null||hashed_pub_check(payee_state,pub_key)){
     console.log("invalid payee");
     return false;
@@ -525,7 +589,7 @@ export const ValidRefreshTx = (tx:T.Tx,chain:T.Block[],my_version:number,native:
     console.log("invalid output hash");
     return false;
   }
-  else if(output!=_.ObjectHash(base_states.map(s=>JSON.stringify(s)))&&output_check(req_tx.meta.data.type,base_states,output_raw,token_name_maxsize,StateData)){
+  else if(output!=_.ObjectHash(base_states.map(s=>JSON.stringify(s)))&&output_check(req_tx.meta.data.type,base_states,new_states_raw,token_name_maxsize,StateData)){
     console.log("invalid output");
     return false;
   }
@@ -603,6 +667,115 @@ export const CreateRequestTx = (pub_key:string[],solvency:string,gas:number,type
   return tx;
 }
 
+export const native_code = (StateData:T.State[],req_tx:T.Tx,native:string)=>{
+  const base = req_tx.meta.data.base;
+  const not_changed = StateData;
+  if(req_tx.meta.data.token!=native) return not_changed;
+  const type = req_tx.raw.raw[0];
+  switch(type){
+    case "remit":
+      if(req_tx.meta.data.type!="issue") return not_changed;
+      const remiter = req_tx.meta.data.base[0];
+      const remiter_state = StateData.filter(s=>s.kind==="state"&&s.token===native&&s.owner===remiter)[0];
+      const receivers = req_tx.meta.data.base.slice(1);
+      const amounts:number[] = JSON.parse(req_tx.raw.raw[1]||"[]").map((str:string)=>Number(str));
+      const sum = amounts.reduce((s,a)=>s+a,0);
+      const fee = Number(remiter_state.data.fee||"0");
+      if(remiter_state==null||amounts.some(n=>new BigNumber(n).isLessThan(0))||new BigNumber(remiter_state.amount).minus(sum).minus(fee).isLessThan(0)) return not_changed;
+
+      const remited = StateData.map(s=>{
+        if(s.kind!="state"||s.token!=native||s.owner!=remiter) return s;
+        return _.new_obj(
+          s,
+          (s)=>{
+            s.nonce ++;
+            s.amount = new BigNumber(s.amount).minus(sum).toNumber();
+            return s;
+          }
+        )
+      });
+      const recieved = remited.map(s=>{
+        const index = receivers.indexOf(s.owner);
+        if(s.kind!="state"||s.token!=native||index===-1) return s;
+        return _.new_obj(
+          s,
+          s=>{
+            s.nonce ++;
+            s.amount = new BigNumber(s.amount).plus(amounts[index]).toNumber();
+            return s;
+          }
+        )
+      });
+      return recieved;
+
+    default: return not_changed;
+  }
+}
+
+export const unit_code = (StateData:T.State[],req_tx:T.Tx,pre_tx:T.Tx,native:string,unit:string,chain:T.Block[])=>{
+  const base = req_tx.meta.data.base;
+  const not_changed = StateData;
+  if(req_tx.meta.data.token!=unit||req_tx.meta.data.type!="issue"&&req_tx.raw.raw[0]!="buy") return not_changed;
+  const inputs = req_tx.raw.raw;
+  const pre_unit = StateData.filter(s=>{return s.kind==="token"&&s.token===unit})[0];
+  const remiter = req_tx.meta.data.address;
+  const units:T.Unit[] = JSON.parse(inputs[1]);
+  const unit_check = units.some(u=>{
+    const unit_ref_tx = (()=>{
+      for(let block of chain.slice().reverse()){
+        for(let tx of block.txs.concat(block.natives).concat(block.units)){
+          if(tx.meta.kind==="refresh"&&tx.meta.data.request===u.request&&tx.meta.data.index===u.index) return tx;
+        }
+      }
+      return empty_tx_pure();
+    })();
+    return unit_ref_tx.meta.data.output!=u.output || pre_unit.committed.indexOf(_.ObjectHash(u))!=-1;
+  });
+  if(unit_check||req_tx.meta.data.base[0]!=remiter) return not_changed;
+
+  const hashes = units.map(u=>_.ObjectHash(u));
+  const unit_address = units.map(u=>u.payee);
+  const unit_sum = units.length;
+
+  const unit_ids = unit_address.map(add=>add.split(":")[2]||"");
+  const native_ids = pre_tx.meta.data.base.splice(1).map(add=>add.split(":")[2]||"");
+  const price_sum = units.reduce((sum,u)=>sum+u.unit_price,0);
+  const native_amounts:number[] = JSON.parse(pre_tx.raw.raw[1]||"[]").map((str:string)=>Number(str));
+  const native_sum = native_amounts.reduce((s,a)=>s+a,0);
+  if(_.ObjectHash(pre_tx.meta.data.base.splice(1))!=_.ObjectHash(unit_address)||pre_tx.meta.data.token!=native||pre_tx.meta.data.type!="issue"||pre_tx.raw.raw[0]!="remit"||_.toHash(_.reduce_pub(req_tx.meta.data.pub_key))!=_.toHash(_.reduce_pub(pre_tx.meta.data.pub_key))||_.ObjectHash(unit_ids)!=_.ObjectHash(native_ids)||!(new BigNumber(price_sum).isEqualTo(native_sum))) return not_changed;
+
+  const unit_bought = StateData.map(s=>{
+    if(s.kind==="state"&&s.token===unit&&s.owner===remiter){
+      return _.new_obj(
+        s,
+        (s)=>{
+          s.nonce ++;
+          s.amount = new BigNumber(s.amount).plus(unit_sum).toNumber();
+          return s;
+        }
+      )
+    }
+    else return s;
+  });
+  const unit_token = unit_bought.map(s=>{
+    if(s.kind==="token"&&s.token===unit){
+      return _.new_obj(
+        s,
+        (state)=>{
+          state.nonce = 1;
+          state.issued = unit_sum
+          state.committed = hashes
+          return state;
+        }
+      )
+    }
+    else return s;
+  });
+  return unit_token;
+
+}
+
+
 export const CreateRefreshTx = (version:number,unit_price:number,pub_key:string[],target:number,feeprice:number,request:string,index:number,payee:string,output_raw:string[],log_raw:string[],chain:T.Block[])=>{
   const req_tx:T.TxMeta = _.find_tx(chain,request).meta;
   const token = req_tx.data.token;
@@ -659,6 +832,7 @@ export const SignTx = (tx:T.Tx,my_private:string,my_pub:string)=>{
   const pub_keys = tx.meta.data.pub_key;
   const index = pub_keys.indexOf(my_pub);
   if(index===-1) return tx;
+  console.log(index);
   const sign = CryptoSet.SignData(tx.hash,my_private);
   return _.new_obj(
     tx,
@@ -735,55 +909,61 @@ export const AcceptRequestTx = (tx:T.Tx,validator:string,index:number,StateData:
     if(index===-1) return s;
     return after[index];
   });
+  const StateData_sol = StateData_added.map(s=>{
+    if(s.owner!=tx.meta.data.solvency) return s;
+    return _.new_obj(
+      s,
+      s=>{
+        if(s.data.fee==null) s.data.fee = fee.toFixed(18);
+        else s.data.fee = new BigNumber(s.data.fee).plus(fee).toFixed(18);
+        return s;
+      }
+    )
+  });
 
-  const LocationData_added = tx.meta.data.base.reduce((loc:T.Location[],key):T.Location[]=>{
-    const new_loc:T.Location = {
-      address:key,
-      state:"already",
-      index:index,
-      hash:tx.hash
-    };
-    const mapped =  LocationData.map(l=>{
-      if(l.address===key) return new_loc;
-      else return l;
-    });
-    if(_.ObjectHash(mapped)===_.ObjectHash(LocationData)) return LocationData.concat(new_loc);
-    else return mapped;
-  },LocationData);
+  const LocationData_added = LocationData.map(l=>{
+    const index = tx.meta.data.base.indexOf(l.address);
+    if(index!=-1){
+      return _.new_obj(
+        l,
+        l=>{
+          l.state = "yet";
+          return l;
+        }
+      );
+    }
+    else return l;
+  });
 
-  return [StateData_added,LocationData_added];
+  return [StateData_sol,LocationData_added];
 }
 
 export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,native:string,unit:string,StateData:T.State[],LocationData:T.Location[]):[T.State[],T.Location[]]=>{
   const req_tx = find_req_tx(ref_tx,chain);
+  const solvency = req_tx.meta.data.solvency;
+  const payee = ref_tx.meta.data.payee;
+  const tx_fee = _.tx_fee(ref_tx);
+  const gas = req_tx.meta.data.gas;
+  const solvency_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===solvency})[0] || StateSet.CreateState(0,solvency,native,0,{},[]);
+  const payee_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===payee})[0] || StateSet.CreateState(0,payee,native,0,{},[]);
+  const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,native,0,{},[]);
+  const pay_states = PayStates(solvency_state,payee_state,validator_state,gas,tx_fee);
+  const pay_owners = pay_states.map(p=>p.owner);
+  const payed = StateData.map(s=>{
+    const index = pay_owners.indexOf(s.owner);
+    if(index!=-1) return pay_states[index];
+    else return s;
+  });
   if(req_tx.meta.data.type==="create"){
     const token_info:T.State = JSON.parse(req_tx.raw.raw[0]);
-    const StateData_create = StateData.map(s=>{
+    const created = payed.map(s=>{
       if(s.kind==="token"&&s.token===token_info.token) return token_info;
       else return s;
     });
-    return [StateData_create,LocationData];
-  }
-  else if(req_tx.meta.data.type==="update"){
-    const token_info:T.State = JSON.parse(req_tx.raw.raw[0]);
-    const pre_token = StateData.filter(s=>{return s.kind==="token"&&s.token===token_info.token})[0];
-    const new_token:T.State = _.new_obj(
-      pre_token,
-      (token)=>{
-        token.nonce ++;
-        token.issued = new BigNumber(token.issued).plus(token_info.issued).toNumber();
-        token.committed = token.committed.concat(token_info.committed);
-        return token;
-      }
-    );
-    const StateData_update = StateData.map(s=>{
-      if(s.kind==="token"&&s.token===token_info.token) return new_token;
-      else return s;
-    });
-    return [StateData_update,LocationData];
+    return [created,LocationData];
   }
   else{
-    const token_info = StateData.filter(s=>{return s.kind==="token"&&s.token===req_tx.meta.data.token})[0];
+    /*const token_info = StateData.filter(s=>{return s.kind==="token"&&s.token===req_tx.meta.data.token})[0];
     const base_states:T.State[] = req_tx.meta.data.base.map((key:string)=>{
       return StateData.filter(s=>{return s.kind==="state"&&s.owner===key})[0]
     });
@@ -799,11 +979,46 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
     );
     const solvency_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===req_tx.meta.data.solvency})[0] || StateSet.CreateState(0,req_tx.meta.data.solvency,native,0,{},[]);
     const payee_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===ref_tx.meta.data.payee})[0] || StateSet.CreateState(0,ref_tx.meta.data.payee,native,0,{},[]);
-    const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,native,0,{},[]);
-    const tx_fee = _.tx_fee(ref_tx);
-    const payed = PayStates(solvency_state,payee_state,validator_state,req_tx.meta.data.gas,tx_fee);
-    const payed_owners = payed.map(s=>s.owner);
-    const StateData_payed = StateData.map(s=>{
+    const validator_state = StateData.filter(s=>{return s.kind==="state"&&s.owner===validator})[0] || StateSet.CreateState(0,validator,native,0,{},[]);*/
+    /*const payed = PayStates(solvency_state,payee_state,validator_state,req_tx.meta.data.gas,tx_fee);
+    const payed_owners = payed.map(s=>s.owner);*/
+    const output_states:T.State[] = ref_tx.raw.raw.map(s=>JSON.parse(s||JSON.stringify(StateSet.CreateState())));
+    const output_owners = output_states.map(o=>o.owner);
+    const outputed = payed.map(s=>{
+      if(s.kind==="state"){
+        const i = output_owners.indexOf(s.owner);
+        if(i!=-1) return output_states[i];
+        else return s;
+      }
+      else{
+        const i = output_owners.indexOf(s.owner);
+        if(i===-1) return s;
+        const change = output_states[i];
+        if(change.kind!="token") return s;
+        return _.new_obj(
+          s,
+          s=>{
+            s.nonce += change.nonce;
+            s.deposited = new BigNumber(s.deposited).plus(change.deposited).toNumber();
+            s.issued = new BigNumber(s.issued).plus(change.issued).toNumber();
+            s.committed = s.committed.concat(change.committed);
+            return s;
+          }
+        )
+      }
+    });
+    const issued = outputed.map(s=>{
+      const issue = s.data.issue || 0;
+      return _.new_obj(
+        s,
+        s=>{
+          s.amount = new BigNumber(s.amount).plus(issue).toNumber();
+          s.data.issue = (0).toFixed(18);
+          return s;
+        }
+      )
+    });
+    /*const StateData_payed = StateData.map(s=>{
       const index = payed_owners.indexOf(s.owner);
       if(index===-1) return s;
       return payed[index];
@@ -814,7 +1029,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       if(s.kind==="token"&&s.token===req_tx.meta.data.token) return new_token_info;
       else return s;
     });
-    const owners = StateData_deleted.map(s=>s.owner);
+    const owners = StateData_payed.map(s=>s.owner);
     const StateData_added:T.State[] = ref_tx.raw.raw.reduce((states,val)=>{
       const state:T.State = JSON.parse(val);
       if(state==null) return states;
@@ -823,21 +1038,22 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
         return states.map((val,i)=>{if(index===i)return state; else return val});
       }
       else return states.concat(state);
-    },StateData_deleted);
-    const loc_addresses = LocationData.map(l=>l.address);
-    const LocationData_added = req_tx.meta.data.base.reduce((locs,key)=>{
-      const index = loc_addresses.indexOf(key);
-      const pre_loc = locs[index];
-      const new_loc = _.new_obj(
-        pre_loc,
-        loc=>{
-          loc.state = "yet";
-          return loc;
-        }
-      );
-      return locs.map((val,i)=>{if(index===i)return new_loc; else return val;})
-    },LocationData);
-    if(req_tx.meta.data.token===native&&req_tx.meta.data.type==="scrap"&&req_tx.raw.raw[0]==="remit"){
+    },StateData_deleted);*/
+    const added = LocationData.map(l=>{
+      const index = output_owners.indexOf(l.address);
+      if(index!=-1){
+        return _.new_obj(
+          l,
+          l=>{
+            l.state = "yet";
+            return l;
+          }
+        );
+      }
+      else return l;
+    });
+    return [issued,added];
+    /*if(req_tx.meta.data.token===native&&req_tx.meta.data.type==="scrap"&&req_tx.raw.raw[0]==="remit"){
       const remiter_state = StateData.filter(s=>s.kind==="state"&&s.token===native&&s.owner===req_tx.meta.data.address)[0];
       const receiver = req_tx.raw.raw[1];
       const amount = -1*Number(req_tx.raw.raw[2]);
@@ -912,7 +1128,7 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
         ).toNumber()
       ).toNumber(),1).toNumber());
       const unit_sum = unit_values.reduce((sum,u)=>new BigNumber(sum).plus(u).toNumber(),0);*/
-      const unit_sum = units.length
+      /*const unit_sum = units.length
       const StateData_unit_bought = StateData_added.map(s=>{
         if(s.kind==="state"&&s.token===unit&&s.owner===unit_address){
           return _.new_obj(
@@ -993,9 +1209,8 @@ export const AcceptRefreshTx = (ref_tx:T.Tx,chain:T.Block[],validator:string,nat
       const reduced_time = unit_waitings.reduce((sum,time)=>BigNumber.maximum(new BigNumber(sum).minus(time).toNumber(),0).toNumber(),waiting_states);
       const firsters = unit_waitings.filter(time=>new BigNumber(time).isLessThanOrEqualTo(0));
       const new_wait_states = new BigNumber(waiting_states).plus(firsters.length).toNumber();*/
-      return [StateData_unit_token,LocationData_added];
-    }
-    return [StateData_added,LocationData_added];
+      /*return [StateData_unit_token,LocationData_added];
+    }*/
   }
 }
 

@@ -24,7 +24,7 @@ export const CreateToken = (nonce=0,token="",issued=0,deposited=0,committed:stri
     kind:"token",
     nonce:nonce,
     token:token,
-    owner:"",
+    owner:"Vr:"+token+":"+_.toHash(''),
     amount:0,
     data:{},
     product:[""],

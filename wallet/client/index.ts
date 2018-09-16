@@ -11,11 +11,8 @@ import { Tx_to_Pool } from '../../core/tx_pool';
 import {store} from './script'
 import level from 'level-browserify'
 import * as gen from '../../genesis/index';
-import {IO} from 'rxjs-socket.io'
 import { RunVM } from '../../core/code';
 import { client } from './script'
-import BigNumber from '../../node_modules/bignumber.js';
-import { block } from '../../genesis_arc2';
 
 
 
@@ -32,10 +29,6 @@ export const trie_ins = (root:string)=>{
 
 const output_keys = (tx:T.Tx)=>{
     if(tx.meta.kind==="request") return [];
-    else if(tx.meta.data.type==="create"||tx.meta.data.type==="update"){
-        const token:T.State = JSON.parse(tx.raw.raw[0]);
-        return [token.token];
-    }
     const states:T.State[] = tx.raw.raw.map(r=>JSON.parse(r));
     return states.map(s=>s.owner);
 }
@@ -55,7 +48,11 @@ export const states_for_tx = async (tx:T.Tx,chain:T.Block[],S_Trie:Trie)=>{
     const base = tx.meta.data.base;
     const base_states:T.State[] = await P.reduce(base, async (result:T.State[],key:string)=>{
         const getted:T.State = await S_Trie.get(key);
-        if(getted==null) return result;
+        if(getted==null){
+            const token = key.split(':')[1];
+            //if(_.address_form_check(key,token_name_maxsize)) return result.concat(StateSet.CreateToken(0,token));
+            return result.concat(StateSet.CreateState(0,key,token,0));
+        }
         else return result.concat(getted);
     },[]);
     const outputs = output_keys(tx);
@@ -70,7 +67,9 @@ export const states_for_tx = async (tx:T.Tx,chain:T.Block[],S_Trie:Trie)=>{
         if(getted==null) return result.concat(StateSet.CreateState(0,key,native,0));
         else return result.concat(getted);
     },[]);
+    console.log(pay_states);
     const concated = base_states.concat(output_states).concat(pay_states);
+    console.log(concated);
     const hashes = concated.map(state=>_.ObjectHash(state));
     return concated.filter((val,i)=>hashes.indexOf(_.ObjectHash(val))===i);
 }
@@ -80,11 +79,25 @@ export const locations_for_tx = async (tx:T.Tx,chain:T.Block[],L_Trie:Trie)=>{
         if(tx.meta.kind==="request") return tx;
         else return TxSet.find_req_tx(tx,chain);
     })();
-    const result:T.Location[] = Object.values(await L_Trie.filter(key=>{
+    const keys = target.meta.data.base.filter((val,i,array)=>array.indexOf(val)===i);
+    const result:T.Location[] = await P.reduce(keys, async (array:T.Location[],key:string)=>{
+        const getted:T.Location = await L_Trie.get(key);
+        if(getted==null){
+            const new_loc:T.Location = {
+                address:key,
+                state:'yet',
+                index:0,
+                hash:_.toHash('')
+            }
+            return array.concat(new_loc);
+        }
+        else return array.concat(getted);
+    },[]);
+    /*Object.values(await L_Trie.filter(key=>{
         if(target.meta.data.base.indexOf(key)!=-1) return true;
         else if(target.meta.data.solvency===key&&target.meta.data.base.indexOf(key)===-1) return true;
         else return false;
-    }));
+    }));*/
     return result;
 }
 
@@ -95,7 +108,7 @@ export const states_for_block = async (block:T.Block,chain:T.Block[],S_Trie:Trie
     const unit_validator_state:T.State = await S_Trie.get(unit_validator) || StateSet.CreateState(0,unit_validator,unit);
     const targets = block.txs.concat(block.natives).concat(block.units).map(pure=>TxSet.pure_to_tx(pure,block));
     const tx_states:T.State[] = await P.reduce(targets,async (result:T.State[],tx:T.Tx)=>result.concat(await states_for_tx(tx,chain,S_Trie)),[]);
-    const native_states:T.State[] = await P.map(block.natives,async (tx:T.Tx)=>{
+    /*const native_states:T.State[] = await P.map(block.natives,async (tx:T.Tx)=>{
         const key = (()=>{
             if(tx.meta.kind==="request") return tx.hash;
             else return tx.meta.data.request;
@@ -120,17 +133,16 @@ export const states_for_block = async (block:T.Block,chain:T.Block[],S_Trie:Trie
         const i = b.units.map(t=>t.hash).indexOf(key);
         const raw = b.raws[b.txs.length+b.natives.length+i] || TxSet.empty_tx().raw;
         const remiter:T.State = await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],native,0);
-        const units:T.Unit[] = JSON.parse(raw.raw[2]);
+        const units:T.Unit[] = JSON.parse(raw.raw[2]||"[]");
         const sellers:T.State[] = await P.map(units, async (u:T.Unit)=>await S_Trie.get(u.payee)||StateSet.CreateState(0,u.payee,native,0));
         return result.concat(sellers).concat(remiter);
-    },[]) || [];
+    },[]) || [];*/
     const all_units:T.State[] = Object.values(await S_Trie.filter((key,state:T.State)=>{
         return state.kind==="state"&&state.token===unit;
     }));
-    const native_token = await S_Trie.get(native);
-    const unit_token = await S_Trie.get(unit);
-    const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(native_states).concat(unit_states).concat(all_units).concat(native_token).concat(unit_token);
-    console.log(concated);
+    const native_token = await S_Trie.get("Vr:"+native+":"+_.toHash('')) || StateSet.CreateToken(0,native);
+    const unit_token = await S_Trie.get("Vr:"+unit+":"+_.toHash('')) || StateSet.CreateToken(0,unit);
+    const concated = tx_states.concat(native_validator_state).concat(unit_validator_state).concat(all_units).concat(native_token).concat(unit_token);
     return concated.filter((val,i,array)=>array.map(s=>_.ObjectHash(s)).indexOf(_.ObjectHash(val))===i);
 }
 
@@ -219,8 +231,7 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
         const accepted = await BlockSet.AcceptBlock(block,chain,0,my_version,block_time,max_blocks,block_size,candidates,stateroot,locationroot,native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
         if(accepted.block.length>0){
             await P.forEach(accepted.state, async (state:T.State)=>{
-                if(state.kind==="state") await S_Trie.put(state.owner,state);
-                else await S_Trie.put(state.token,state);
+                await S_Trie.put(state.owner,state);
             });
             await P.forEach(accepted.location, async (loc:T.Location)=>{
                 await L_Trie.put(loc.address,loc);
@@ -242,6 +253,8 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             await store.commit("refresh_roots",_.copy(new_roots));
             await store.commit("refresh_candidates",accepted.candidates.slice());
             await store.commit("add_block",_.copy(accepted.block[0]));
+
+
             return {
                 pool:_.copy(new_pool),
                 roots:_.copy(new_roots),
@@ -280,14 +293,14 @@ export const tx_check = (block:T.Block,chain:T.Block[],StateData:T.State[],Locat
         return {
             hash:n.hash,
             meta:n.meta,
-            raw:block.raws[i]
+            raw:block.raws[txs.length+i]
         }
     });
     const units:T.Tx[] = block.units.map((u,i)=>{
         return {
             hash:u.hash,
             meta:u.meta,
-            raw:block.raws[i]
+            raw:block.raws[txs.length+natives.length+i]
         }
     });
 
@@ -310,12 +323,12 @@ export const get_balance = async (address:string)=>{
     return state.amount;
 }
 
-export const send_request_tx = async (secret:string,to:string,amount:string,roots:{[key:string]:string},chain:T.Block[])=>{
+export const send_request_tx = async (secret:string,type:T.TxTypes,token:string,base:string[],input_raw:string[],log:string[],roots:{[key:string]:string},chain:T.Block[],pre=TxSet.empty_tx_pure().meta.pre,next=TxSet.empty_tx_pure().meta.next)=>{
     try{
         console.log("send_request_tx");
         const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)]
-        const from:string = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
-        const pre_tx = TxSet.CreateRequestTx(pub_key,from,Math.pow(2,-5),"scrap",native,[from],["remit",to,"-"+amount],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
+        const solvency:string = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
+        const pre_tx = TxSet.CreateRequestTx(pub_key,solvency,Math.pow(2,-5),type,token,base,input_raw,log,my_version,pre,next,Math.pow(2,-18));
         const tx = TxSet.SignTx(pre_tx,secret,pub_key[0]);
         const stateroot = roots.stateroot;
         const S_Trie:Trie = trie_ins(stateroot);
@@ -323,9 +336,9 @@ export const send_request_tx = async (secret:string,to:string,amount:string,root
         const L_Trie:Trie = trie_ins(locationroot);
         const StateData = await states_for_tx(tx,chain,S_Trie);
         const LocationData = await locations_for_tx(tx,chain,L_Trie);
-        if(!TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) alert("invalid infomations");
+        if(!TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) console.log("invalid infomations");
         else{
-            alert("remit!");
+            console.log('remit!');
             client.publish('/data',{type:'tx',tx:[tx],block:[]});
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
@@ -337,12 +350,12 @@ export const send_request_tx = async (secret:string,to:string,amount:string,root
         }
     }
     catch(e){
-        console.log(e);
+        throw new Error(e);
     }
 }
 
 export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,req_tx:T.Tx,index:number,code:string,chain:T.Block[])=>{
-    try{
+
         console.log("send_refresh_tx");
         const stateroot = roots.stateroot;
         const S_Trie:Trie = trie_ins(stateroot);
@@ -351,7 +364,7 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)]
         const payee = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
         const req_pure = TxSet.tx_to_pure(req_tx);
-        const pre_states = await P.map(req_pure.meta.data.base,async (add:string)=>await S_Trie.get(add));
+        const pre_states:T.State[] = await P.map(req_pure.meta.data.base,async (add:string)=>await S_Trie.get(add));
         const token = req_tx.meta.data.token || "";
         const token_state:T.State = await S_Trie.get(token) || StateSet.CreateToken(0,token);
         const pure_chain = chain.map(b=>{
@@ -386,7 +399,11 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
             }
             return TxSet.empty_tx();
         })();
-        const output_states = RunVM(code,pre_states,req_tx.raw.raw,req_pure,token_state,pure_chain,relate_pre_tx,relate_next_tx,gas_limit);
+        const output_states = (()=>{
+            if(req_tx.meta.data.token===native) return TxSet.native_code(pre_states,req_tx,native);
+            else if(req_tx.meta.data.token===unit) return TxSet.unit_code(pre_states,req_tx,relate_pre_tx,native,unit,chain.slice());
+            else return RunVM(code,pre_states,req_tx.raw.raw,req_pure,token_state,pure_chain,relate_pre_tx,relate_next_tx,gas_limit);
+        })();
         const output_raws = output_states.map(state=>JSON.stringify(state));
         const pre_tx = TxSet.CreateRefreshTx(my_version,0.1,pub_key,pow_target,Math.pow(2,-18),req_tx.hash,index,payee,output_raws,[],chain);
         const tx = TxSet.SignTx(pre_tx,secret,pub_key[0]);
@@ -402,10 +419,7 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
             const new_pool = Object.assign({[tx.hash]:tx},pool);
             store.commit('refresh_pool',new_pool);*/
         }
-    }
-    catch(e){
-        console.log(e);
-    }
+
 }
 
 
@@ -437,6 +451,9 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
     const S_Trie:Trie = trie_ins(stateroot);
     const locationroot = roots.locationroot;
     const L_Trie:Trie = trie_ins(locationroot);
+    const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)];
+    const native_validator = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
+    const unit_validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(pub_key));
     console.log(Object.values(pool))
     const splited:T.Tx[] = random_chose(Object.values(pool),block_size/1000);
     const not_same = splited.reduce((result:T.Tx[],tx)=>{
@@ -458,7 +475,6 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         else result.txs.push(tx);
         return result;
     },{txs:[],natives:[],units:[]});
-    const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)];
     const txs = reduced.txs;
     const natives = reduced.natives;
     const units = reduced.units;
@@ -524,8 +540,7 @@ const get_pre_info = async (chain:T.Block[]):Promise<[{stateroot:string,location
     const candidates = BlockSet.CandidatesForm(BlockSet.get_units(unit,StateData));
     const accepted = await BlockSet.AcceptBlock(pre_block,chain.slice(0,pre_block.meta.index),0,my_version,block_time,max_blocks,block_size,candidates.slice(),S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
     await P.forEach(accepted.state, async (state:T.State)=>{
-        if(state.kind==="state") await S_Trie.put(state.owner,state);
-        else await S_Trie.put(state.token,state);
+        await S_Trie.put(state.owner,state);
     });
     await P.forEach(accepted.location, async (loc:T.Location)=>{
         await L_Trie.put(loc.address,loc);
@@ -582,9 +597,9 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
 
         store.commit("refresh_roots",_.copy(info.roots));
         store.commit("refresh_candidates",info.candidates.slice());
-        //store.commit('checking',true);
-        //store.commit('check_limit',add_blocks[add_blocks.length-1].meta.index);
-        store.commit('refresh_yet_data',add_blocks_data);
+        store.commit('replaceing',true);
+        store.commit('rep_limit',add_blocks[add_blocks.length-1].meta.index);
+        store.commit('refresh_yet_data',add_blocks_data.concat(store.state.yet_data));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
@@ -601,21 +616,82 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
     try{
         console.log("unit!");
         const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)]
-        const from:string = CryptoSet.GenereateAddress(unit,_.reduce_pub(pub_key));
-        const remiter = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
-        const pre_tx = TxSet.CreateRequestTx(pub_key,remiter,Math.pow(2,-5),"issue",unit,[from],["buy",remiter,JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(10,-18));
+        const native_remiter = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
+        const unit_remiter = CryptoSet.GenereateAddress(unit,_.reduce_pub(pub_key));
+        console.log(native_remiter)
+        const unit_sellers = units.map(u=>u.payee);
+        const native_sellers = unit_sellers.map(add=>add.split(":")[2]||"").map(id=>"Vr:"+native+":"+id);
+        const prices = units.map(u=>u.unit_price);
+        const pure_native_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-5),"issue",native,[native_remiter].concat(native_sellers),["remit",JSON.stringify(prices)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
+        const pure_unit_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-5),"issue",unit,[unit_remiter].concat("Vr:"+unit+":"+_.toHash('')),["buy",JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
+        const native_pure_hash = pure_native_tx.meta.purehash;
+        const unit_pure_hash = pure_unit_tx.meta.purehash;
+        const next_rel:T.Relation = {
+            flag:true,
+            hash:unit_pure_hash
+        }
+        const pre_rel:T.Relation = {
+            flag:true,
+            hash:native_pure_hash
+        }
+        const rel_native_tx = _.new_obj(
+            pure_native_tx,
+            (tx:T.Tx)=>{
+                const new_meta = _.new_obj(
+                    tx.meta,m=>{
+                        m.next = next_rel;
+                        return m;
+                    }
+                );
+                tx.meta = new_meta;
+                tx.hash = _.ObjectHash(new_meta);
+                return tx;
+            }
+        );
+        const rel_unit_tx = _.new_obj(
+            pure_unit_tx,
+            (tx:T.Tx)=>{
+                const new_meta = _.new_obj(
+                    tx.meta,m=>{
+                        m.pre = pre_rel;
+                        return m;
+                    }
+                );
+                tx.meta = new_meta;
+                tx.hash = _.ObjectHash(new_meta);
+                return tx;
+            }
+        );
+        const native_tx = TxSet.SignTx(rel_native_tx,secret,pub_key[0]);
+        const unit_tx = TxSet.SignTx(rel_unit_tx,secret,pub_key[0]);
+        const stateroot = roots.stateroot;
+        const S_Trie:Trie = trie_ins(stateroot);
+        const locationroot = roots.locationroot;
+        const L_Trie:Trie = trie_ins(locationroot);
+        const native_StateData = await states_for_tx(native_tx,chain,S_Trie);
+        const native_LocationData = await locations_for_tx(native_tx,chain,L_Trie);
+        const unit_StateData = await states_for_tx(unit_tx,chain,S_Trie);
+        const unit_LocationData = await locations_for_tx(unit_tx,chain,L_Trie);
+        if(!TxSet.ValidRequestTx(native_tx,my_version,native,unit,native_StateData,native_LocationData)||!TxSet.ValidRequestTx(unit_tx,my_version,native,unit,unit_StateData,unit_LocationData)) console.log("fail to buy units");
+        else{
+            console.log("buy unit!");
+            store.commit('buying_unit',unit_tx.hash);
+            client.publish('/data',{type:'tx',tx:[native_tx],block:[]});
+            client.publish('/data',{type:'tx',tx:[unit_tx],block:[]});
+        }
+        /*const pre_tx = TxSet.CreateRequestTx(pub_key,remiter,Math.pow(2,-5),"issue",unit,[from],["buy",remiter,JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(10,-18));
         const tx = TxSet.SignTx(pre_tx,secret,pub_key[0]);
         const stateroot = roots.stateroot;
         const S_Trie:Trie = trie_ins(stateroot);
         const locationroot = roots.locationroot;
         const L_Trie:Trie = trie_ins(locationroot);
         const StateData = await states_for_tx(tx,chain,S_Trie);
-        const LocationData = await locations_for_tx(tx,chain,L_Trie);
-        if(!TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) console.log("fail to buy units");
+        const LocationData = await locations_for_tx(tx,chain,L_Trie);*/
+        /*if(!TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData)) console.log("fail to buy units");
         else{
             console.log("buy unit!");
             client.publish('/data',{type:'tx',tx:[tx],block:[]});
-        }
+        }*/
     }
-    catch(e){console.log(e);}
+    catch(e){throw new Error(e);}
 }

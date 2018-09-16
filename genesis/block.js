@@ -2,10 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const con_1 = require("../wallet/con");
 const genesis_pub = "03197dced5b880718079c048f42c25cf3378a4352919ba3183f428d3290ce5c494";
-const stateroot = "5e67c96a8d4a580a15417dd11406bd68bf824ceba43ecfaf656c93dd59126f7b"; //"61127a7a4187262b74749ec799b38b072331b4a7ef008b492a60466f1b8bc3ec"//"467dd369487cbf99225b9e7e32cccfb2d31b4955aa3fcb2d10278d1f44cf3682"
+const stateroot = "f3a7e29e01052eeea4b84db142243d08839b0d87828d75c4615b40db4571e07f"; //"ace10da62902dbd84f2fc0d1c0b457f01b0f6d406d68d55e99377131df29226d"//"61127a7a4187262b74749ec799b38b072331b4a7ef008b492a60466f1b8bc3ec"//"467dd369487cbf99225b9e7e32cccfb2d31b4955aa3fcb2d10278d1f44cf3682"
 const locationroot = "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421";
 exports.genesis_block = {
-    hash: '24f3e98080019e749f4e2114eceeefbb60e4ce160c24f81afd43648ca093b9fb',
+    hash: '6aa601f05dd07c62a486b6402376bd624765353945ef8ddd1421fb66ed415778',
     validatorSign: [],
     meta: {
         version: 0,

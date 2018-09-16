@@ -115,10 +115,11 @@ export const RunVM = (code:string,states:T.State[],input:string[],tx:T.TxPure,to
 };
 
 /*(async ()=>{
-   const checked = check(esp.parse("a = Math['ran'+'dom']()"),['Math','a'],{})
+　　const code = "const a = requrie('fs'); a.writeFileSync('./a.json',JSON.stringfy({}))"
+   const checked = check(esp.parse(code),['requrie'],{'a':['writeFileSync']});
+   console.log(pj.render(checked,option));
    const generated = esc.generate(checked);
-   let sandbox = {a:0}
+   let sandbox = {}
    vm.runInNewContext(generated,sandbox);
-   console.log(sandbox.a)
 })();*/
 

@@ -1,5 +1,3 @@
-import * as rx from 'rxjs'
-import socket from 'socket.io'
 import * as http from 'http'
 import express from 'express'
 import faye from 'faye'
@@ -15,7 +13,6 @@ export const ip = process.env.vreath_ip || "localhost";
 
 const app = express();
 const server = http.createServer(app);
-const io = socket(server);
 const bayeux = new faye.NodeAdapter({mount: '/vreath'});
 bayeux.addWebsocketExtension(deflate);
 bayeux.attach(server);

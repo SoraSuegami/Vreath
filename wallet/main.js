@@ -1,7 +1,4 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -9,8 +6,10 @@ var __importStar = (this && this.__importStar) || function (mod) {
     result["default"] = mod;
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const socket_io_1 = __importDefault(require("socket.io"));
 const http = __importStar(require("http"));
 const express_1 = __importDefault(require("express"));
 const faye_1 = __importDefault(require("faye"));
@@ -19,7 +18,6 @@ exports.port = process.env.vreath_port || "57750";
 exports.ip = process.env.vreath_ip || "localhost";
 const app = express_1.default();
 const server = http.createServer(app);
-const io = socket_io_1.default(server);
 const bayeux = new faye_1.default.NodeAdapter({ mount: '/vreath' });
 bayeux.addWebsocketExtension(permessage_deflate_1.default);
 bayeux.attach(server);

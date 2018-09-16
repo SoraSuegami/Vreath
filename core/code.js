@@ -124,9 +124,10 @@ exports.RunVM = (code, states, input, tx, token_state, chain, pre_tx, next_tx, g
     }
 };
 /*(async ()=>{
-   const checked = check(esp.parse("a = Math['ran'+'dom']()"),['Math','a'],{})
+  const code = "const a = requrie('fs'); a.writeFileSync('./a.json',JSON.stringfy({}))"
+   const checked = check(esp.parse(code),['requrie'],{'a':['writeFileSync']});
+   console.log(pj.render(checked,option));
    const generated = esc.generate(checked);
-   let sandbox = {a:0}
+   let sandbox = {}
    vm.runInNewContext(generated,sandbox);
-   console.log(sandbox.a)
 })();*/

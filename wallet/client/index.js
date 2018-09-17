@@ -94,6 +94,8 @@ exports.locations_for_tx = async (tx, chain, L_Trie) => {
     })();
     const keys = target.meta.data.base.filter((val, i, array) => array.indexOf(val) === i);
     const result = await P.reduce(keys, async (array, key) => {
+        if (key.split(':')[2] === _.toHash(''))
+            return array;
         const getted = await L_Trie.get(key);
         if (getted == null) {
             const new_loc = {
@@ -262,6 +264,39 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
         await script_1.store.commit("refresh_roots", _.copy(new_roots));
         await script_1.store.commit("refresh_candidates", accepted.candidates.slice());
         await script_1.store.commit("add_block", _.copy(accepted.block[0]));
+        const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+        const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
+        reqs_pure.forEach(pure => {
+            const full_tx = TxSet.pure_to_tx(pure, block);
+            console.log(full_tx);
+            script_1.store.commit('add_not_refreshed', full_tx);
+        });
+        if (refs_pure.length > 0) {
+            console.log(refs_pure);
+            script_1.store.commit('del_not_refreshed', refs_pure.map(pure => pure.meta.data.request));
+        }
+        console.log(refs_pure);
+        console.log(script_1.store.state.not_refreshed_tx);
+        const bought_units = block.units.reduce((result, u) => {
+            if (u.meta.kind === "request")
+                return result;
+            const ref_tx = TxSet.pure_to_tx(u, block);
+            const req_tx = TxSet.find_req_tx(ref_tx, chain);
+            const raw = req_tx.raw || TxSet.empty_tx().raw;
+            const this_units = JSON.parse(raw.raw[2] || "[]") || [];
+            return result.concat(this_units);
+        }, []);
+        if (bought_units.some(unit => unit.request === script_1.store.state.now_buying))
+            script_1.store.commit('unit_buying', "");
+        const new_unit_store = _.new_obj(script_1.store.state.unit_store, (store) => {
+            bought_units.forEach(unit => {
+                const com = store[unit.request] || [];
+                const deleted = com.filter(c => _.ObjectHash(c) != _.ObjectHash(unit));
+                store[unit.request] = deleted;
+            });
+            return store;
+        });
+        script_1.store.commit("refresh_unit_store", new_unit_store);
         return {
             pool: _.copy(new_pool),
             roots: _.copy(new_roots),
@@ -414,10 +449,11 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain) => {
             return code_1.RunVM(code, pre_states, req_tx.raw.raw, req_pure, token_state, pure_chain, relate_pre_tx, relate_next_tx, con_1.gas_limit);
     })();
     const output_raws = output_states.map(state => JSON.stringify(state));
-    const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 0.1, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
+    const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 0.01, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
     const tx = TxSet.SignTx(pre_tx, secret, pub_key[0]);
     const StateData = await exports.states_for_tx(tx, chain, S_Trie);
     const LocationData = await exports.locations_for_tx(tx, chain, L_Trie);
+    script_1.store.commit('del_not_refreshed', [tx.meta.data.request]);
     if (!TxSet.ValidRefreshTx(tx, chain, con_1.my_version, con_1.native, con_1.unit, con_1.token_name_maxsize, StateData, LocationData))
         console.log("fail to create valid refresh");
     else {
@@ -483,7 +519,22 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
         else
             return result;
     }, []);
-    const reduced = not_same.reduce((result, tx) => {
+    const related = not_same.filter(tx => {
+        if (tx.meta.kind === "request")
+            return true;
+        const req_tx = TxSet.find_req_tx(tx, chain);
+        if (req_tx.meta.pre.flag === true) {
+            const pres = TxSet.list_up_related(chain, TxSet.tx_to_pure(req_tx).meta, "pre");
+            return pres.length > 0;
+        }
+        else if (req_tx.meta.next.flag === true) {
+            const nexts = TxSet.list_up_related(chain, TxSet.tx_to_pure(req_tx).meta, "next");
+            return nexts.length > 0;
+        }
+        else
+            return true;
+    });
+    const reduced = related.reduce((result, tx) => {
         if (tx.meta.data.token === con_1.native)
             result.natives.push(tx);
         else if (tx.meta.data.token === con_1.unit)

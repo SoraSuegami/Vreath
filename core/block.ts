@@ -536,6 +536,9 @@ export const change_unit_amounts = (unit:string,rate:number,StateData:T.State[])
             s,
             s=>{
                 s.amount = new BigNumber(s.amount).times(rate).toNumber();
+                const reduce = new BigNumber(s.amount).times(new BigNumber(1).minus(rate));
+                if(s.data.reduce==null) s.data.reduce = reduce.toFixed(18);
+                else s.data.reduce = (new BigNumber(Number(s.data.reduce)).plus(reduce)).toFixed(18);
                 return s;
             }
         );
@@ -550,7 +553,7 @@ const compute_issue = (all_issue:number,index:number,cycle:number)=>{
     else return issue.toNumber();
 }
 
-const issue_native = (block:T.Block,validator:string,all_issue:number,fee_sum:number,block_time:number,native:string,StateData:T.State[])=>{
+const issue_native = (block:T.Block,validator:string,all_issue:number,fee_sum:number,block_time:number,native:string,solvency:string[],StateData:T.State[])=>{
     const cycle = new BigNumber(126144000000).dividedToIntegerBy(block_time);
     const index = new BigNumber(block.meta.index);
     const i = index.div(cycle).integerValue(BigNumber.ROUND_DOWN).toNumber();
@@ -561,9 +564,10 @@ const issue_native = (block:T.Block,validator:string,all_issue:number,fee_sum:nu
             return _.new_obj(
                 s,
                 (s)=>{
-                    s.amount = new BigNumber(s.amount).plus(add).toNumber();
-                    if(s.data.issue==null) s.data.issue = add.toFixed(18);
-                    else s.data.issue = new BigNumber(s.data.issue).plus(add).toFixed(18);
+                    s.amount = new BigNumber(s.amount).plus(issue).toNumber();
+                    const index = solvency.indexOf(validator);
+                    if(index!=-1&&s.data.issue==null) s.data.issue = add.toFixed(18);
+                    else if(index!=-1) s.data.issue = new BigNumber(Number(s.data.issue)).plus(add).toFixed(18);
                     return s;
                 }
             )
@@ -575,7 +579,7 @@ const issue_native = (block:T.Block,validator:string,all_issue:number,fee_sum:nu
 export const AcceptBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_version:number,block_time:number,max_blocks:number,block_size:number,right_candidates:T.Candidates[],right_stateroot:string,right_locationroot:string,native:string,unit:string,rate:number,token_name_maxsize:number,all_issue:number,StateData:T.State[],LocationData:T.Location[])=>{
     if(block.meta.kind==="key"&&ValidKeyBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_size,native,unit,StateData,LocationData)){
         const validator = CryptoSet.GenereateAddress(native,_.reduce_pub(block.meta.validatorPub));
-        const StateData_issued = issue_native(block,validator,all_issue,0,block_time,native,StateData);
+        const StateData_issued = issue_native(block,validator,all_issue,0,block_time,native,[],StateData);
         const StateData_unit = change_unit_amounts(unit,rate,StateData_issued);
         const new_candidates = NewCandidates(unit,rate,StateData_issued);
         return {
@@ -621,10 +625,14 @@ export const AcceptBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_
             else return result;
         },sets);
         const fee_sum = tx_fee_sum(target.map(t=>TxSet.tx_to_pure(t)),block.raws);
-        const StateData_issued = issue_native(block,validator,all_issue,fee_sum,block_time,native,refreshed[0]);
+        const solvency = target.reduce((result:string[],tx)=>{
+            if(tx.meta.kind!="request") return result;
+            return result.concat(tx.meta.data.base);
+        },[]);
+        const StateData_issued = issue_native(block,validator,all_issue,fee_sum,block_time,native,solvency,refreshed[0]);
         const unit_changed = change_unit_amounts(unit,rate,StateData_issued);
 
-        const new_candidates = NewCandidates(unit,rate,StateData);
+        const new_candidates = NewCandidates(unit,rate,StateData_issued);
         return {
             state:unit_changed,
             location:refreshed[1],

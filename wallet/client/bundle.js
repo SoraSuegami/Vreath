@@ -731,6 +731,11 @@ exports.change_unit_amounts = (unit, rate, StateData) => {
             return s;
         return _.new_obj(s, s => {
             s.amount = new bignumber_js_1.BigNumber(s.amount).times(rate).toNumber();
+            const reduce = new bignumber_js_1.BigNumber(s.amount).times(new bignumber_js_1.BigNumber(1).minus(rate));
+            if (s.data.reduce == null)
+                s.data.reduce = reduce.toFixed(18);
+            else
+                s.data.reduce = (new bignumber_js_1.BigNumber(Number(s.data.reduce)).plus(reduce)).toFixed(18);
             return s;
         });
     });
@@ -744,7 +749,7 @@ const compute_issue = (all_issue, index, cycle) => {
     else
         return issue.toNumber();
 };
-const issue_native = (block, validator, all_issue, fee_sum, block_time, native, StateData) => {
+const issue_native = (block, validator, all_issue, fee_sum, block_time, native, solvency, StateData) => {
     const cycle = new bignumber_js_1.BigNumber(126144000000).dividedToIntegerBy(block_time);
     const index = new bignumber_js_1.BigNumber(block.meta.index);
     const i = index.div(cycle).integerValue(bignumber_js_1.BigNumber.ROUND_DOWN).toNumber();
@@ -753,11 +758,12 @@ const issue_native = (block, validator, all_issue, fee_sum, block_time, native, 
     return StateData.map(s => {
         if (s.kind === "state" && s.owner === validator && s.token === native) {
             return _.new_obj(s, (s) => {
-                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(add).toNumber();
-                if (s.data.issue == null)
+                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(issue).toNumber();
+                const index = solvency.indexOf(validator);
+                if (index != -1 && s.data.issue == null)
                     s.data.issue = add.toFixed(18);
-                else
-                    s.data.issue = new bignumber_js_1.BigNumber(s.data.issue).plus(add).toFixed(18);
+                else if (index != -1)
+                    s.data.issue = new bignumber_js_1.BigNumber(Number(s.data.issue)).plus(add).toFixed(18);
                 return s;
             });
         }
@@ -768,7 +774,7 @@ const issue_native = (block, validator, all_issue, fee_sum, block_time, native, 
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, all_issue, StateData, LocationData) => {
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_size, native, unit, StateData, LocationData)) {
         const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
-        const StateData_issued = issue_native(block, validator, all_issue, 0, block_time, native, StateData);
+        const StateData_issued = issue_native(block, validator, all_issue, 0, block_time, native, [], StateData);
         const StateData_unit = exports.change_unit_amounts(unit, rate, StateData_issued);
         const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
         return {
@@ -814,9 +820,14 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
                 return result;
         }, sets);
         const fee_sum = tx_fee_sum(target.map(t => TxSet.tx_to_pure(t)), block.raws);
-        const StateData_issued = issue_native(block, validator, all_issue, fee_sum, block_time, native, refreshed[0]);
+        const solvency = target.reduce((result, tx) => {
+            if (tx.meta.kind != "request")
+                return result;
+            return result.concat(tx.meta.data.base);
+        }, []);
+        const StateData_issued = issue_native(block, validator, all_issue, fee_sum, block_time, native, solvency, refreshed[0]);
         const unit_changed = exports.change_unit_amounts(unit, rate, StateData_issued);
-        const new_candidates = exports.NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
         return {
             state: unit_changed,
             location: refreshed[1],
@@ -1342,7 +1353,10 @@ const hashed_pub_check = (state, pubs) => {
 };
 exports.refreshed_check = (base, index, tx_hash, LocationData) => {
     const addresses = LocationData.map(l => l.address);
+    console.log(base);
     return base.some(key => {
+        if (key.split(':')[2] === _.toHash(''))
+            return false;
         const i = addresses.indexOf(key);
         const val = LocationData[i];
         if (i === -1)
@@ -1417,9 +1431,9 @@ const search_related_tx = (chain, hash, order, caller_hash) => {
     }
     return exports.empty_tx_pure().meta;
 };
-const list_up_related = (chain, tx, order, result = []) => {
+exports.list_up_related = (chain, tx, order) => {
     if (tx[order].flag === false)
-        return result;
+        return [];
     const ori_order = (() => {
         if (order === 'pre')
             return 'pre';
@@ -1435,9 +1449,8 @@ const list_up_related = (chain, tx, order, result = []) => {
     console.log(ori_order);
     const searched = search_related_tx(chain, tx[ori_order].hash, count_order, tx.purehash);
     if (searched.purehash === exports.empty_tx_pure().meta.purehash || searched.kind != "request")
-        return result;
-    const new_pres = result.concat(searched);
-    return list_up_related(chain, searched, ori_order, new_pres);
+        return [];
+    return [searched];
 };
 const mining = (request, index, refresher, output, target) => {
     let nonce = -1;
@@ -1489,7 +1502,7 @@ const search_related_raw = (chain, hash, order, caller_hash) => {
     }
     return exports.empty_tx().raw;
 };
-const compute_new_state = (state_raw, solvency, payee, fee, gas) => {
+const compute_new_state = (state_raw, solvency, payee, fee, gas, native, unit) => {
     const output_states = state_raw.map(s => JSON.parse(s || JSON.stringify(StateSet.CreateState())));
     const output_owners = output_states.map(o => o.owner);
     const outputed = output_states.map(s => {
@@ -1520,6 +1533,8 @@ const compute_new_state = (state_raw, solvency, payee, fee, gas) => {
             return s;
     });
     const issued = payed.map(s => {
+        if (s.kind != "state" || s.token != native)
+            return s;
         const issue = Number(s.data.issue || "0");
         return _.new_obj(s, s => {
             s.amount = new bignumber_js_1.BigNumber(s.amount).plus(issue).toNumber();
@@ -1527,8 +1542,17 @@ const compute_new_state = (state_raw, solvency, payee, fee, gas) => {
             return s;
         });
     });
-    console.log(issued);
-    const token_changed = issued.map(s => {
+    const reduced = issued.map(s => {
+        if (s.kind != "state" || s.token != unit)
+            return s;
+        const reduce = Number(s.data.reduce || "0");
+        return _.new_obj(s, s => {
+            s.amount = new bignumber_js_1.BigNumber(s.amount).minus(reduce).toNumber();
+            s.data.reduce = (0).toFixed(18);
+            return s;
+        });
+    });
+    const token_changed = reduced.map(s => {
         if (s.kind != "token")
             return s;
         const i = output_owners.indexOf(s.owner);
@@ -1766,18 +1790,19 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
     };
     const token = req_tx.meta.data.token;
     const fee = _.tx_fee(tx);
+    const block_tx_hashes = block.txs.concat(block.natives).concat(block.units).map(tx => tx.hash);
     const new_states_raw = (() => {
         if (req_tx.meta.data.type === "create")
-            return output_raw.concat(compute_new_state([], req_tx.meta.data.solvency, payee, _.tx_fee(tx), req_tx.meta.data.gas).map(s => JSON.stringify(s)));
+            return output_raw.concat(compute_new_state([], req_tx.meta.data.solvency, payee, _.tx_fee(tx), req_tx.meta.data.gas, native, unit).map(s => JSON.stringify(s)));
         else
-            return compute_new_state(output_raw, req_tx.meta.data.solvency, payee, fee, req_tx.meta.data.gas).map(s => JSON.stringify(s));
+            return compute_new_state(output_raw, req_tx.meta.data.solvency, payee, fee, req_tx.meta.data.gas, native, unit).map(s => JSON.stringify(s));
     })();
     const payee_state = StateData.filter(s => s.kind === "state" && s.owner === payee && s.token === native && new bignumber_js_1.BigNumber(s.amount).plus(req_tx.meta.data.gas).minus(fee).isGreaterThanOrEqualTo(0))[0];
     const base_states = req_tx.meta.data.base.map(key => {
         return StateData.slice().filter(s => { return s.owner === key; })[0] || StateSet.CreateState();
     });
-    const pres = list_up_related(chain, req_tx.meta, "pre", []);
-    const nexts = list_up_related(chain, req_tx.meta, "next", []);
+    const pres = exports.list_up_related(chain, req_tx.meta, "pre");
+    const nexts = exports.list_up_related(chain, req_tx.meta, "next");
     if (!exports.ValidTxBasic(tx, my_version)) {
         return false;
     }
@@ -1797,7 +1822,7 @@ exports.ValidRefreshTx = (tx, chain, my_version, native, unit, token_name_maxsiz
         console.log("invalid request index");
         return false;
     }
-    else if (req_tx == exports.empty_tx_pure() || (chain[tx.meta.data.index].txs.indexOf(req_tx) === -1 && chain[tx.meta.data.index].natives.indexOf(req_tx) === -1 && chain[tx.meta.data.index].units.indexOf(req_tx) === -1)) {
+    else if (req_tx.hash == exports.empty_tx_pure().hash || block_tx_hashes.indexOf(req_tx.hash) === -1) {
         console.log("invalid request hash");
         return false;
     }
@@ -1899,15 +1924,16 @@ exports.native_code = (StateData, req_tx, native) => {
             const receivers = req_tx.meta.data.base.slice(1);
             const amounts = JSON.parse(req_tx.raw.raw[1] || "[]").map((str) => Number(str));
             const sum = amounts.reduce((s, a) => s + a, 0);
-            const fee = Number(remiter_state.data.fee || "0");
-            if (remiter_state == null || amounts.some(n => new bignumber_js_1.BigNumber(n).isLessThan(0)) || new bignumber_js_1.BigNumber(remiter_state.amount).minus(sum).minus(fee).isLessThan(0))
+            const gas = Number(remiter_state.data.gas || "0");
+            if (remiter_state == null || amounts.some(n => new bignumber_js_1.BigNumber(n).isLessThan(0)) || new bignumber_js_1.BigNumber(remiter_state.amount).minus(sum).minus(gas).isLessThan(0))
                 return not_changed;
             const remited = StateData.map(s => {
                 if (s.kind != "state" || s.token != native || s.owner != remiter)
                     return s;
+                const issued = Number(s.data.issue || "0");
                 return _.new_obj(s, (s) => {
                     s.nonce++;
-                    s.amount = new bignumber_js_1.BigNumber(s.amount).minus(sum).toNumber();
+                    s.amount = new bignumber_js_1.BigNumber(s.amount).minus(issued).minus(sum).toNumber();
                     return s;
                 });
             });
@@ -1915,9 +1941,10 @@ exports.native_code = (StateData, req_tx, native) => {
                 const index = receivers.indexOf(s.owner);
                 if (s.kind != "state" || s.token != native || index === -1)
                     return s;
+                const issued = Number(s.data.issue || "0");
                 return _.new_obj(s, s => {
                     s.nonce++;
-                    s.amount = new bignumber_js_1.BigNumber(s.amount).plus(amounts[index]).toNumber();
+                    s.amount = new bignumber_js_1.BigNumber(s.amount).minus(issued).plus(amounts[index]).toNumber();
                     return s;
                 });
             });
@@ -1960,9 +1987,12 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
         return not_changed;
     const unit_bought = StateData.map(s => {
         if (s.kind === "state" && s.token === unit && s.owner === remiter) {
+            const reduce = Number(s.data.reduce || "0");
+            if (new bignumber_js_1.BigNumber(s.amount).minus(reduce).plus(unit_sum).isLessThan(0))
+                return s;
             return _.new_obj(s, (s) => {
                 s.nonce++;
-                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(unit_sum).toNumber();
+                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(reduce).plus(unit_sum).toNumber();
                 return s;
             });
         }
@@ -2104,22 +2134,25 @@ exports.AcceptRequestTx = (tx, validator, index, StateData, LocationData) => {
             return s;
         return after[index];
     });
+    const gas = tx.meta.data.gas;
     const StateData_sol = StateData_added.map(s => {
         if (s.owner != tx.meta.data.solvency)
             return s;
         return _.new_obj(s, s => {
-            if (s.data.fee == null)
-                s.data.fee = fee.toFixed(18);
+            if (s.data.gas == null)
+                s.data.gas = gas.toFixed(18);
             else
-                s.data.fee = new bignumber_js_1.BigNumber(s.data.fee).plus(fee).toFixed(18);
+                s.data.gas = new bignumber_js_1.BigNumber(s.data.gas).plus(gas).toFixed(18);
             return s;
         });
     });
     const LocationData_added = LocationData.map(l => {
-        const index = tx.meta.data.base.indexOf(l.address);
-        if (index != -1) {
+        const i = tx.meta.data.base.indexOf(l.address);
+        if (i != -1) {
             return _.new_obj(l, l => {
-                l.state = "yet";
+                l.state = "already";
+                l.index = index;
+                l.hash = tx.hash;
                 return l;
             });
         }
@@ -2203,10 +2236,30 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             }
         });
         const issued = outputed.map(s => {
-            const issue = s.data.issue || 0;
+            if (s.kind != "state" || s.token != native)
+                return s;
+            const issue = Number(s.data.issue || "0");
             return _.new_obj(s, s => {
                 s.amount = new bignumber_js_1.BigNumber(s.amount).plus(issue).toNumber();
                 s.data.issue = (0).toFixed(18);
+                return s;
+            });
+        });
+        const reduced = issued.map(s => {
+            if (s.kind != "state" || s.token != unit)
+                return s;
+            const reduce = Number(s.data.reduce || "0");
+            return _.new_obj(s, s => {
+                s.amount = new bignumber_js_1.BigNumber(s.amount).minus(reduce).toNumber();
+                s.data.reduce = (0).toFixed(18);
+                return s;
+            });
+        });
+        const gased = reduced.map(s => {
+            if (s.kind != "state" || s.owner != solvency)
+                return s;
+            return _.new_obj(s, s => {
+                s.data.gas = (0).toFixed(18);
                 return s;
             });
         });
@@ -2232,7 +2285,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
           else return states.concat(state);
         },StateData_deleted);*/
         const added = LocationData.map(l => {
-            const index = output_owners.indexOf(l.address);
+            const index = req_tx.meta.data.base.indexOf(l.address);
             if (index != -1) {
                 return _.new_obj(l, l => {
                     l.state = "yet";
@@ -2242,7 +2295,7 @@ exports.AcceptRefreshTx = (ref_tx, chain, validator, native, unit, StateData, Lo
             else
                 return l;
         });
-        return [issued, added];
+        return [gased, added];
         /*if(req_tx.meta.data.token===native&&req_tx.meta.data.type==="scrap"&&req_tx.raw.raw[0]==="remit"){
           const remiter_state = StateData.filter(s=>s.kind==="state"&&s.token===native&&s.owner===req_tx.meta.data.address)[0];
           const receiver = req_tx.raw.raw[1];
@@ -95537,6 +95590,8 @@ exports.locations_for_tx = async (tx, chain, L_Trie) => {
     })();
     const keys = target.meta.data.base.filter((val, i, array) => array.indexOf(val) === i);
     const result = await P.reduce(keys, async (array, key) => {
+        if (key.split(':')[2] === _.toHash(''))
+            return array;
         const getted = await L_Trie.get(key);
         if (getted == null) {
             const new_loc = {
@@ -95705,6 +95760,39 @@ exports.block_accept = async (block, chain, candidates, roots, pool, codes, secr
         await script_1.store.commit("refresh_roots", _.copy(new_roots));
         await script_1.store.commit("refresh_candidates", accepted.candidates.slice());
         await script_1.store.commit("add_block", _.copy(accepted.block[0]));
+        const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
+        const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
+        reqs_pure.forEach(pure => {
+            const full_tx = TxSet.pure_to_tx(pure, block);
+            console.log(full_tx);
+            script_1.store.commit('add_not_refreshed', full_tx);
+        });
+        if (refs_pure.length > 0) {
+            console.log(refs_pure);
+            script_1.store.commit('del_not_refreshed', refs_pure.map(pure => pure.meta.data.request));
+        }
+        console.log(refs_pure);
+        console.log(script_1.store.state.not_refreshed_tx);
+        const bought_units = block.units.reduce((result, u) => {
+            if (u.meta.kind === "request")
+                return result;
+            const ref_tx = TxSet.pure_to_tx(u, block);
+            const req_tx = TxSet.find_req_tx(ref_tx, chain);
+            const raw = req_tx.raw || TxSet.empty_tx().raw;
+            const this_units = JSON.parse(raw.raw[2] || "[]") || [];
+            return result.concat(this_units);
+        }, []);
+        if (bought_units.some(unit => unit.request === script_1.store.state.now_buying))
+            script_1.store.commit('unit_buying', "");
+        const new_unit_store = _.new_obj(script_1.store.state.unit_store, (store) => {
+            bought_units.forEach(unit => {
+                const com = store[unit.request] || [];
+                const deleted = com.filter(c => _.ObjectHash(c) != _.ObjectHash(unit));
+                store[unit.request] = deleted;
+            });
+            return store;
+        });
+        script_1.store.commit("refresh_unit_store", new_unit_store);
         return {
             pool: _.copy(new_pool),
             roots: _.copy(new_roots),
@@ -95857,10 +95945,11 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain) => {
             return code_1.RunVM(code, pre_states, req_tx.raw.raw, req_pure, token_state, pure_chain, relate_pre_tx, relate_next_tx, con_1.gas_limit);
     })();
     const output_raws = output_states.map(state => JSON.stringify(state));
-    const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 0.1, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
+    const pre_tx = TxSet.CreateRefreshTx(con_1.my_version, 0.01, pub_key, con_1.pow_target, Math.pow(2, -18), req_tx.hash, index, payee, output_raws, [], chain);
     const tx = TxSet.SignTx(pre_tx, secret, pub_key[0]);
     const StateData = await exports.states_for_tx(tx, chain, S_Trie);
     const LocationData = await exports.locations_for_tx(tx, chain, L_Trie);
+    script_1.store.commit('del_not_refreshed', [tx.meta.data.request]);
     if (!TxSet.ValidRefreshTx(tx, chain, con_1.my_version, con_1.native, con_1.unit, con_1.token_name_maxsize, StateData, LocationData))
         console.log("fail to create valid refresh");
     else {
@@ -95926,7 +96015,22 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
         else
             return result;
     }, []);
-    const reduced = not_same.reduce((result, tx) => {
+    const related = not_same.filter(tx => {
+        if (tx.meta.kind === "request")
+            return true;
+        const req_tx = TxSet.find_req_tx(tx, chain);
+        if (req_tx.meta.pre.flag === true) {
+            const pres = TxSet.list_up_related(chain, TxSet.tx_to_pure(req_tx).meta, "pre");
+            return pres.length > 0;
+        }
+        else if (req_tx.meta.next.flag === true) {
+            const nexts = TxSet.list_up_related(chain, TxSet.tx_to_pure(req_tx).meta, "next");
+            return nexts.length > 0;
+        }
+        else
+            return true;
+    });
+    const reduced = related.reduce((result, tx) => {
         if (tx.meta.data.token === con_1.native)
             result.natives.push(tx);
         else if (tx.meta.data.token === con_1.unit)
@@ -96211,6 +96315,7 @@ const timers_1 = __webpack_require__(/*! timers */ "./node_modules/timers-browse
 const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
 const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
 const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
+const bignumber_js_1 = __importDefault(__webpack_require__(/*! ../../node_modules/bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
 const port = peer_list_1.peer_list[0].port || "57750";
 const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
@@ -96277,8 +96382,8 @@ const compute_yet = async () => {
             else if (block.meta.index === chain.length) {
                 if (exports.store.state.replace_mode && block.meta.index >= exports.store.state.replace_index)
                     exports.store.commit('replaceing', false);
-                const pre_chain_index = exports.store.state.chain.length;
                 await index_1.block_accept(block, chain.slice(), exports.store.state.candidates.slice(), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
+                const new_chain = exports.store.state.chain;
                 const txs = exports.store.state.yet_data.filter((d) => d.type === "tx");
                 const blocks = exports.store.state.yet_data.filter((d) => d.type === "block" && d.block[0] != null && d.block[0].meta.index != block.meta.index); /*.sort((a:Data,b:Data)=>{
                     return a.block[0].meta.index - b.block[0].meta.index;
@@ -96288,22 +96393,21 @@ const compute_yet = async () => {
                 exports.store.commit("refresh_yet_data", reduced);
                 const balance = await index_1.get_balance(exports.store.getters.my_address);
                 exports.store.commit("refresh_balance", balance);
-                const new_chain_index = exports.store.state.chain.length;
-                if (new_chain_index === pre_chain_index + 1) {
-                    const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
-                    const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
-                    reqs_pure.forEach(pure => {
-                        const full_tx = TxSet.pure_to_tx(pure, block);
-                        console.log(full_tx);
-                        exports.store.commit('add_not_refreshed', full_tx);
-                    });
-                    if (refs_pure.length > 0) {
-                        console.log(refs_pure);
-                        exports.store.commit('del_not_refreshed', refs_pure.map(pure => pure.meta.data.request));
+                const refreshes = exports.store.state.not_refreshed_tx;
+                const related = refreshes.filter(tx => {
+                    if (tx.meta.pre.flag === true) {
+                        const pres = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "pre");
+                        return pres.length > 0;
                     }
-                }
-                if (exports.store.state.not_refreshed_tx.length > 0 && !exports.store.state.replace_mode) {
-                    const req_tx = exports.store.state.not_refreshed_tx[0];
+                    else if (tx.meta.next.flag === true) {
+                        const nexts = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "next");
+                        return nexts.length > 0;
+                    }
+                    else
+                        return true;
+                });
+                if (related.length > 0 && !exports.store.state.replace_mode) {
+                    const req_tx = related[0];
                     const chain = exports.store.state.chain.slice();
                     const index = (() => {
                         for (let block of chain.slice().reverse()) {
@@ -96317,7 +96421,7 @@ const compute_yet = async () => {
                     })();
                     const code = exports.store.state.code[req_tx.meta.data.token];
                     await index_1.send_refresh_tx(_.copy(exports.store.state.roots), exports.store.state.secret, req_tx, index, code, exports.store.state.chain.slice());
-                    await send_blocks();
+                    //await send_blocks();
                 }
                 /*if(refs_pure.length>0){
                     await P.forEach(refs_pure, async (pure:T.TxPure)=>{
@@ -96326,48 +96430,45 @@ const compute_yet = async () => {
                         await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
                     })
                 }*/
-                const bought_units = block.units.reduce((result, u) => {
-                    if (u.meta.kind === "request")
-                        return result;
-                    const ref_tx = TxSet.pure_to_tx(u, block);
-                    const req_tx = TxSet.find_req_tx(ref_tx, chain);
-                    const raw = req_tx.raw || TxSet.empty_tx().raw;
-                    const this_units = JSON.parse(raw.raw[2] || "[]") || [];
-                    return result.concat(this_units);
-                }, []);
-                if (bought_units.some(unit => unit.request === exports.store.state.now_buying))
-                    exports.store.commit('unit_buying', "");
-                const new_unit_store = _.new_obj(exports.store.state.unit_store, (store) => {
-                    bought_units.forEach(unit => {
-                        const com = store[unit.request] || [];
-                        const deleted = com.filter(c => _.ObjectHash(c) != _.ObjectHash(unit));
-                        store[unit.request] = deleted;
-                    });
-                    return store;
-                });
-                exports.store.commit("refresh_unit_store", new_unit_store);
                 const unit_store_values = Object.values(exports.store.state.unit_store);
                 const units_sum = unit_store_values.reduce((sum, us) => sum + us.length, 0);
-                if (unit_store_values.length > 0 && exports.store.state.now_buying === "" && !exports.store.state.replace_mode) {
-                    const reversed_chain = exports.store.state.chain.slice().reverse();
-                    const refreshed = (() => {
-                        let result = [];
-                        for (let block of reversed_chain) {
-                            for (let tx of block.txs.concat(block.natives).concat(block.units)) {
-                                if (tx.meta.kind === "refresh") {
-                                    result = result.concat(unit_store_values.reduce((result, us) => {
-                                        if (us.length > 0 && us[0].request === tx.meta.data.request)
-                                            return result.concat(us);
-                                        else
-                                            return result;
-                                    }, []));
-                                }
-                                if (result.length === units_sum)
-                                    break;
+                const reversed_chain = exports.store.state.chain.slice().reverse();
+                const refreshed = (() => {
+                    let result = [];
+                    let price_sum;
+                    let flag = false;
+                    for (let block of reversed_chain) {
+                        for (let tx of block.txs.concat(block.natives).concat(block.units)) {
+                            if (tx.meta.kind === "refresh") {
+                                result = result.concat(unit_store_values.reduce((result, us) => {
+                                    if (us.length > 0 && us[0].request === tx.meta.data.request) {
+                                        price_sum = result.reduce((sum, unit) => new bignumber_js_1.default(sum).plus(unit.unit_price).toNumber(), 0);
+                                        us.forEach(u => {
+                                            if (new bignumber_js_1.default(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new bignumber_js_1.default(balance).times(0.99))) {
+                                                flag = true;
+                                                return result;
+                                            }
+                                            else {
+                                                price_sum = new bignumber_js_1.default(price_sum).plus(u.unit_price).toNumber();
+                                                result.push(u);
+                                            }
+                                        });
+                                        return result;
+                                    }
+                                    else
+                                        return result;
+                                }, []));
                             }
+                            if (result.length === units_sum || flag)
+                                break;
                         }
-                        return result;
-                    })();
+                    }
+                    return result;
+                })();
+                console.log(unit_store_values);
+                console.log('buy_units are:');
+                console.log(refreshed);
+                if (refreshed.length > 0 && exports.store.state.now_buying === "" && !exports.store.state.replace_mode) {
                     const validatorPub = BlockSet.search_key_block(reversed_chain.slice().reverse()).meta.validatorPub;
                     const validator_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(validatorPub));
                     const buy_units = index_1.random_chose(refreshed, 10);
@@ -96420,21 +96521,20 @@ exports.client.subscribe('/data', async (data) => {
 })*/
 exports.client.subscribe('/checkchain', (data) => {
     console.log('checked');
+    console.log(exports.store.state.check_mode);
     exports.client.publish('/replacechain', exports.store.state.chain.slice());
 });
 exports.client.subscribe('/replacechain', async (chain) => {
     try {
         console.log("replace:");
         console.log(chain);
-        if (exports.store.state.check_mode) {
-            await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
-            exports.store.commit('checking', false);
-            const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
-            const unit_state = await S_Trie.get(CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret)));
-            console.log(await S_Trie.filter());
-            if (chain.length === 1 && unit_state != null && unit_state.amount > 0)
-                await index_1.send_key_block(JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots));
-        }
+        await index_1.check_chain(chain.slice(), JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
+        exports.store.commit('checking', false);
+        const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
+        const unit_state = await S_Trie.get(CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret)));
+        console.log(await S_Trie.filter());
+        if (chain.length === 1 && unit_state != null && unit_state.amount > 0)
+            await index_1.send_key_block(JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])), exports.store.state.secret, exports.store.state.candidates.slice(), _.copy(exports.store.state.roots));
     }
     catch (e) {
         throw new Error(e);
@@ -96590,7 +96690,8 @@ exports.store = new vuex_1.default.Store({
     },
     block_accept(commit,block:T.Block){
         try{
-            if(!store.state.check_mode){
+            if(!store.state.
+            ){
                 commit.commit("check",true);
                 block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),_.copy(store.state.unit_store)).then(()=>{
                     console.log("block accept");
@@ -96644,8 +96745,8 @@ const Wallet = {
     store: exports.store,
     data: function () {
         return {
-            to: "Vr:native:cc57286592f4029e666e4f0b589fda1d8d295248510698e45f16b4aadef7592b",
-            amount: "0.01"
+            to: "",
+            amount: ""
         };
     },
     created: async function () {

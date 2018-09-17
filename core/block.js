@@ -524,6 +524,11 @@ exports.change_unit_amounts = (unit, rate, StateData) => {
             return s;
         return _.new_obj(s, s => {
             s.amount = new bignumber_js_1.BigNumber(s.amount).times(rate).toNumber();
+            const reduce = new bignumber_js_1.BigNumber(s.amount).times(new bignumber_js_1.BigNumber(1).minus(rate));
+            if (s.data.reduce == null)
+                s.data.reduce = reduce.toFixed(18);
+            else
+                s.data.reduce = (new bignumber_js_1.BigNumber(Number(s.data.reduce)).plus(reduce)).toFixed(18);
             return s;
         });
     });
@@ -537,7 +542,7 @@ const compute_issue = (all_issue, index, cycle) => {
     else
         return issue.toNumber();
 };
-const issue_native = (block, validator, all_issue, fee_sum, block_time, native, StateData) => {
+const issue_native = (block, validator, all_issue, fee_sum, block_time, native, solvency, StateData) => {
     const cycle = new bignumber_js_1.BigNumber(126144000000).dividedToIntegerBy(block_time);
     const index = new bignumber_js_1.BigNumber(block.meta.index);
     const i = index.div(cycle).integerValue(bignumber_js_1.BigNumber.ROUND_DOWN).toNumber();
@@ -546,11 +551,12 @@ const issue_native = (block, validator, all_issue, fee_sum, block_time, native, 
     return StateData.map(s => {
         if (s.kind === "state" && s.owner === validator && s.token === native) {
             return _.new_obj(s, (s) => {
-                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(add).toNumber();
-                if (s.data.issue == null)
+                s.amount = new bignumber_js_1.BigNumber(s.amount).plus(issue).toNumber();
+                const index = solvency.indexOf(validator);
+                if (index != -1 && s.data.issue == null)
                     s.data.issue = add.toFixed(18);
-                else
-                    s.data.issue = new bignumber_js_1.BigNumber(s.data.issue).plus(add).toFixed(18);
+                else if (index != -1)
+                    s.data.issue = new bignumber_js_1.BigNumber(Number(s.data.issue)).plus(add).toFixed(18);
                 return s;
             });
         }
@@ -561,7 +567,7 @@ const issue_native = (block, validator, all_issue, fee_sum, block_time, native, 
 exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_blocks, block_size, right_candidates, right_stateroot, right_locationroot, native, unit, rate, token_name_maxsize, all_issue, StateData, LocationData) => {
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_size, native, unit, StateData, LocationData)) {
         const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
-        const StateData_issued = issue_native(block, validator, all_issue, 0, block_time, native, StateData);
+        const StateData_issued = issue_native(block, validator, all_issue, 0, block_time, native, [], StateData);
         const StateData_unit = exports.change_unit_amounts(unit, rate, StateData_issued);
         const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
         return {
@@ -607,9 +613,14 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
                 return result;
         }, sets);
         const fee_sum = tx_fee_sum(target.map(t => TxSet.tx_to_pure(t)), block.raws);
-        const StateData_issued = issue_native(block, validator, all_issue, fee_sum, block_time, native, refreshed[0]);
+        const solvency = target.reduce((result, tx) => {
+            if (tx.meta.kind != "request")
+                return result;
+            return result.concat(tx.meta.data.base);
+        }, []);
+        const StateData_issued = issue_native(block, validator, all_issue, fee_sum, block_time, native, solvency, refreshed[0]);
         const unit_changed = exports.change_unit_amounts(unit, rate, StateData_issued);
-        const new_candidates = exports.NewCandidates(unit, rate, StateData);
+        const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
         return {
             state: unit_changed,
             location: refreshed[1],

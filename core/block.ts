@@ -130,10 +130,10 @@ export const txs_check = (block:T.Block,my_version:number,native:string,unit:str
     const target = txs.concat(natives).concat(units);
     return target.some((tx:T.Tx)=>{
         if(tx.meta.kind==="request"){
-            return !TxSet.ValidRequestTx(tx,my_version,native,unit,StateData,LocationData);
+            return !TxSet.ValidRequestTx(tx,my_version,native,unit,true,StateData,LocationData);
         }
         else if(tx.meta.kind==="refresh"){
-            return !TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,token_name_maxsize,StateData,LocationData);
+            return !TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,true,token_name_maxsize,StateData,LocationData);
         }
         else return true;
     });
@@ -286,7 +286,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
     const validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(validatorPub));
     const validator_state:T.State = StateData.filter(s=>{return s.kind==="state"&&s.token===unit&&s.owner===validator})[0] || StateSet.CreateState(0,validator,unit,0,{},[]);
 
-    const native_request_check = natives.some(pure=>{
+    /*const native_request_check = natives.some(pure=>{
         if(pure.meta.kind==="refresh") return false;
         return pure.meta.data.base.indexOf(native_validator)!=-1;
     });
@@ -302,7 +302,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
         const tx = TxSet.pure_to_tx(pure,block);
         const req = TxSet.find_req_tx(tx,chain);
         return req.meta.data.base.indexOf(unit_validator)!=-1;
-    })
+    })*/
 
     const tx_roots = txs.map(t=>t.hash).concat(natives.map(n=>n.hash)).concat(units.map(u=>u.hash));
     const pures = txs.map(tx=>{return {hash:tx.hash,meta:tx.meta}}).concat(natives.map(n=>{return {hash:n.hash,meta:n.meta}})).concat(units.map(u=>{return {hash:u.hash,meta:u.meta}}));
@@ -386,7 +386,7 @@ export const ValidMicroBlock = (block:T.Block,chain:T.Block[],my_shard_id:number
         console.log("too many micro blocks");
         return false;
     }
-    else if(txs_check(block,my_version,native,unit,chain.slice(),token_name_maxsize,StateData,LocationData)){
+    else if(txs_check(block,my_version,native,unit,chain,token_name_maxsize,StateData,LocationData)){
         console.log("invalid txs");
         return false;
     }
@@ -502,16 +502,15 @@ const reduce_units = (states:T.State[],rate:number)=>{
 }
 
 export const CandidatesForm = (states:T.State[]):T.Candidates[]=>{
-    return states.slice().sort((a,b)=>{
+    return _.copy(states).slice().sort((a,b)=>{
         return _.Hex_to_Num(_.toHash(a.owner))-_.Hex_to_Num(_.toHash(b.owner))
     }).map(state=>{
         return {address:state.owner,amount:state.amount}
     });
 }
 
-export const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
-    return CandidatesForm(reduce_units(get_units(unit,StateData),rate))
-}
+export const NewCandidates = (unit:string,StateData:T.State[])=>CandidatesForm((get_units(unit,StateData)));
+
 
 
 /*const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
@@ -529,16 +528,16 @@ export const NewCandidates = (unit:string,rate:number,StateData:T.State[])=>{
     return false;
 }*/
 
-export const change_unit_amounts = (unit:string,rate:number,StateData:T.State[])=>{
+export const change_unit_amounts = (unit:string,rate:number,targets:string[],StateData:T.State[])=>{
     return StateData.map(s=>{
         if(s.kind!="state"||s.token!=unit) return s;
         return _.new_obj(
             s,
             s=>{
                 s.amount = new BigNumber(s.amount).times(rate).toNumber();
-                const reduce = new BigNumber(s.amount).times(new BigNumber(1).minus(rate));
-                if(s.data.reduce==null) s.data.reduce = reduce.toFixed(18);
-                else s.data.reduce = (new BigNumber(Number(s.data.reduce)).plus(reduce)).toFixed(18);
+                const index = targets.indexOf(s.owner);
+                if(index!=-1&&s.data.reduce==null) s.data.reduce = rate.toFixed(18);
+                else if(index!=-1) s.data.reduce = (new BigNumber(Number(s.data.reduce)).times(rate)).toFixed(18);
                 return s;
             }
         );
@@ -580,8 +579,8 @@ export const AcceptBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_
     if(block.meta.kind==="key"&&ValidKeyBlock(block,chain,my_shard_id,my_version,right_candidates,right_stateroot,right_locationroot,block_size,native,unit,StateData,LocationData)){
         const validator = CryptoSet.GenereateAddress(native,_.reduce_pub(block.meta.validatorPub));
         const StateData_issued = issue_native(block,validator,all_issue,0,block_time,native,[],StateData);
-        const StateData_unit = change_unit_amounts(unit,rate,StateData_issued);
-        const new_candidates = NewCandidates(unit,rate,StateData_issued);
+        const StateData_unit = change_unit_amounts(unit,rate,[],StateData_issued);
+        const new_candidates = NewCandidates(unit,StateData_unit);
         return {
             state:StateData_unit,
             location:LocationData,
@@ -629,10 +628,14 @@ export const AcceptBlock = (block:T.Block,chain:T.Block[],my_shard_id:number,my_
             if(tx.meta.kind!="request") return result;
             return result.concat(tx.meta.data.base);
         },[]);
+        const unit_targets = units.reduce((result:string[],tx)=>{
+            if(tx.meta.kind==="refresh") return result;
+            return result.concat(tx.meta.data.address);
+        },[]);
         const StateData_issued = issue_native(block,validator,all_issue,fee_sum,block_time,native,solvency,refreshed[0]);
-        const unit_changed = change_unit_amounts(unit,rate,StateData_issued);
+        const unit_changed = change_unit_amounts(unit,rate,unit_targets,StateData_issued);
 
-        const new_candidates = NewCandidates(unit,rate,StateData_issued);
+        const new_candidates = NewCandidates(unit,unit_changed);
         return {
             state:unit_changed,
             location:refreshed[1],

@@ -135,10 +135,10 @@ exports.txs_check = (block, my_version, native, unit, chain, token_name_maxsize,
     const target = txs.concat(natives).concat(units);
     return target.some((tx) => {
         if (tx.meta.kind === "request") {
-            return !TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
+            return !TxSet.ValidRequestTx(tx, my_version, native, unit, true, StateData, LocationData);
         }
         else if (tx.meta.kind === "refresh") {
-            return !TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData);
+            return !TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, true, token_name_maxsize, StateData, LocationData);
         }
         else
             return true;
@@ -289,25 +289,23 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator_state = StateData.filter(s => { return s.kind === "state" && s.token === unit && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
-    const native_request_check = natives.some(pure => {
-        if (pure.meta.kind === "refresh")
-            return false;
-        return pure.meta.data.base.indexOf(native_validator) != -1;
+    /*const native_request_check = natives.some(pure=>{
+        if(pure.meta.kind==="refresh") return false;
+        return pure.meta.data.base.indexOf(native_validator)!=-1;
     });
-    const native_refresh_check = natives.some(pure => {
-        if (pure.meta.kind === "request")
-            return false;
-        const tx = TxSet.pure_to_tx(pure, block);
-        const req = TxSet.find_req_tx(tx, chain);
-        return req.meta.data.base.indexOf(native_validator) != -1;
+
+    const native_refresh_check = natives.some(pure=>{
+        if(pure.meta.kind==="request") return false;
+        const tx = TxSet.pure_to_tx(pure,block);
+        const req = TxSet.find_req_tx(tx,chain);
+        return req.meta.data.base.indexOf(native_validator)!=-1;
     });
-    const unit_refresh_check = units.some(pure => {
-        if (pure.meta.kind === "request")
-            return false;
-        const tx = TxSet.pure_to_tx(pure, block);
-        const req = TxSet.find_req_tx(tx, chain);
-        return req.meta.data.base.indexOf(unit_validator) != -1;
-    });
+    const unit_refresh_check = units.some(pure=>{
+        if(pure.meta.kind==="request") return false;
+        const tx = TxSet.pure_to_tx(pure,block);
+        const req = TxSet.find_req_tx(tx,chain);
+        return req.meta.data.base.indexOf(unit_validator)!=-1;
+    })*/
     const tx_roots = txs.map(t => t.hash).concat(natives.map(n => n.hash)).concat(units.map(u => u.hash));
     const pures = txs.map(tx => { return { hash: tx.hash, meta: tx.meta }; }).concat(natives.map(n => { return { hash: n.hash, meta: n.meta }; })).concat(units.map(u => { return { hash: u.hash, meta: u.meta }; }));
     const date = new Date();
@@ -386,7 +384,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("too many micro blocks");
         return false;
     }
-    else if (exports.txs_check(block, my_version, native, unit, chain.slice(), token_name_maxsize, StateData, LocationData)) {
+    else if (exports.txs_check(block, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData)) {
         console.log("invalid txs");
         return false;
     }
@@ -495,15 +493,13 @@ const reduce_units = (states, rate) => {
     });
 };
 exports.CandidatesForm = (states) => {
-    return states.slice().sort((a, b) => {
+    return _.copy(states).slice().sort((a, b) => {
         return _.Hex_to_Num(_.toHash(a.owner)) - _.Hex_to_Num(_.toHash(b.owner));
     }).map(state => {
         return { address: state.owner, amount: state.amount };
     });
 };
-exports.NewCandidates = (unit, rate, StateData) => {
-    return exports.CandidatesForm(reduce_units(exports.get_units(unit, StateData), rate));
-};
+exports.NewCandidates = (unit, StateData) => exports.CandidatesForm((exports.get_units(unit, StateData)));
 /*const check_fraud_proof = (block:T.Block,chain:T.Block[],code:string,gas_limit:number,StateData:T.State[])=>{
     const tx = _.find_tx(chain,block.meta.fraud.hash);
     const empty_state = StateSet.CreateState()
@@ -518,17 +514,17 @@ exports.NewCandidates = (unit, rate, StateData) => {
     if(result.traced!=tx.meta.data.trace) return true;
     return false;
 }*/
-exports.change_unit_amounts = (unit, rate, StateData) => {
+exports.change_unit_amounts = (unit, rate, targets, StateData) => {
     return StateData.map(s => {
         if (s.kind != "state" || s.token != unit)
             return s;
         return _.new_obj(s, s => {
             s.amount = new bignumber_js_1.BigNumber(s.amount).times(rate).toNumber();
-            const reduce = new bignumber_js_1.BigNumber(s.amount).times(new bignumber_js_1.BigNumber(1).minus(rate));
-            if (s.data.reduce == null)
-                s.data.reduce = reduce.toFixed(18);
-            else
-                s.data.reduce = (new bignumber_js_1.BigNumber(Number(s.data.reduce)).plus(reduce)).toFixed(18);
+            const index = targets.indexOf(s.owner);
+            if (index != -1 && s.data.reduce == null)
+                s.data.reduce = rate.toFixed(18);
+            else if (index != -1)
+                s.data.reduce = (new bignumber_js_1.BigNumber(Number(s.data.reduce)).times(rate)).toFixed(18);
             return s;
         });
     });
@@ -568,8 +564,8 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
     if (block.meta.kind === "key" && exports.ValidKeyBlock(block, chain, my_shard_id, my_version, right_candidates, right_stateroot, right_locationroot, block_size, native, unit, StateData, LocationData)) {
         const validator = CryptoSet.GenereateAddress(native, _.reduce_pub(block.meta.validatorPub));
         const StateData_issued = issue_native(block, validator, all_issue, 0, block_time, native, [], StateData);
-        const StateData_unit = exports.change_unit_amounts(unit, rate, StateData_issued);
-        const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
+        const StateData_unit = exports.change_unit_amounts(unit, rate, [], StateData_issued);
+        const new_candidates = exports.NewCandidates(unit, StateData_unit);
         return {
             state: StateData_unit,
             location: LocationData,
@@ -618,9 +614,14 @@ exports.AcceptBlock = (block, chain, my_shard_id, my_version, block_time, max_bl
                 return result;
             return result.concat(tx.meta.data.base);
         }, []);
+        const unit_targets = units.reduce((result, tx) => {
+            if (tx.meta.kind === "refresh")
+                return result;
+            return result.concat(tx.meta.data.address);
+        }, []);
         const StateData_issued = issue_native(block, validator, all_issue, fee_sum, block_time, native, solvency, refreshed[0]);
-        const unit_changed = exports.change_unit_amounts(unit, rate, StateData_issued);
-        const new_candidates = exports.NewCandidates(unit, rate, StateData_issued);
+        const unit_changed = exports.change_unit_amounts(unit, rate, unit_targets, StateData_issued);
+        const new_candidates = exports.NewCandidates(unit, unit_changed);
         return {
             state: unit_changed,
             location: refreshed[1],

@@ -10,8 +10,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const CryptoSet = __importStar(require("./crypto_set"));
 const TxSet = __importStar(require("./tx"));
 const bignumber_js_1 = require("bignumber.js");
+const lodash_1 = require("lodash");
 exports.copy = (data) => {
-    return Object.assign({}, data);
+    return lodash_1.cloneDeep(data);
 };
 exports.new_obj = (obj, fn) => {
     return fn(exports.copy(obj));
@@ -78,21 +79,11 @@ exports.tx_fee = (tx) => {
     return new bignumber_js_1.BigNumber(price).times(Buffer.from(target).length).toNumber();
 };
 exports.find_tx = (chain, hash) => {
-    for (let block of chain.slice()) {
-        if (block.meta.kind === "key")
-            continue;
-        for (let tx of block.txs.slice()) {
-            if (tx.hash === hash)
-                return tx;
-        }
-        for (let tx of block.natives.slice()) {
-            if (tx.hash === hash)
-                return tx;
-        }
-        for (let tx of block.units.slice()) {
-            if (tx.hash === hash)
-                return tx;
-        }
+    for (let block of exports.copy(chain)) {
+        let txs = block.txs.concat(block.natives).concat(block.units);
+        let i = txs.map(tx => tx.hash).indexOf(hash);
+        if (i != -1)
+            return exports.copy(txs[i]);
     }
     return TxSet.empty_tx_pure();
 };

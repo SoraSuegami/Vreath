@@ -2,10 +2,11 @@ import * as CryptoSet from './crypto_set'
 import * as T from './types'
 import * as TxSet from './tx'
 import {BigNumber} from 'bignumber.js'
+import {cloneDeep} from 'lodash'
 
 
 export const copy = <T>(data:T)=>{
-  return Object.assign({},data);
+  return cloneDeep(data)
 }
 
 
@@ -88,17 +89,10 @@ export const tx_fee = (tx:T.Tx)=>{
 }
 
 export const find_tx = (chain:T.Block[],hash:string)=>{
-  for(let block of chain.slice()){
-    if(block.meta.kind==="key") continue;
-    for(let tx of block.txs.slice()){
-      if(tx.hash===hash) return tx;
-    }
-    for(let tx of block.natives.slice()){
-      if(tx.hash===hash) return tx;
-    }
-    for(let tx of block.units.slice()){
-      if(tx.hash===hash) return tx;
-    }
+  for(let block of copy(chain)){
+    let txs = block.txs.concat(block.natives).concat(block.units);
+    let i = txs.map(tx=>tx.hash).indexOf(hash);
+    if(i!=-1) return copy(txs[i]);
   }
   return TxSet.empty_tx_pure();
 }

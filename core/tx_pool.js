@@ -11,10 +11,10 @@ const TxSet = __importStar(require("./tx"));
 const _ = __importStar(require("./basic"));
 const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, StateData, LocationData) => {
     if (tx.meta.kind == "request") {
-        return TxSet.ValidRequestTx(tx, my_version, native, unit, StateData, LocationData);
+        return TxSet.ValidRequestTx(tx, my_version, native, unit, false, StateData, LocationData);
     }
     else if (tx.meta.kind == "refresh") {
-        return TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, token_name_maxsize, StateData, LocationData);
+        return TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, false, token_name_maxsize, StateData, LocationData);
     }
     else
         return false;

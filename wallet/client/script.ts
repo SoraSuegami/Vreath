@@ -117,7 +117,7 @@ const compute_yet = async ():Promise<void>=>{
                     }
                 }
                 else store.commit('replaceing',false);
-                await send_blocks();
+                //await send_blocks();
                 await sleep(block_time);
                 return await compute_yet();
             }
@@ -260,6 +260,7 @@ client.subscribe('/checkchain',(address:string)=>{
     console.log('checked')
     console.log(store.state.check_mode)
     if(store.getters.my_address===address) client.publish('/replacechain',_.copy(store.state.chain));
+    return 0;
 });
 
 client.subscribe('/replacechain',async (chain:T.Block[])=>{
@@ -271,6 +272,7 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
         }
         store.commit('checking',false);
         console.log(store.state.yet_data);
+        return 0;
         //return await compute_yet(_.copy(store.state.roots),_.copy(store.state.chain),_.copy(store.state.pool),_.copy(store.state.candidates),_.copy(store.state.unit_store),_.copy(store.state.not_refreshed_tx),store.state.now_buying);
         /*const S_Trie = trie_ins(store.state.roots.stateroot);
         const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
@@ -388,15 +390,12 @@ export const store = new Vuex.Store({
         },
         push_yet_data(state,data:Data){
             state.yet_data.push(data);
-            localStorage.setItem('yet_data',JSON.stringify(_.copy(state.yet_data)));
         },
         unshift_yet_data(state,data:Data){
             state.yet_data.unshift(data);
-            localStorage.setItem('yet_data',JSON.stringify(_.copy(state.yet_data)));
         },
         refresh_yet_data(state,data:Data[]){
             state.yet_data = _.copy(data);
-            localStorage.setItem('yet_data',JSON.stringify(_.copy(state.yet_data)));
         },
         checking(state,bool:boolean){
             state.check_mode = bool;

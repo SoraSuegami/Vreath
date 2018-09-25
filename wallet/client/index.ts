@@ -309,10 +309,10 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             },[]);
             const my_unit_buying = block.units.some(tx=>{
                 if(tx.meta.kind==="request") return false;
-                const ref_tx = _.copy(TxSet.pure_to_tx(tx,block));
+                const ref_tx = _.copy(TxSet.pure_to_tx(_.copy(tx),_.copy(block)));
                 const req_tx = _.copy(TxSet.find_req_tx(_.copy(ref_tx),_.copy(chain)));
                 const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
-                return req_tx.meta.data.address===unit_address
+                return _.copy(req_tx).meta.data.address===unit_address
             })
             console.log("my_unit_buying");
             console.log(my_unit_buying);
@@ -390,7 +390,7 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
 }
 
 export const tx_check = (block:T.Block,chain:T.Block[],StateData:T.State[],LocationData:T.Location[])=>{
-    const txs = block.txs.map((tx,i):T.Tx=>{
+    const txs:T.Tx[] = block.txs.map((tx,i)=>{
         return {
             hash:tx.hash,
             meta:tx.meta,
@@ -634,18 +634,19 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
     const LocationData = await locations_for_block(micro_block,chain,L_Trie);
     //console.log(BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData))
     const invalid_index = tx_check(micro_block,chain,StateData,LocationData);
+    console.log(invalid_index);
     const block_check = BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData);
     if(invalid_index===-1&&block_check){
         const new_pool = _.new_obj(
             pool,
             p=>{
                 micro_block.txs.concat(micro_block.natives).concat(micro_block.units).forEach(tx=>{
-                    delete p[tx.hash];
+                    if(tx.meta.kind==="refresh") delete p[tx.hash];
                 });
                 return p;
             }
         );
-        store.commit('refresh_pool',new_pool);
+        store.commit('refresh_pool',_.copy(new_pool));
         const new_refreshing = already_requests.concat(micro_block.txs.concat(micro_block.natives).concat(micro_block.units).filter(tx=>tx.meta.kind==="refresh").map(tx=>tx.meta.data.request));
         store.commit('new_refreshing',_.copy(new_refreshing));
         client.publish('/data',{type:'block',tx:[],block:[micro_block]});
@@ -658,7 +659,7 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         const target_pure = micro_block.txs.concat(micro_block.natives).concat(micro_block.units)[invalid_index];
         const target_tx = TxSet.pure_to_tx(_.copy(target_pure),_.copy(micro_block));
         const valid = (()=>{
-            if(target_tx.meta.kind==="request") return TxSet.ValidRequestTx(_.copy(target_tx),my_version,native,unit,false,_.copy(StateData),_.copy(LocationData));
+            if(target_tx.meta.kind==="request") return !TxSet.ValidRequestTx(_.copy(target_tx),my_version,native,unit,false,_.copy(StateData),_.copy(LocationData));
             else return true;
         })();
         const del_pool = ((p)=>{
@@ -763,7 +764,7 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
             const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
         },info);*/
-        store.commit('refresh_yet_data',_.copy(add_blocks_data).concat(store.state.yet_data));
+        store.commit('refresh_yet_data',_.copy(add_blocks_data).concat(_.copy(store.state.yet_data)));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         store.commit("checking",false);*/
@@ -789,8 +790,8 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         const pure_native_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",native,_.copy([native_remiter].concat(unit_sellers)),["remit",JSON.stringify(prices)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
         const pure_unit_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",unit,_.copy([unit_remiter].concat("Vr:"+unit+":"+_.toHash(''))),["buy",JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
         console.log(pure_native_tx);
-        const native_pure_hash = pure_native_tx.meta.purehash;
-        const unit_pure_hash = pure_unit_tx.meta.purehash;
+        const native_pure_hash = _.copy(pure_native_tx).meta.purehash;
+        const unit_pure_hash = _.copy(pure_unit_tx).meta.purehash;
         const next_rel:T.Relation = {
             flag:true,
             hash:unit_pure_hash
@@ -841,11 +842,13 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         else{
             console.log("buy unit!");
             store.commit('buying_unit',true);
+            console.error(unit_tx.hash);
             client.publish('/data',{type:'tx',tx:[native_tx],block:[]});
             client.publish('/data',{type:'tx',tx:[unit_tx],block:[]});
         }
         /*const pre_tx = TxSet.CreateRequestTx(pub_key,remiter,Math.pow(2,-5),"issue",unit,[from],["buy",remiter,JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(10,-18));
-        const tx = TxSet.SignTx(pre_tx,secret,pub_key[0]);
+        const tx = TxSet.SignTx(pre_tx,secret,pub_key[0
+        ]);
         const stateroot = roots.stateroot;
         const S_Trie:Trie = trie_ins(stateroot);
         const locationroot = roots.locationroot;

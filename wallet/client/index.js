@@ -279,7 +279,12 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
         };
         const new_pool = _.new_obj(pool, p => {
             block.txs.concat(block.natives).concat(block.units).forEach(tx => {
-                delete p[tx.hash];
+                Object.values(p).forEach(t => {
+                    if (t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
+                        delete p[t.hash];
+                        delete p[t.meta.data.request];
+                    }
+                });
             });
             return p;
         });
@@ -860,7 +865,7 @@ exports.unit_buying = async (secret, units, roots, chain) => {
         else {
             console.log("buy unit!");
             script_1.store.commit('buying_unit', true);
-            console.error(unit_tx.hash);
+            //console.error(unit_tx.hash);
             script_2.client.publish('/data', { type: 'tx', tx: [native_tx], block: [] });
             script_2.client.publish('/data', { type: 'tx', tx: [unit_tx], block: [] });
         }

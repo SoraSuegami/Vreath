@@ -73,10 +73,16 @@ const compute_yet = async () => {
         const target = _.copy(data.tx[0]);
         console.log(target);
         //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
-        const new_pool = await index_1.tx_accept(_.copy(target), _.copy(exports.store.state.chain), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.unit_store));
-        const txs = exports.store.state.yet_data.filter((d) => d.type === "tx" && d.tx[0] != null && d.tx[0].hash != target.hash);
-        const blocks = exports.store.state.yet_data.filter((d) => d.type === "block");
-        const reduced = txs.concat(blocks);
+        await index_1.tx_accept(_.copy(target), _.copy(exports.store.state.chain), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.unit_store));
+        const now_yets = _.copy(exports.store.state.yet_data);
+        const reduced = now_yets.filter(d => {
+            if (d.type === "tx" && d.tx[0] != null)
+                return d.tx[0].hash != target.hash;
+            else if (d.type === "block" && d.block[0] != null)
+                return true;
+            else
+                return false;
+        });
         exports.store.commit("refresh_yet_data", _.copy(reduced));
         console.log(reduced);
         console.log('yet:');
@@ -121,13 +127,61 @@ const compute_yet = async () => {
                 console.log(new_chain.length);
                 if (exports.store.state.replace_mode && chain.length === new_chain.length)
                     exports.store.commit('replaceing', false);
-                const txs = _.copy(exports.store.state.yet_data).filter((d) => d.type === "tx");
-                const blocks = _.copy(exports.store.state.yet_data).filter((d) => d.type === "block" && d.block[0] != null && d.block[0].meta.index > block.meta.index); /*.sort((a:Data,b:Data)=>{
-                    return a.block[0].meta.index - b.block[0].meta.index;
-                });*/
-                const reduced = txs.concat(blocks);
-                console.log(reduced);
-                exports.store.commit("refresh_yet_data", reduced);
+                if (new_chain.length === chain.length + 1) {
+                    const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx => tx.meta.kind === "refresh");
+                    const now_yets = _.copy(exports.store.state.yet_data);
+                    let units = [];
+                    const reduced = now_yets.filter(d => {
+                        if (d.type === "tx" && d.tx[0] != null) {
+                            const t = _.copy(d.tx[0]);
+                            return !refs.some(tx => {
+                                if (t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
+                                    const unit = {
+                                        request: t.meta.data.request,
+                                        index: t.meta.data.index,
+                                        nonce: t.meta.nonce,
+                                        payee: t.meta.data.payee,
+                                        output: t.meta.data.output,
+                                        unit_price: t.meta.unit_price
+                                    };
+                                    units.push(_.copy(unit));
+                                    return true;
+                                }
+                                //else if(t.meta.kind==="request"&&t.hash===tx.meta.data.request) return true;
+                                else
+                                    return false;
+                            });
+                        }
+                        else if (d.type === "block" && d.block[0] != null)
+                            return d.block[0].meta.index > block.meta.index;
+                        else
+                            return false;
+                    });
+                    exports.store.commit("refresh_yet_data", reduced);
+                    const pre_unit_store = _.copy(exports.store.state.unit_store);
+                    const new_unit_store = _.new_obj(pre_unit_store, (store) => {
+                        units.forEach(unit => {
+                            const pre = store[unit.request] || [];
+                            if (store[unit.request] != null && store[unit.request].some(u => _.ObjectHash(u) === _.ObjectHash(unit)))
+                                return store;
+                            store[unit.request] = pre.concat(unit);
+                        });
+                        return store;
+                    });
+                    exports.store.commit("refresh_unit_store", new_unit_store);
+                }
+                else {
+                    const now_yets = _.copy(exports.store.state.yet_data);
+                    const reduced = now_yets.filter(d => {
+                        if (d.type === "tx" && d.tx[0] != null)
+                            return true;
+                        else if (d.type === "block" && d.block[0] != null)
+                            return d.block[0].meta.index > block.meta.index;
+                        else
+                            return false;
+                    });
+                    exports.store.commit("refresh_yet_data", reduced);
+                }
                 const balance = await index_1.get_balance(exports.store.getters.my_address);
                 exports.store.commit("refresh_balance", balance);
                 let refreshed_hash = [];
@@ -233,11 +287,15 @@ const compute_yet = async () => {
                 return await compute_yet();
             }
             else {
-                const txs = exports.store.state.yet_data.filter((d) => d.type === "tx");
-                const blocks = exports.store.state.yet_data.filter((d) => d.type === "block" && d.block[0] != null && d.block[0].meta.index != block.meta.index); /*.sort((a:Data,b:Data)=>{
-                    return a.block[0].meta.index - b.block[0].meta.index;
-                });*/
-                const reduced = txs.concat(blocks);
+                const now_yets = _.copy(exports.store.state.yet_data);
+                const reduced = now_yets.filter(d => {
+                    if (d.type === "tx" && d.tx[0] != null)
+                        return true;
+                    else if (d.type === "block" && d.block[0] != null)
+                        return d.block[0].meta.index != block.meta.index;
+                    else
+                        return false;
+                });
                 console.log(reduced);
                 exports.store.commit("refresh_yet_data", _.copy(reduced));
                 console.log('yet:');
@@ -249,7 +307,14 @@ const compute_yet = async () => {
     }
 };
 exports.client.subscribe('/data', async (data) => {
-    exports.store.commit('push_yet_data', _.copy(data));
+    if (data.type === "block")
+        exports.store.commit('push_yet_data', _.copy(data));
+    const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
+    const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret));
+    const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0);
+    const unit_amount = unit_state.amount || 0;
+    if (data.type === "tx" && unit_amount > 0)
+        exports.store.commit('push_yet_data', _.copy(data));
 });
 exports.client.subscribe('/checkchain', (address) => {
     console.log('checked');
@@ -387,6 +452,11 @@ exports.store = new vuex_1.default.Store({
         },
         checking(state, bool) {
             state.check_mode = bool;
+            if (bool === true) {
+                setTimeout(() => {
+                    state.check_mode = false;
+                }, con_1.block_time * 10);
+            }
         },
         replaceing(state, bool) {
             state.replace_mode = bool;

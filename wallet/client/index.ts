@@ -266,7 +266,12 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 pool,
                 p=>{
                     block.txs.concat(block.natives).concat(block.units).forEach(tx=>{
-                        delete p[tx.hash];
+                        Object.values(p).forEach(t=>{
+                            if(t.meta.kind==="refresh"&&t.meta.data.index===tx.meta.data.index&&t.meta.data.request===tx.meta.data.request){
+                                delete p[t.hash];
+                                delete p[t.meta.data.request];
+                            }
+                        });
                     });
                     return p;
                 }
@@ -842,7 +847,7 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         else{
             console.log("buy unit!");
             store.commit('buying_unit',true);
-            console.error(unit_tx.hash);
+            //console.error(unit_tx.hash);
             client.publish('/data',{type:'tx',tx:[native_tx],block:[]});
             client.publish('/data',{type:'tx',tx:[unit_tx],block:[]});
         }

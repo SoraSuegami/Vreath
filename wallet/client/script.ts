@@ -84,10 +84,13 @@ const compute_yet = async ():Promise<void>=>{
         const target:T.Tx = _.copy(data.tx[0]);
         console.log(target);
         //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
-        const new_pool = await tx_accept(_.copy(target),_.copy(store.state.chain),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.unit_store));
-        const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
-        const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
-        const reduced = txs.concat(blocks);
+        await tx_accept(_.copy(target),_.copy(store.state.chain),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.unit_store));
+        const now_yets:Data[] = _.copy(store.state.yet_data);
+        const reduced = now_yets.filter(d=>{
+            if(d.type==="tx"&&d.tx[0]!=null) return d.tx[0].hash!=target.hash;
+            else if(d.type==="block"&&d.block[0]!=null) return true;
+            else return false;
+        });
         store.commit("refresh_yet_data",_.copy(reduced));
         console.log(reduced);
         console.log('yet:')
@@ -105,7 +108,7 @@ const compute_yet = async ():Promise<void>=>{
     }
     else if(data.type==="block"&&data.block.length>0){
         const block = data.block[0];
-        const chain = _.copy(store.state.chain);
+        const chain:T.Block[] = _.copy(store.state.chain);
         console.log(block);
         if(block.meta.version>=compatible_version){
             if(block.meta.index>chain.length){
@@ -129,13 +132,57 @@ const compute_yet = async ():Promise<void>=>{
                 console.log(chain.length)
                 console.log(new_chain.length)
                 if(store.state.replace_mode&&chain.length===new_chain.length) store.commit('replaceing',false);
-                const txs = _.copy(store.state.yet_data).filter((d:Data)=>d.type==="tx");
-                const blocks= _.copy(store.state.yet_data).filter((d:Data)=>d.type==="block"&&d.block[0]!=null&&d.block[0].meta.index>block.meta.index)/*.sort((a:Data,b:Data)=>{
-                    return a.block[0].meta.index - b.block[0].meta.index;
-                });*/
-                const reduced = txs.concat(blocks);
-                console.log(reduced);
-                store.commit("refresh_yet_data",reduced);
+                if(new_chain.length===chain.length+1){
+                    const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx=>tx.meta.kind==="refresh");
+                    const now_yets:Data[] = _.copy(store.state.yet_data);
+                    let units:T.Unit[] = [];
+                    const reduced = now_yets.filter(d=>{
+                        if(d.type==="tx"&&d.tx[0]!=null){
+                            const t = _.copy(d.tx[0]);
+                            return !refs.some(tx=>{
+                                if(t.meta.kind==="refresh"&&t.meta.data.index===tx.meta.data.index&&t.meta.data.request===tx.meta.data.request){
+                                    const unit:T.Unit = {
+                                        request:t.meta.data.request,
+                                        index:t.meta.data.index,
+                                        nonce:t.meta.nonce,
+                                        payee:t.meta.data.payee,
+                                        output:t.meta.data.output,
+                                        unit_price:t.meta.unit_price
+                                    }
+                                    units.push(_.copy(unit));
+                                    return true;
+                                }
+                                //else if(t.meta.kind==="request"&&t.hash===tx.meta.data.request) return true;
+                                else return false;
+                            });
+                        }
+                        else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index;
+                        else return false;
+                    });
+                    store.commit("refresh_yet_data",reduced);
+                    const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
+                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
+                        pre_unit_store,
+                        (store)=>{
+                            units.forEach(unit=>{
+                                const pre = store[unit.request] || [];
+                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.ObjectHash(u)===_.ObjectHash(unit))) return store;
+                                store[unit.request] = pre.concat(unit);
+                            });
+                            return store;
+                        }
+                    );
+                    store.commit("refresh_unit_store",new_unit_store);
+                }
+                else{
+                    const now_yets:Data[] = _.copy(store.state.yet_data);
+                    const reduced = now_yets.filter(d=>{
+                        if(d.type==="tx"&&d.tx[0]!=null) return true;
+                        else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
+                        else return false;
+                    });
+                    store.commit("refresh_yet_data",reduced)
+                }
                 const balance = await get_balance(store.getters.my_address);
                 store.commit("refresh_balance",balance);
 
@@ -236,11 +283,12 @@ const compute_yet = async ():Promise<void>=>{
                 return await compute_yet();
             }
             else{
-                const txs = store.state.yet_data.filter((d:Data)=>d.type==="tx");
-                const blocks= store.state.yet_data.filter((d:Data)=>d.type==="block"&&d.block[0]!=null&&d.block[0].meta.index!=block.meta.index)/*.sort((a:Data,b:Data)=>{
-                    return a.block[0].meta.index - b.block[0].meta.index;
-                });*/
-                const reduced = txs.concat(blocks);
+                const now_yets:Data[] = _.copy(store.state.yet_data);
+                const reduced = now_yets.filter(d=>{
+                    if(d.type==="tx"&&d.tx[0]!=null) return true;
+                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index!=block.meta.index;
+                    else return false;
+                });
                 console.log(reduced);
                 store.commit("refresh_yet_data",_.copy(reduced));
                 console.log('yet:')
@@ -253,7 +301,12 @@ const compute_yet = async ():Promise<void>=>{
 }
 
 client.subscribe('/data',async (data:Data)=>{
-    store.commit('push_yet_data',_.copy(data));
+    if(data.type==="block") store.commit('push_yet_data',_.copy(data));
+    const S_Trie = trie_ins(store.state.roots.stateroot);
+    const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
+    const unit_state:T.State = await S_Trie.get(unit_address) || StateSet.CreateState(0,unit_address,unit,0);
+    const unit_amount = unit_state.amount || 0;
+    if(data.type==="tx"&&unit_amount>0) store.commit('push_yet_data',_.copy(data));
 });
 
 client.subscribe('/checkchain',(address:string)=>{
@@ -399,6 +452,11 @@ export const store = new Vuex.Store({
         },
         checking(state,bool:boolean){
             state.check_mode = bool;
+            if(bool===true){
+                setTimeout(()=>{
+                    state.check_mode = false;
+                },block_time*10);
+            }
         },
         replaceing(state,bool:boolean){
             state.replace_mode = bool;

@@ -194,13 +194,23 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
         const new_unit_store = _.new_obj(
             unit_store,
             (store)=>{
+                const valid_ref_tx = (()=>{
+                    for(let block of _.copy(chain).slice()){
+                        let txs = block.txs.concat(block.natives).concat(block.units);
+                        for(let t of _.copy(txs)){
+                            if(t.meta.kind==="refresh"&&t.meta.data.request===tx.meta.data.request&&t.meta.data.index===tx.meta.data.index) return t;
+                        }
+                    }
+                    return TxSet.empty_tx_pure();
+                })();
+                if(valid_ref_tx.hash!=TxSet.empty_tx_pure().hash&&valid_ref_tx.meta.data.output!=tx.meta.data.output) return store;
                 const pre = store[tx.meta.data.request] || [];
-                if(store[tx.meta.data.request]!=null&&store[tx.meta.data.request].some(u=>_.ObjectHash(u)===_.ObjectHash(new_unit))) return store;
-                store[tx.meta.data.request] = pre.concat(new_unit);
+                if(store[tx.meta.data.request]!=null&&store[tx.meta.data.request].some(u=>u.payee===new_unit.payee&&u.index===new_unit.index)) return _.copy(store);
+                else store[tx.meta.data.request] = pre.concat(new_unit);
                 return store;
             }
         )
-        store.commit("refresh_unit_store",new_unit_store);
+        store.commit("add_unit",new_unit);
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
                 for(let tx of block.txs.concat(block.natives).concat(block.units)){
@@ -309,7 +319,7 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 const ref_tx = TxSet.pure_to_tx(u,block);
                 const req_tx = TxSet.find_req_tx(ref_tx,chain);
                 const raw = req_tx.raw || TxSet.empty_tx().raw;
-                const this_units:T.Unit[] = JSON.parse(raw.raw[2]||"[]")||[];
+                const this_units:T.Unit[] = JSON.parse(raw.raw[1]||"[]")||[];
                 return result.concat(this_units);
             },[]);
             const my_unit_buying = block.units.some(tx=>{
@@ -328,13 +338,15 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 (store:{[key:string]:T.Unit[]})=>{
                     bought_units.forEach(unit=>{
                         const com = store[unit.request] || [];
-                        const deleted = com.filter(c=>_.ObjectHash(c)!=_.ObjectHash(unit))
+                        const deleted = com.filter(c=>(c.payee!=unit.payee&&c.index==unit.index&&c.output===unit.output)||(c.index!=unit.index));
                         store[unit.request] = deleted;
                     });
                     return store;
                 }
             )
-            store.commit("refresh_unit_store",_.copy(new_unit_store));
+            bought_units.forEach(unit=>{
+                store.commit("delete_unit",_.copy(unit));
+            });
 
 
             return {
@@ -433,7 +445,7 @@ export const get_balance = async (address:string)=>{
     const S_Trie = trie_ins(store.state.roots.stateroot||"");
     const state:T.State = await S_Trie.get(address);
     if(state==null) return 0;
-    return state.amount;
+    return new BigNumber(state.amount).toNumber();
 }
 
 export const send_request_tx = async (secret:string,type:T.TxTypes,token:string,base:string[],input_raw:string[],log:string[],roots:{[key:string]:string},chain:T.Block[],pre=TxSet.empty_tx_pure().meta.pre,next=TxSet.empty_tx_pure().meta.next)=>{
@@ -682,13 +694,22 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
                     unit_price:target_pure.meta.unit_price
                 }
                 const pre = store[target_pure.meta.data.request] || []
+                if(pre.length>0&&(pre.map(u=>_.toHash(u.payee+u.request+u.index)).indexOf(_.toHash(new_unit.payee+new_unit.request+new_unit.index))!=-1||pre[0].output!=new_unit.output)) return store;
                 store[target_pure.meta.data.request] = pre.concat(new_unit);
                 return store;
             }
             else return store;
         })(_.copy(unit_store))
+        const new_unit:T.Unit = {
+            request:target_pure.meta.data.request,
+            index:target_pure.meta.data.index,
+            nonce:target_pure.meta.nonce,
+            payee:target_pure.meta.data.payee,
+            output:target_pure.meta.data.output,
+            unit_price:target_pure.meta.unit_price
+        }
         store.commit("refresh_pool",_.copy(del_pool));
-        store.commit("refresh_unit_store",_.copy(add_unit_store));
+        store.commit("add_unit",_.copy(new_unit));
         await send_micro_block(_.copy(del_pool),secret,_.copy(chain),_.copy(candidates),_.copy(roots),_.copy(unit_store));
     }
     else{console.log("fall to create micro block;");}
@@ -790,9 +811,33 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         console.log(native_remiter)
         const unit_sellers = units.map(u=>u.payee);
         console.log(unit_sellers);
-        const native_sellers = unit_sellers.map(add=>add.split(":")[2]||"").map(id=>"Vr:"+native+":"+id);
-        const prices = units.map(u=>u.unit_price);
-        const pure_native_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",native,_.copy([native_remiter].concat(unit_sellers)),["remit",JSON.stringify(prices)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
+        const native_sellers = unit_sellers.reduce((res:string[],add)=>{
+            const index = res.indexOf(add);
+            if(index===-1) return res.concat(add);
+            else return res;
+        },[]);
+        const prices:number[] = Object.values(units.reduce((res:{[key:string]:number},unit)=>{
+            const amount = res[unit.payee];
+            if(amount==null){
+                return _.new_obj(
+                    res,
+                    r=>{
+                        r[unit.payee] = unit.unit_price;
+                        return r;
+                    }
+                )
+            }
+            else{
+                return _.new_obj(
+                    res,
+                    r=>{
+                        r[unit.payee] = new BigNumber(amount).plus(unit.unit_price).toNumber();
+                        return r;
+                    }
+                )
+            }
+        },{}));
+        const pure_native_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",native,_.copy([native_remiter].concat(native_sellers)),["remit",JSON.stringify(prices)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
         const pure_unit_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",unit,_.copy([unit_remiter].concat("Vr:"+unit+":"+_.toHash(''))),["buy",JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
         console.log(pure_native_tx);
         const native_pure_hash = _.copy(pure_native_tx).meta.purehash;
@@ -848,6 +893,9 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
             console.log("buy unit!");
             store.commit('buying_unit',true);
             //console.error(unit_tx.hash);
+            units.forEach(u=>{
+                store.commit('delete_unit',_.copy(u));
+            });
             client.publish('/data',{type:'tx',tx:[native_tx],block:[]});
             client.publish('/data',{type:'tx',tx:[unit_tx],block:[]});
         }

@@ -11,6 +11,16 @@
   <div id="app">
     <router-view></router-view>
   </div>
+  <script>
+    /*if('serviceWorker' in navigator){
+      navigator.serviceWorker.register("bundle.js").then(reg=>{
+        if(reg.installing) console.log('installing');
+        else if(reg.waiting) console.log('waiting');
+        else if(reg.active) console.log('active');
+      }).catch(error=>console.log('fail to service workers'));
+    }*/
+    //navigator.serviceWorker.register("bundle.js").catch(console.error.bind(console));
+  </script>
   <script type="text/javascript" src="./bundle.js"></script>
 </body>
 </html>

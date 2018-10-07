@@ -703,7 +703,15 @@ exports.native_code = (StateData, req_tx, native) => {
 };
 exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
     const base = req_tx.meta.data.base;
-    const not_changed = StateData;
+    const not_changed = _.copy(StateData).map(s => {
+        if (s.kind != "token" && s.token != unit)
+            return s;
+        return _.new_obj(s, s => {
+            s.committed = [];
+            s.issued = 0;
+            return s;
+        });
+    });
     const pre = _.copy(pre_tx);
     console.log(pre);
     console.log(chain);
@@ -711,7 +719,7 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
     if (req_tx.meta.data.token != unit || req_tx.meta.data.type != "issue" && req_tx.raw.raw[0] != "buy")
         return not_changed;
     const inputs = req_tx.raw.raw;
-    const pre_unit = StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0];
+    const pre_unit = _.copy(StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0]);
     const remiter = req_tx.meta.data.address;
     const units = JSON.parse(inputs[1]);
     const unit_check = units.some(u => {
@@ -725,19 +733,42 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
             }
             return exports.empty_tx_pure();
         })();
-        return unit_ref_tx.meta.data.output != u.output || pre_unit.committed.indexOf(_.ObjectHash(u)) != -1;
+        return unit_ref_tx.meta.data.output != u.output || pre_unit.committed.indexOf(_.toHash(u.payee + u.request + u.index.toString())) != -1;
     });
     if (unit_check || req_tx.meta.data.base[0] != remiter)
         return not_changed;
-    const hashes = units.map(u => _.ObjectHash(u));
+    const hashes = units.map(u => _.toHash(u.payee + u.request + u.index.toString()));
+    if (hashes.some((v, i, arr) => arr.indexOf(v) != i))
+        return not_changed;
     const unit_address = units.map(u => u.payee);
+    const unit_price_map = units.reduce((res, unit) => {
+        if (res[unit.payee] == null) {
+            res[unit.payee] = new bignumber_js_1.BigNumber(unit.unit_price).toNumber();
+            return res;
+        }
+        else {
+            res[unit.payee] = new bignumber_js_1.BigNumber(res[unit.payee]).plus(unit.unit_price).toNumber();
+            return res;
+        }
+    }, {});
     const unit_sum = units.length;
     const unit_ids = unit_address.map(add => add.split(":")[2] || "");
-    const native_ids = pre.meta.data.base.splice(1).map(add => add.split(":")[2] || "");
+    const native_adds = pre.meta.data.base.splice(1);
+    const native_ids = native_adds.map(add => add.split(":")[2] || "");
     const price_sum = units.reduce((sum, u) => sum + u.unit_price, 0);
     const native_amounts = JSON.parse(pre.raw.raw[1] || "[]").map((str) => Number(str));
+    const native_price_map = native_adds.reduce((res, add, i) => {
+        if (res[add] == null) {
+            res[add] = new bignumber_js_1.BigNumber(native_amounts[i]).toNumber();
+            return res;
+        }
+        else {
+            res[add] = new bignumber_js_1.BigNumber(res[add]).plus(native_amounts[i]).toNumber();
+            return res;
+        }
+    }, {});
     const native_sum = native_amounts.reduce((s, a) => s + a, 0);
-    if (_.ObjectHash(pre_base.splice(1)) != _.ObjectHash(unit_address) || pre.meta.data.token != native || pre.meta.data.type != "issue" || pre.raw.raw[0] != "remit" || _.toHash(_.reduce_pub(req_tx.meta.data.pub_key)) != _.toHash(_.reduce_pub(pre.meta.data.pub_key)) || _.ObjectHash(unit_ids) != _.ObjectHash(native_ids) || !(new bignumber_js_1.BigNumber(price_sum).isEqualTo(native_sum)))
+    if ( /*pre_base.splice(1).some(add=>unit_address.indexOf(add)===-1)*/_.ObjectHash(unit_price_map) != _.ObjectHash(native_price_map) || pre.meta.data.token != native || pre.meta.data.type != "issue" || pre.raw.raw[0] != "remit" || _.toHash(_.reduce_pub(req_tx.meta.data.pub_key)) != _.toHash(_.reduce_pub(pre.meta.data.pub_key)) || native_ids.some(add => unit_ids.indexOf(add) === -1) || !(new bignumber_js_1.BigNumber(price_sum).isEqualTo(native_sum)))
         return not_changed;
     const unit_bought = StateData.map(s => {
         if (s.kind === "state" && s.token === unit && s.owner === remiter) {

@@ -1940,7 +1940,15 @@ exports.native_code = (StateData, req_tx, native) => {
 };
 exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
     const base = req_tx.meta.data.base;
-    const not_changed = StateData;
+    const not_changed = _.copy(StateData).map(s => {
+        if (s.kind != "token" && s.token != unit)
+            return s;
+        return _.new_obj(s, s => {
+            s.committed = [];
+            s.issued = 0;
+            return s;
+        });
+    });
     const pre = _.copy(pre_tx);
     console.log(pre);
     console.log(chain);
@@ -1948,7 +1956,7 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
     if (req_tx.meta.data.token != unit || req_tx.meta.data.type != "issue" && req_tx.raw.raw[0] != "buy")
         return not_changed;
     const inputs = req_tx.raw.raw;
-    const pre_unit = StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0];
+    const pre_unit = _.copy(StateData.filter(s => { return s.kind === "token" && s.token === unit; })[0]);
     const remiter = req_tx.meta.data.address;
     const units = JSON.parse(inputs[1]);
     const unit_check = units.some(u => {
@@ -1962,19 +1970,42 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
             }
             return exports.empty_tx_pure();
         })();
-        return unit_ref_tx.meta.data.output != u.output || pre_unit.committed.indexOf(_.ObjectHash(u)) != -1;
+        return unit_ref_tx.meta.data.output != u.output || pre_unit.committed.indexOf(_.toHash(u.payee + u.request + u.index.toString())) != -1;
     });
     if (unit_check || req_tx.meta.data.base[0] != remiter)
         return not_changed;
-    const hashes = units.map(u => _.ObjectHash(u));
+    const hashes = units.map(u => _.toHash(u.payee + u.request + u.index.toString()));
+    if (hashes.some((v, i, arr) => arr.indexOf(v) != i))
+        return not_changed;
     const unit_address = units.map(u => u.payee);
+    const unit_price_map = units.reduce((res, unit) => {
+        if (res[unit.payee] == null) {
+            res[unit.payee] = new bignumber_js_1.BigNumber(unit.unit_price).toNumber();
+            return res;
+        }
+        else {
+            res[unit.payee] = new bignumber_js_1.BigNumber(res[unit.payee]).plus(unit.unit_price).toNumber();
+            return res;
+        }
+    }, {});
     const unit_sum = units.length;
     const unit_ids = unit_address.map(add => add.split(":")[2] || "");
-    const native_ids = pre.meta.data.base.splice(1).map(add => add.split(":")[2] || "");
+    const native_adds = pre.meta.data.base.splice(1);
+    const native_ids = native_adds.map(add => add.split(":")[2] || "");
     const price_sum = units.reduce((sum, u) => sum + u.unit_price, 0);
     const native_amounts = JSON.parse(pre.raw.raw[1] || "[]").map((str) => Number(str));
+    const native_price_map = native_adds.reduce((res, add, i) => {
+        if (res[add] == null) {
+            res[add] = new bignumber_js_1.BigNumber(native_amounts[i]).toNumber();
+            return res;
+        }
+        else {
+            res[add] = new bignumber_js_1.BigNumber(res[add]).plus(native_amounts[i]).toNumber();
+            return res;
+        }
+    }, {});
     const native_sum = native_amounts.reduce((s, a) => s + a, 0);
-    if (_.ObjectHash(pre_base.splice(1)) != _.ObjectHash(unit_address) || pre.meta.data.token != native || pre.meta.data.type != "issue" || pre.raw.raw[0] != "remit" || _.toHash(_.reduce_pub(req_tx.meta.data.pub_key)) != _.toHash(_.reduce_pub(pre.meta.data.pub_key)) || _.ObjectHash(unit_ids) != _.ObjectHash(native_ids) || !(new bignumber_js_1.BigNumber(price_sum).isEqualTo(native_sum)))
+    if ( /*pre_base.splice(1).some(add=>unit_address.indexOf(add)===-1)*/_.ObjectHash(unit_price_map) != _.ObjectHash(native_price_map) || pre.meta.data.token != native || pre.meta.data.type != "issue" || pre.raw.raw[0] != "remit" || _.toHash(_.reduce_pub(req_tx.meta.data.pub_key)) != _.toHash(_.reduce_pub(pre.meta.data.pub_key)) || native_ids.some(add => unit_ids.indexOf(add) === -1) || !(new bignumber_js_1.BigNumber(price_sum).isEqualTo(native_sum)))
         return not_changed;
     const unit_bought = StateData.map(s => {
         if (s.kind === "state" && s.token === unit && s.owner === remiter) {
@@ -112604,13 +112635,26 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, candidates, unit_stor
             unit_price: tx.meta.unit_price
         };
         const new_unit_store = _.new_obj(unit_store, (store) => {
-            const pre = store[tx.meta.data.request] || [];
-            if (store[tx.meta.data.request] != null && store[tx.meta.data.request].some(u => _.ObjectHash(u) === _.ObjectHash(new_unit)))
+            const valid_ref_tx = (() => {
+                for (let block of _.copy(chain).slice()) {
+                    let txs = block.txs.concat(block.natives).concat(block.units);
+                    for (let t of _.copy(txs)) {
+                        if (t.meta.kind === "refresh" && t.meta.data.request === tx.meta.data.request && t.meta.data.index === tx.meta.data.index)
+                            return t;
+                    }
+                }
+                return TxSet.empty_tx_pure();
+            })();
+            if (valid_ref_tx.hash != TxSet.empty_tx_pure().hash && valid_ref_tx.meta.data.output != tx.meta.data.output)
                 return store;
-            store[tx.meta.data.request] = pre.concat(new_unit);
+            const pre = store[tx.meta.data.request] || [];
+            if (store[tx.meta.data.request] != null && store[tx.meta.data.request].some(u => u.payee === new_unit.payee && u.index === new_unit.index))
+                return _.copy(store);
+            else
+                store[tx.meta.data.request] = pre.concat(new_unit);
             return store;
         });
-        script_1.store.commit("refresh_unit_store", new_unit_store);
+        script_1.store.commit("add_unit", new_unit);
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
                 for(let tx of block.txs.concat(block.natives).concat(block.units)){
@@ -112719,7 +112763,7 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
             const ref_tx = TxSet.pure_to_tx(u, block);
             const req_tx = TxSet.find_req_tx(ref_tx, chain);
             const raw = req_tx.raw || TxSet.empty_tx().raw;
-            const this_units = JSON.parse(raw.raw[2] || "[]") || [];
+            const this_units = JSON.parse(raw.raw[1] || "[]") || [];
             return result.concat(this_units);
         }, []);
         const my_unit_buying = block.units.some(tx => {
@@ -112738,12 +112782,14 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
         const new_unit_store = _.new_obj(unit_store, (store) => {
             bought_units.forEach(unit => {
                 const com = store[unit.request] || [];
-                const deleted = com.filter(c => _.ObjectHash(c) != _.ObjectHash(unit));
+                const deleted = com.filter(c => (c.payee != unit.payee && c.index == unit.index && c.output === unit.output) || (c.index != unit.index));
                 store[unit.request] = deleted;
             });
             return store;
         });
-        script_1.store.commit("refresh_unit_store", _.copy(new_unit_store));
+        bought_units.forEach(unit => {
+            script_1.store.commit("delete_unit", _.copy(unit));
+        });
         return {
             pool: _.copy(new_pool),
             roots: _.copy(new_roots),
@@ -112839,7 +112885,7 @@ exports.get_balance = async (address) => {
     const state = await S_Trie.get(address);
     if (state == null)
         return 0;
-    return state.amount;
+    return new bignumber_js_1.BigNumber(state.amount).toNumber();
 };
 exports.send_request_tx = async (secret, type, token, base, input_raw, log, roots, chain, pre = TxSet.empty_tx_pure().meta.pre, next = TxSet.empty_tx_pure().meta.next) => {
     try {
@@ -113107,14 +113153,24 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
                     unit_price: target_pure.meta.unit_price
                 };
                 const pre = store[target_pure.meta.data.request] || [];
+                if (pre.length > 0 && (pre.map(u => _.toHash(u.payee + u.request + u.index)).indexOf(_.toHash(new_unit.payee + new_unit.request + new_unit.index)) != -1 || pre[0].output != new_unit.output))
+                    return store;
                 store[target_pure.meta.data.request] = pre.concat(new_unit);
                 return store;
             }
             else
                 return store;
         })(_.copy(unit_store));
+        const new_unit = {
+            request: target_pure.meta.data.request,
+            index: target_pure.meta.data.index,
+            nonce: target_pure.meta.nonce,
+            payee: target_pure.meta.data.payee,
+            output: target_pure.meta.data.output,
+            unit_price: target_pure.meta.unit_price
+        };
         script_1.store.commit("refresh_pool", _.copy(del_pool));
-        script_1.store.commit("refresh_unit_store", _.copy(add_unit_store));
+        script_1.store.commit("add_unit", _.copy(new_unit));
         await exports.send_micro_block(_.copy(del_pool), secret, _.copy(chain), _.copy(candidates), _.copy(roots), _.copy(unit_store));
     }
     else {
@@ -113217,9 +113273,29 @@ exports.unit_buying = async (secret, units, roots, chain) => {
         console.log(native_remiter);
         const unit_sellers = units.map(u => u.payee);
         console.log(unit_sellers);
-        const native_sellers = unit_sellers.map(add => add.split(":")[2] || "").map(id => "Vr:" + con_1.native + ":" + id);
-        const prices = units.map(u => u.unit_price);
-        const pure_native_tx = TxSet.CreateRequestTx(pub_key, native_remiter, Math.pow(2, -3), "issue", con_1.native, _.copy([native_remiter].concat(unit_sellers)), ["remit", JSON.stringify(prices)], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, Math.pow(2, -18));
+        const native_sellers = unit_sellers.reduce((res, add) => {
+            const index = res.indexOf(add);
+            if (index === -1)
+                return res.concat(add);
+            else
+                return res;
+        }, []);
+        const prices = Object.values(units.reduce((res, unit) => {
+            const amount = res[unit.payee];
+            if (amount == null) {
+                return _.new_obj(res, r => {
+                    r[unit.payee] = unit.unit_price;
+                    return r;
+                });
+            }
+            else {
+                return _.new_obj(res, r => {
+                    r[unit.payee] = new bignumber_js_1.BigNumber(amount).plus(unit.unit_price).toNumber();
+                    return r;
+                });
+            }
+        }, {}));
+        const pure_native_tx = TxSet.CreateRequestTx(pub_key, native_remiter, Math.pow(2, -3), "issue", con_1.native, _.copy([native_remiter].concat(native_sellers)), ["remit", JSON.stringify(prices)], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, Math.pow(2, -18));
         const pure_unit_tx = TxSet.CreateRequestTx(pub_key, native_remiter, Math.pow(2, -3), "issue", con_1.unit, _.copy([unit_remiter].concat("Vr:" + con_1.unit + ":" + _.toHash(''))), ["buy", JSON.stringify(units)], [], con_1.my_version, TxSet.empty_tx_pure().meta.pre, TxSet.empty_tx_pure().meta.next, Math.pow(2, -18));
         console.log(pure_native_tx);
         const native_pure_hash = _.copy(pure_native_tx).meta.purehash;
@@ -113266,6 +113342,9 @@ exports.unit_buying = async (secret, units, roots, chain) => {
             console.log("buy unit!");
             script_1.store.commit('buying_unit', true);
             //console.error(unit_tx.hash);
+            units.forEach(u => {
+                script_1.store.commit('delete_unit', _.copy(u));
+            });
             script_2.client.publish('/data', { type: 'tx', tx: [native_tx], block: [] });
             script_2.client.publish('/data', { type: 'tx', tx: [unit_tx], block: [] });
         }
@@ -113348,13 +113427,35 @@ const faye_1 = __importDefault(__webpack_require__(/*! faye */ "./node_modules/f
 const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
 const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
 const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
-const bignumber_js_1 = __importDefault(__webpack_require__(/*! ../../node_modules/bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
+const bignumber_js_1 = __importDefault(__webpack_require__(/*! bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
 const port = peer_list_1.peer_list[0].port || "57750";
 const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
 /*const socket = new IO();
 socket.connect('http://'+ip+':'+port);*/
 exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
+/*self.addEventListener('install',(event)=>{
+    console.log("let's install");
+    event.waitUntil(
+        caches.open('vreath').then(caches=>{
+            return caches.addAll([
+                './',
+                './img',
+                './json'
+            ]).then(() =>{console.log("loaded");self.skipWaiting();});
+        })
+    );
+});
+
+self.addEventListener('fetch',(event)=>{
+    event.respondWith(
+        caches.match(event.request,{
+            ignoreSearch:true
+        }).then(response=>{
+            return response || fetch(event.request);
+        })
+    )
+});*/
 localStorage.removeItem("data");
 localStorage.removeItem("apps");
 localStorage.removeItem("code");
@@ -113481,17 +113582,19 @@ const compute_yet = async () => {
                             return false;
                     });
                     exports.store.commit("refresh_yet_data", reduced);
-                    const pre_unit_store = _.copy(exports.store.state.unit_store);
-                    const new_unit_store = _.new_obj(pre_unit_store, (store) => {
-                        units.forEach(unit => {
-                            const pre = store[unit.request] || [];
-                            if (store[unit.request] != null && store[unit.request].some(u => _.ObjectHash(u) === _.ObjectHash(unit)))
-                                return store;
-                            store[unit.request] = pre.concat(unit);
-                        });
-                        return store;
-                    });
-                    exports.store.commit("refresh_unit_store", new_unit_store);
+                    /*const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
+                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
+                        pre_unit_store,
+                        (store)=>{
+                            units.forEach(unit=>{
+                                const pre = store[unit.request] || [];
+                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
+                                store[unit.request] = pre.concat(unit);
+                            });
+                            return store;
+                        }
+                    );
+                    store.commit("refresh_unit_store",new_unit_store);*/
                 }
                 else {
                     const now_yets = _.copy(exports.store.state.yet_data);
@@ -113753,6 +113856,21 @@ exports.store = new vuex_1.default.Store({
             state.candidates = _.copy(candidates);
             localStorage.setItem("candidates", JSON.stringify(_.copy(state.candidates)));
         },
+        add_unit(state, unit) {
+            const units = _.copy(state.unit_store)[unit.request] || [];
+            if (!units.some(u => u.index === unit.index && u.payee === unit.payee)) {
+                state.unit_store[unit.request] = _.copy(units).concat(unit);
+                localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+            }
+        },
+        delete_unit(state, unit) {
+            const units = _.copy(state.unit_store)[unit.request] || [];
+            const deleted = units.filter(u => u.index === unit.index && u.payee != unit.payee && u.output === unit.output);
+            state.unit_store[unit.request] = _.copy(deleted);
+            if (deleted.length <= 0)
+                delete state.unit_store[unit.request];
+            localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+        },
         refresh_unit_store(state, store) {
             state.unit_store = _.copy(store);
             localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
@@ -113924,7 +114042,7 @@ const Wallet = {
         },
         balance: function () {
             const balance = this.$store.state.balance || 0;
-            return balance.toFixed(18);
+            return new bignumber_js_1.default(balance).toNumber();
         },
         secret: function () {
             return this.$store.state.secret;

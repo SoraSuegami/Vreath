@@ -25,13 +25,35 @@ const faye_1 = __importDefault(require("faye"));
 const TxSet = __importStar(require("../../core/tx"));
 const BlockSet = __importStar(require("../../core/block"));
 const StateSet = __importStar(require("../../core/state"));
-const bignumber_js_1 = __importDefault(require("../../node_modules/bignumber.js"));
+const bignumber_js_1 = __importDefault(require("bignumber.js"));
 const port = peer_list_1.peer_list[0].port || "57750";
 const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
 /*const socket = new IO();
 socket.connect('http://'+ip+':'+port);*/
 exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
+/*self.addEventListener('install',(event)=>{
+    console.log("let's install");
+    event.waitUntil(
+        caches.open('vreath').then(caches=>{
+            return caches.addAll([
+                './',
+                './img',
+                './json'
+            ]).then(() =>{console.log("loaded");self.skipWaiting();});
+        })
+    );
+});
+
+self.addEventListener('fetch',(event)=>{
+    event.respondWith(
+        caches.match(event.request,{
+            ignoreSearch:true
+        }).then(response=>{
+            return response || fetch(event.request);
+        })
+    )
+});*/
 localStorage.removeItem("data");
 localStorage.removeItem("apps");
 localStorage.removeItem("code");
@@ -158,17 +180,19 @@ const compute_yet = async () => {
                             return false;
                     });
                     exports.store.commit("refresh_yet_data", reduced);
-                    const pre_unit_store = _.copy(exports.store.state.unit_store);
-                    const new_unit_store = _.new_obj(pre_unit_store, (store) => {
-                        units.forEach(unit => {
-                            const pre = store[unit.request] || [];
-                            if (store[unit.request] != null && store[unit.request].some(u => _.ObjectHash(u) === _.ObjectHash(unit)))
-                                return store;
-                            store[unit.request] = pre.concat(unit);
-                        });
-                        return store;
-                    });
-                    exports.store.commit("refresh_unit_store", new_unit_store);
+                    /*const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
+                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
+                        pre_unit_store,
+                        (store)=>{
+                            units.forEach(unit=>{
+                                const pre = store[unit.request] || [];
+                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
+                                store[unit.request] = pre.concat(unit);
+                            });
+                            return store;
+                        }
+                    );
+                    store.commit("refresh_unit_store",new_unit_store);*/
                 }
                 else {
                     const now_yets = _.copy(exports.store.state.yet_data);
@@ -430,6 +454,21 @@ exports.store = new vuex_1.default.Store({
             state.candidates = _.copy(candidates);
             localStorage.setItem("candidates", JSON.stringify(_.copy(state.candidates)));
         },
+        add_unit(state, unit) {
+            const units = _.copy(state.unit_store)[unit.request] || [];
+            if (!units.some(u => u.index === unit.index && u.payee === unit.payee)) {
+                state.unit_store[unit.request] = _.copy(units).concat(unit);
+                localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+            }
+        },
+        delete_unit(state, unit) {
+            const units = _.copy(state.unit_store)[unit.request] || [];
+            const deleted = units.filter(u => u.index === unit.index && u.payee != unit.payee && u.output === unit.output);
+            state.unit_store[unit.request] = _.copy(deleted);
+            if (deleted.length <= 0)
+                delete state.unit_store[unit.request];
+            localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+        },
         refresh_unit_store(state, store) {
             state.unit_store = _.copy(store);
             localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
@@ -601,7 +640,7 @@ const Wallet = {
         },
         balance: function () {
             const balance = this.$store.state.balance || 0;
-            return balance.toFixed(18);
+            return new bignumber_js_1.default(balance).toNumber();
         },
         secret: function () {
             return this.$store.state.secret;

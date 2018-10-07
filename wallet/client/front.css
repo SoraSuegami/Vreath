@@ -1,22 +1,4 @@
-h1{
-    padding:50px;
-    background:#ffffff;
-    font-size:700px;
-    font-family:arial green;
-     width:500px;
-     text-align:center;
-     margin:30px auto;
-}
-h2{
-    padding:50px;
-    background:#ffffff;
-    font-size:700px;
-    font-family:arial green;
-     width:500px;
-     text-align:center;
-     margin:30px auto;
-}
-h3{
+#front_html{
     padding:50px;
     background:#ffffff;
     font-size:700px;
@@ -30,7 +12,7 @@ h3{
     width:400px;
     height:100px;
 }*/
-.square_btn{
+/*#square_btn{
     position:relative;
     display:inline-block;
     padding:0.25em 0.5em;
@@ -42,6 +24,6 @@ h3{
     font-weight:bold;
     border:solid 2px #d27d00
 }
-.square_btn:active{
+#square_btn:active{
     box-shadow:0 0 2px rgba(0,0,0,0.30)
-}
+}*/

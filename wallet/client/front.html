@@ -1,20 +1,20 @@
-<DOCTYPE! html>
-    <html>
-<head>
-<h1>Welcome</h1>
-<h2>to</h2>
-<h3>Vreath</h3>
-</head>
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Vreath</title>
+        <link rel="stylesheet" href="./at.min.css">
+        <link rel="stylesheet" href="./front.css">
+    </head>
 
-<body>
-<img class="img-resize" src="./img/vreathrogo_title.png" width="400" height="100">
-<br>
-<input type="text">
-<br>
-<br>
-<input type=>password
-<a href="#" class="square_btn">BUTTON</a>
-</body>
+    <body>
+        <img class="img-resize" src="./img/vreathrogo_title.png" width="400" height="100">
+        <br>
+        <h1 id="front_title">Welcome to Vreath</h1><br>
+        <at-input placeholder="secret" type="password" v-model="secret"></at-input><br>
+        <a href="/#" id="square_btn"><at-button v-on:click="regist" type="default">Start</at-button></a>
+        <script type="text/javascript" src="./bundle.js"></script>
+    </body>
 
 </html>
 

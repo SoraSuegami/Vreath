@@ -415,6 +415,7 @@ export const store = new Vuex.Store({
         candidates:JSON.parse(localStorage.getItem("candidates")||JSON.stringify(gen.candidates)),
         unit_store:JSON.parse(localStorage.getItem("unit_store")||JSON.stringify({})),
         secret:localStorage.getItem("secret")||CryptoSet.GenerateKeys(),
+        registed:Number(localStorage.getItem("registed")||"0"),
         balance:0,
         yet_data:JSON.parse(localStorage.getItem("yet_data")||"[]"),
         check_mode:false,
@@ -476,6 +477,10 @@ export const store = new Vuex.Store({
         refresh_secret(state,secret:string){
             state.secret = secret;
             localStorage.setItem("secret",state.secret);
+        },
+        regist(state){
+            state.registed = 1;
+            localStorage.setItem("registed","1");
         },
         refresh_balance(state,amount:number){
             state.balance = amount;
@@ -575,6 +580,26 @@ export const store = new Vuex.Store({
     }
 });
 
+(async ()=>{
+    const gen_S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        await gen_S_Trie.put(s.owner,s);
+    });
+    const last_block:T.Block = _.copy(store.state.chain[store.state.chain.length-1]) || _.copy(gen.block);
+    const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
+    console.log(last_address);
+    if(last_address!=store.getters.my_address){
+        store.commit('checking',true);
+        client.publish("/checkchain",last_address);
+    }
+    const balance = await get_balance(store.getters.my_address);
+    console.log(balance);
+    store.commit("refresh_balance",balance);
+    console.log('yet:')
+    console.log(store.state.yet_data);;
+    await compute_yet();
+})()
+
 
 const Home = {
     data:function(){
@@ -602,6 +627,35 @@ const Home = {
     `
 }
 
+const Registration = {
+    data:function(){
+        return{
+            secret:this.$store.state.secret
+        }
+    },
+    store,
+    methods:{
+        regist:function(){
+            try{
+                console.log(this.$secret)
+                this.$store.commit('refresh_secret',this.secret);
+                this.$store.commit('regist');
+                router.push({ path: '/' });
+            }
+            catch(e){
+                console.log(e);
+            }
+        }
+    },
+    template:`
+    <div>
+        <h1 id="front_title">Welcome to Vreath</h1><br>
+        <at-input placeholder="secret" type="password" v-model="secret"></at-input><br>
+        <a href="/#" id="square_btn"><at-button v-on:click="regist" type="default">Start</at-button></a>
+    </div>
+    `
+}
+
 const Wallet = {
     store,
     data:function(){
@@ -609,25 +663,6 @@ const Wallet = {
             to:"",
             amount:""
         }
-    },
-    created:async function(){
-        const gen_S_Trie = trie_ins("");
-        await P.forEach(gen.state,async (s:T.State)=>{
-            await gen_S_Trie.put(s.owner,s);
-        });
-        const last_block:T.Block = _.copy(store.state.chain[store.state.chain.length-1]) || _.copy(gen.block);
-        const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-        console.log(last_address);
-        if(last_address!=store.getters.my_address){
-            store.commit('checking',true);
-            client.publish("/checkchain",last_address);
-        }
-        const balance = await get_balance(this.from);
-        console.log(balance);
-        this.$store.commit("refresh_balance",balance);
-        console.log('yet:')
-        console.log(store.state.yet_data);;
-        await compute_yet();
     },
     watch:{
         refresh_balance:async function(){
@@ -771,6 +806,7 @@ const Deposit = {
 
 let routes = [
     { path: '/', component:Home},
+    { path:'/regist', component:Registration},
     { path: '/wallet', component:Wallet},
     { path: '/setting', component:Setting,
       children: [
@@ -783,6 +819,8 @@ let routes = [
 const router = new VueRouter({
     routes:routes
 });
+
+if(store.state.registed===0) router.push({ path: '/regist' });
 
 const app = new Vue({
     router: router

@@ -1352,10 +1352,10 @@ exports.refreshed_check = (base, index, tx_hash, LocationData) => {
         const val = LocationData[i];
         if (i === -1)
             return true;
-        else if (val.state === "yet" && val.index === index && val.hash === tx_hash)
-            return true;
-        else
+        else if (val.state === "already" && val.index === index && val.hash === tx_hash)
             return false;
+        else
+            return true;
     });
 };
 const state_check = (state, token_name_maxsize) => {
@@ -2309,7 +2309,7 @@ const check_tx = (tx, my_version, native, unit, chain, token_name_maxsize, State
         return TxSet.ValidRequestTx(tx, my_version, native, unit, false, StateData, LocationData);
     }
     else if (tx.meta.kind == "refresh") {
-        return TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, false, token_name_maxsize, StateData, LocationData);
+        return TxSet.ValidRefreshTx(tx, chain, my_version, native, unit, true, token_name_maxsize, StateData, LocationData);
     }
     else
         return false;
@@ -113042,220 +113042,6 @@ exports.compute_yet = async () => {
         }
     }
 };
-//Vue.use(Vuex)
-//delete_db();
-/*export const store = new Vuex.Store({
-    state:{
-        apps:read_db('app',def_apps),
-        code:read_db('code',codes),
-        pool:read_db('pool',{}),
-        chain:read_db('chain',[gen.block]),
-        roots:read_db('roots',gen.roots),
-        candidates:read_db('candidates',gen.candidates),
-        unit_store:read_db('unit_store',{}),
-        secret:read_db('secret',CryptoSet.GenerateKeys()),
-        registed:Number(read_db('registed',0)),
-        balance:0,
-        yet_data:[],
-        check_mode:false,
-        replace_mode:false,
-        replace_index:0,
-        not_refreshed_tx:[],
-        now_buying:false,
-        now_refreshing:[]
-    },
-    mutations:{
-        add_app(state,obj:Installed){
-            state.apps[obj.name] = _.copy(obj);
-            write_db('apps',_.copy(state.apps));
-            self.postMessage({
-                key:'add_app',
-                val:_.copy(obj)
-            },location.protocol+'//'+location.host);
-        },
-        del_app(state,key:string){
-            delete state.apps[key];
-            write_db('apps',_.copy(state.apps));
-            self.postMessage({
-                key:'del_app',
-                val:key
-            },location.protocol+'//'+location.host);
-        },
-        refresh_pool(state,pool:T.Pool){
-            state.pool = _.copy(pool);
-            write_db('pool',_.copy(state.pool));
-            self.postMessage({
-                key:'refresh_pool',
-                val:_.copy(pool)
-            },location.protocol+'//'+location.host);
-        },
-        add_block(state,block:T.Block){
-            state.chain.push(block);
-            write_db('chain',_.copy(state.chain));
-            self.postMessage({
-                key:'add_block',
-                val:_.copy(block)
-            },location.protocol+'//'+location.host);
-        },
-        replace_chain(state,chain:T.Block[]){
-            state.chain = _.copy(chain).slice().sort((a:T.Block,b:T.Block)=>{
-                return a.meta.index - b.meta.index;
-            }).filter((b:T.Block,i:number)=>b.meta.index===i);
-            write_db('chain',_.copy(state.chain));
-            self.postMessage({
-                key:'replace_chain',
-                val:_.copy(chain)
-            },location.protocol+'//'+location.host);
-        },
-        refresh_roots(state,roots:{[key:string]:string}){
-            state.roots = _.copy(roots);
-            write_db('roots',_.copy(state.roots));
-            self.postMessage({
-                key:'refresh_roots',
-                val:_.copy(roots)
-            },location.protocol+'//'+location.host);
-        },
-        refresh_candidates(state,candidates:T.Candidates[]){
-            state.candidates = _.copy(candidates);
-            write_db('candidates',_.copy(state.candidates));
-            self.postMessage({
-                key:'refresh_candidates',
-                val:_.copy(candidates)
-            },location.protocol+'//'+location.host);
-        },
-        add_unit(state,unit:T.Unit){
-            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
-            if(!units.some(u=>u.index===unit.index&&u.payee===unit.payee)){
-                state.unit_store[unit.request] = _.copy(units).concat(unit);
-                write_db('unit_store',_.copy(state.unit_store));
-                self.postMessage({
-                    key:'add_unit',
-                    val:_.copy(unit)
-                },location.protocol+'//'+location.host);
-            }
-        },
-        delete_unit(state,unit:T.Unit){
-            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
-            const deleted = units.filter(u=>u.index===unit.index&&u.payee!=unit.payee&&u.output===unit.output);
-            state.unit_store[unit.request] = _.copy(deleted);
-            if(deleted.length<=0) delete state.unit_store[unit.request];
-            write_db('unit_store',_.copy(state.unit_store));
-            self.postMessage({
-                key:'delete_unit',
-                val:_.copy(unit)
-            },location.protocol+'//'+location.host);
-        },
-        refresh_unit_store(state,store:{[key:string]:T.Unit[]}){
-            state.unit_store = _.copy(store);
-            write_db('unit_store',_.copy(state.unit_store));
-            self.postMessage({
-                key:'refresh_unit_store',
-                val:_.copy(store)
-            },location.protocol+'//'+location.host);
-        },
-        refresh_secret(state,secret:string){
-            state.secret = secret;
-            write_db('secret',state.secret);
-            self.postMessage({
-                key:'refresh_secret',
-                val:secret
-            },location.protocol+'//'+location.host);
-        },
-        regist(state){
-            state.registed = 1;
-            write_db('registed',1);
-            self.postMessage({
-                key:'regist',
-                val:null
-            },location.protocol+'//'+location.host);
-        },
-        refresh_balance(state,amount:number){
-            state.balance = amount;
-            self.postMessage({
-                key:'refresh_balance',
-                val:amount
-            },location.protocol+'//'+location.host);
-        },
-        push_yet_data(state,data:Data){
-            state.yet_data.push(data);
-            self.postMessage({
-                key:'push_yet_data',
-                val:data
-            },location.protocol+'//'+location.host);
-        },
-        unshift_yet_data(state,data:Data){
-            state.yet_data.unshift(data);
-            self.postMessage({
-                key:'unshift_yet_data',
-                val:data
-            },location.protocol+'//'+location.host);
-        },
-        refresh_yet_data(state,data:Data[]){
-            state.yet_data = _.copy(data);
-            self.postMessage({
-                key:'refresh_yet_data',
-                val:data
-            },location.protocol+'//'+location.host);
-        },
-        checking(state,bool:boolean){
-            state.check_mode = bool;
-            if(bool===true){
-                setTimeout(()=>{
-                    state.check_mode = false;
-                },block_time*10);
-            }
-            self.postMessage({
-                key:'checking',
-                val:bool
-            },location.protocol+'//'+location.host);
-        },
-        replaceing(state,bool:boolean){
-            state.replace_mode = bool;
-            self.postMessage({
-                key:'replaceing',
-                val:bool
-            },location.protocol+'//'+location.host);
-        },
-        rep_limit(state,index:number){
-            state.replace_index = index;
-            self.postMessage({
-                key:'rep_limit',
-                val:index
-            },location.protocol+'//'+location.host);
-        },
-        add_not_refreshed(state,tx:T.Tx){
-            state.not_refreshed_tx = state.not_refreshed_tx.concat(_.copy(tx));
-            self.postMessage({
-                key:'add_not_refreshed',
-                val:_.copy(tx)
-            },location.protocol+'//'+location.host);
-        },
-        del_not_refreshed(state,hashes:string[]){
-            state.not_refreshed_tx = state.not_refreshed_tx.filter((tx:T.Tx)=>hashes.indexOf(tx.hash)===-1);
-            self.postMessage({
-                key:'del_not_refreshed',
-                val:_.copy(hashes)
-            },location.protocol+'//'+location.host);
-        },
-        buying_unit(state,bool:boolean){
-            state.now_buying =bool;
-            self.postMessage({
-                key:'buying_unit',
-                val:bool
-            },location.protocol+'//'+location.host);
-        },
-        new_refreshing(state,requests:string[]){
-            state.now_refreshing = requests;
-            self.postMessage({
-                key:'new_refreshing',
-                val:_.copy(requests)
-            },location.protocol+'//'+location.host);
-        }
-    },
-    getters:{
-        my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
-    }
-});*/
 const port = peer_list_1.peer_list[0].port || "57750";
 const ip = peer_list_1.peer_list[0].ip || "localhost";
 console.log(ip);
@@ -113290,6 +113076,7 @@ exports.client.subscribe('/replacechain', async (chain) => {
 exports.client.bind('transport:down', () => {
     console.log('lose connection');
     exports.delete_db();
+    exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
 });
 /*(async ()=>{
     const gen_S_Trie = trie_ins("");
@@ -113971,7 +113758,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
                 return r.concat(t.meta.data.request);
             else
                 return r;
-        }, []);
+        }, already_requests);
         if (tx.meta.kind === "request" && !bases.some(b => tx.meta.data.base.indexOf(b) != -1))
             return result.concat(tx);
         else if (tx.meta.kind === "refresh" && requests.indexOf(tx.meta.data.request) === -1)

@@ -115,10 +115,10 @@ exports.refreshed_check = (base, index, tx_hash, LocationData) => {
         const val = LocationData[i];
         if (i === -1)
             return true;
-        else if (val.state === "yet" && val.index === index && val.hash === tx_hash)
-            return true;
-        else
+        else if (val.state === "already" && val.index === index && val.hash === tx_hash)
             return false;
+        else
+            return true;
     });
 };
 const state_check = (state, token_name_maxsize) => {

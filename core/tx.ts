@@ -113,8 +113,8 @@ export const refreshed_check = (base:string[],index:number,tx_hash:string,Locati
     const i = addresses.indexOf(key);
     const val = LocationData[i];
     if(i===-1) return true;
-    else if(val.state==="yet"&&val.index===index&&val.hash===tx_hash) return true;
-    else return false;
+    else if(val.state==="already"&&val.index===index&&val.hash===tx_hash) return false;
+    else return true;
   });
 }
 

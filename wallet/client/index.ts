@@ -602,7 +602,7 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         const requests = result.reduce((r:string[],t)=>{
             if(t.meta.kind==="refresh") return r.concat(t.meta.data.request);
             else return r;
-        },[]);
+        },already_requests);
         if(tx.meta.kind==="request"&&!bases.some(b=>tx.meta.data.base.indexOf(b)!=-1)) return result.concat(tx);
         else if(tx.meta.kind==="refresh"&&requests.indexOf(tx.meta.data.request)===-1) return result.concat(tx);
         else return result;

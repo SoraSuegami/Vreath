@@ -9,7 +9,7 @@ const check_tx = (tx:T.Tx,my_version:number,native:string,unit:string,chain:T.Bl
     return TxSet.ValidRequestTx(tx,my_version,native,unit,false,StateData,LocationData);
   }
   else if(tx.meta.kind=="refresh"){
-    return TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,false,token_name_maxsize,StateData,LocationData);
+    return TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,true,token_name_maxsize,StateData,LocationData);
   }
   else return false;
 }

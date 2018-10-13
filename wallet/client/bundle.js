@@ -112421,6 +112421,928 @@ function extend() {
 
 /***/ }),
 
+/***/ "./wallet/client/background.js":
+/*!*************************************!*\
+  !*** ./wallet/client/background.js ***!
+  \*************************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const index_1 = __webpack_require__(/*! ./index */ "./wallet/client/index.js");
+const CryptoSet = __importStar(__webpack_require__(/*! ../../core/crypto_set */ "./core/crypto_set.js"));
+const _ = __importStar(__webpack_require__(/*! ../../core/basic */ "./core/basic.js"));
+const con_1 = __webpack_require__(/*! ../con */ "./wallet/con.js");
+const peer_list_1 = __webpack_require__(/*! ./peer_list */ "./wallet/client/peer_list.js");
+const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
+const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
+const faye_1 = __importDefault(__webpack_require__(/*! faye */ "./node_modules/faye/src/faye_browser.js"));
+const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
+const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
+const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
+const bignumber_js_1 = __importDefault(__webpack_require__(/*! bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
+const level_browserify_1 = __importDefault(__webpack_require__(/*! level-browserify */ "./node_modules/level-browserify/browser.js"));
+/*if('serviceWorker' in navigator){
+    navigator.serviceWorker.register("sw_bundle.js").then(reg=>{
+      if(reg.installing) console.log('installing');
+      else if(reg.waiting) console.log('waiting');
+      else if(reg.active) console.log('active');
+    }).catch(error=>console.log(error));
+}*/
+const testdb = level_browserify_1.default('./db');
+const storeName = 'vreath';
+let db;
+/*const open_req = indexedDB.open(storeName,1);
+open_req.onupgradeneeded = (event)=>{
+    db = open_req.result;
+    db.createObjectStore(storeName,{keyPath:'id'});
+}
+open_req.onsuccess = (event)=>{
+    console.log('db open success');
+    db = open_req.result;
+    db.close();
+}
+open_req.onerror = ()=>console.log("fail to open db");*/
+exports.read_db = (key, def) => {
+    const req = indexedDB.open('vreath', 2);
+    let result = def;
+    req.onerror = () => console.log('fail to open db');
+    req.onupgradeneeded = (event) => {
+        db = req.result;
+        db.createObjectStore(storeName, { keyPath: 'id' });
+    };
+    req.onsuccess = (event) => {
+        db = req.result;
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const get_req = store.get(key);
+        get_req.onsuccess = () => {
+            result = get_req.source.val;
+        };
+        db.close();
+    };
+    return result;
+};
+exports.write_db = (key, val) => {
+    const req = indexedDB.open('vreath', 2);
+    req.onerror = () => console.log('fail to open db');
+    req.onupgradeneeded = (event) => {
+        db = req.result;
+        db.createObjectStore(storeName, { keyPath: 'id' });
+    };
+    req.onsuccess = (event) => {
+        db = req.result;
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const data = {
+            id: key,
+            val: val
+        };
+        const put_req = store.put(data);
+        put_req.onsuccess = () => console.log('write data success');
+        tx.oncomplete = () => console.log('transaction complete');
+    };
+};
+exports.delete_db = () => {
+    const del_db = indexedDB.deleteDatabase('vreath');
+    del_db.onsuccess = () => console.log('db delete success');
+    del_db.onerror = () => console.log('db delete error');
+};
+const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
+const wallet = {
+    name: "wallet",
+    icon: "./img/vreathrogoi.jpg",
+    pub_keys: [],
+    deposited: 0
+};
+const setting = {
+    name: "setting",
+    icon: "./img/setting_icon.png",
+    pub_keys: [],
+    deposited: 0
+};
+const def_apps = {
+    wallet: wallet,
+    setting: setting
+};
+const codes = {
+    "native": "const main = () => {};",
+    "unit": "const main = () => {};"
+};
+class Store {
+    constructor() {
+        this._code = exports.read_db('code', codes);
+        this._pool = exports.read_db('pool', {});
+        this._chain = exports.read_db('chain', [gen.block]);
+        this._roots = exports.read_db('roots', gen.roots);
+        this._candidates = exports.read_db('candidates', gen.candidates);
+        this._unit_store = exports.read_db('unit_store', {});
+        this._secret = exports.read_db('secret', CryptoSet.GenerateKeys());
+        this._balance = exports.read_db('balance', 0);
+        this._yet_data = [];
+        this._check_mode = false;
+        this._replace_mode = false;
+        this._replace_index = 0;
+        this._not_refreshed_tx = [];
+        this._now_buying = false;
+        this._now_refreshing = [];
+    }
+    get code() {
+        return this._code;
+    }
+    get pool() {
+        return this._pool;
+    }
+    get chain() {
+        return this._chain;
+    }
+    get roots() {
+        return this._roots;
+    }
+    get candidates() {
+        return this._candidates;
+    }
+    get unit_store() {
+        return this._unit_store;
+    }
+    get secret() {
+        return this._secret;
+    }
+    get balance() {
+        return this._balance;
+    }
+    get yet_data() {
+        return this._yet_data;
+    }
+    get check_mode() {
+        return this._check_mode;
+    }
+    get replace_mode() {
+        return this._replace_mode;
+    }
+    get replace_index() {
+        return this._replace_index;
+    }
+    get not_refreshed_tx() {
+        return this._not_refreshed_tx;
+    }
+    get now_buying() {
+        return this._now_buying;
+    }
+    get now_refreshing() {
+        return this._now_refreshing;
+    }
+    get my_address() {
+        return CryptoSet.GenereateAddress(con_1.native, CryptoSet.PublicFromPrivate(this._secret)) || "";
+    }
+    refresh_pool(pool) {
+        this._pool = _.copy(pool);
+        exports.write_db('pool', _.copy(this.pool));
+        /*self.postMessage({
+            key:'refresh_pool',
+            val:_.copy(pool)
+        },location.protocol+'//'+location.host);*/
+    }
+    add_block(block) {
+        this._chain.push(block);
+        exports.write_db('chain', _.copy(this._chain));
+        /*self.postMessage({
+            key:'add_block',
+            val:_.copy(block)
+        },location.protocol+'//'+location.host);*/
+    }
+    replace_chain(chain) {
+        this._chain = _.copy(chain).slice().sort((a, b) => {
+            return a.meta.index - b.meta.index;
+        }).filter((b, i) => b.meta.index === i);
+        exports.write_db('chain', _.copy(this._chain));
+        /*self.postMessage({
+            key:'replace_chain',
+            val:_.copy(chain)
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_roots(roots) {
+        this._roots = _.copy(roots);
+        exports.write_db('roots', _.copy(this._roots));
+        /*self.postMessage({
+            key:'refresh_roots',
+            val:_.copy(roots)
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_candidates(candidates) {
+        this._candidates = _.copy(candidates);
+        exports.write_db('candidates', _.copy(this._candidates));
+        /*self.postMessage({
+            key:'refresh_candidates',
+            val:_.copy(candidates)
+        },location.protocol+'//'+location.host);*/
+    }
+    add_unit(unit) {
+        const units = _.copy(this._unit_store)[unit.request] || [];
+        if (!units.some(u => u.index === unit.index && u.payee === unit.payee)) {
+            this._unit_store[unit.request] = _.copy(units).concat(unit);
+            exports.write_db('unit_store', _.copy(this._unit_store));
+            /*self.postMessage({
+                key:'add_unit',
+                val:_.copy(unit)
+            },location.protocol+'//'+location.host);*/
+        }
+    }
+    delete_unit(unit) {
+        const units = _.copy(this._unit_store)[unit.request] || [];
+        const deleted = units.filter(u => u.index === unit.index && u.payee != unit.payee && u.output === unit.output);
+        this._unit_store[unit.request] = _.copy(deleted);
+        if (deleted.length <= 0)
+            delete this._unit_store[unit.request];
+        exports.write_db('unit_store', _.copy(this._unit_store));
+        /*self.postMessage({
+            key:'delete_unit',
+            val:_.copy(unit)
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_unit_store(store) {
+        this._unit_store = _.copy(store);
+        exports.write_db('unit_store', _.copy(this._unit_store));
+        /*self.postMessage({
+            key:'refresh_unit_store',
+            val:_.copy(store)
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_secret(secret) {
+        this._secret = secret;
+        exports.write_db('secret', this._secret);
+        /*self.postMessage({
+            key:'refresh_secret',
+            val:secret
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_balance(amount) {
+        this._balance = amount;
+        exports.write_db('balance', this._balance);
+        /*self.postMessage({
+            key:'refresh_balance',
+            val:amount
+        },location.protocol+'//'+location.host);*/
+    }
+    push_yet_data(data) {
+        this._yet_data.push(data);
+        /*self.postMessage({
+            key:'push_yet_data',
+            val:data
+        },location.protocol+'//'+location.host);*/
+    }
+    unshift_yet_data(data) {
+        this._yet_data.unshift(data);
+        /*self.postMessage({
+            key:'unshift_yet_data',
+            val:data
+        },location.protocol+'//'+location.host);*/
+    }
+    refresh_yet_data(data) {
+        this._yet_data = _.copy(data);
+        /*self.postMessage({
+            key:'refresh_yet_data',
+            val:data
+        },location.protocol+'//'+location.host);*/
+    }
+    checking(bool) {
+        this._check_mode = bool;
+        if (bool === true) {
+            setTimeout(() => {
+                this._check_mode = false;
+            }, con_1.block_time * 10);
+        }
+        /*self.postMessage({
+            key:'checking',
+            val:bool
+        },location.protocol+'//'+location.host);*/
+    }
+    replaceing(bool) {
+        this._replace_mode = bool;
+        /*self.postMessage({
+            key:'replaceing',
+            val:bool
+        },location.protocol+'//'+location.host);*/
+    }
+    rep_limit(index) {
+        this._replace_index = index;
+        /*self.postMessage({
+            key:'rep_limit',
+            val:index
+        },location.protocol+'//'+location.host);*/
+    }
+    add_not_refreshed(tx) {
+        this._not_refreshed_tx = this._not_refreshed_tx.concat(_.copy(tx));
+        /*self.postMessage({
+            key:'add_not_refreshed',
+            val:_.copy(tx)
+        },location.protocol+'//'+location.host);*/
+    }
+    del_not_refreshed(hashes) {
+        this._not_refreshed_tx = this._not_refreshed_tx.filter((tx) => hashes.indexOf(tx.hash) === -1);
+        /*self.postMessage({
+            key:'del_not_refreshed',
+            val:_.copy(hashes)
+        },location.protocol+'//'+location.host);*/
+    }
+    buying_unit(bool) {
+        this._now_buying = bool;
+        /*self.postMessage({
+            key:'buying_unit',
+            val:bool
+        },location.protocol+'//'+location.host);*/
+    }
+    new_refreshing(requests) {
+        this._now_refreshing = requests;
+        /*self.postMessage({
+            key:'new_refreshing',
+            val:_.copy(requests)
+        },location.protocol+'//'+location.host);*/
+    }
+}
+exports.Store = Store;
+exports.store = new Store();
+const sleep = (msec) => {
+    return new Promise(function (resolve) {
+        setTimeout(function () { resolve(); }, msec);
+    });
+};
+const send_blocks = async () => {
+    const S_Trie = index_1.trie_ins(exports.store.roots.stateroot);
+    const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.secret));
+    const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0);
+    const unit_amount = unit_state.amount || 0;
+    const last_key = BlockSet.search_key_block(_.copy(exports.store.chain));
+    const last_micros = BlockSet.search_micro_block(_.copy(exports.store.chain), _.copy(last_key));
+    const date = new Date();
+    if (!exports.store.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.secret) && last_micros.length <= con_1.max_blocks)
+        await index_1.send_micro_block(_.copy(exports.store.pool), exports.store.secret, _.copy(exports.store.chain), _.copy(exports.store.candidates), _.copy(exports.store.roots), exports.store.unit_store);
+    else if (!exports.store.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
+        await index_1.send_key_block(_.copy(exports.store.chain), exports.store.secret, _.copy(exports.store.candidates), _.copy(exports.store.roots));
+};
+exports.compute_yet = async () => {
+    const data = _.copy(exports.store.yet_data[0]);
+    if (data == null) {
+        exports.store.replaceing(false);
+        await send_blocks();
+        console.log('yet:');
+        console.log(exports.store.yet_data);
+        await sleep(con_1.block_time);
+        return await exports.compute_yet();
+    }
+    else if (data.type === "tx" && data.tx.length > 0) {
+        const target = _.copy(data.tx[0]);
+        console.log(target);
+        //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
+        await index_1.tx_accept(_.copy(target), _.copy(exports.store.chain), _.copy(exports.store.roots), _.copy(exports.store.pool), exports.store.secret, _.copy(exports.store.candidates), _.copy(exports.store.unit_store));
+        const now_yets = _.copy(exports.store.yet_data);
+        const reduced = now_yets.filter(d => {
+            if (d.type === "tx" && d.tx[0] != null)
+                return d.tx[0].hash != target.hash;
+            else if (d.type === "block" && d.block[0] != null)
+                return true;
+            else
+                return false;
+        });
+        exports.store.refresh_yet_data(_.copy(reduced));
+        console.log(reduced);
+        console.log('yet:');
+        console.log(exports.store.yet_data);
+        await sleep(con_1.block_time);
+        return await exports.compute_yet();
+        /*}
+        else{
+            const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
+            const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
+            const reduced = txs.concat(blocks);
+            const concated = reduced.concat(store.state.yet_data[0]);
+            store.commit("refresh_yet_data",concated);
+        }*/
+    }
+    else if (data.type === "block" && data.block.length > 0) {
+        const block = data.block[0];
+        const chain = _.copy(exports.store.chain);
+        console.log(block);
+        if (block.meta.version >= con_1.compatible_version) {
+            if (block.meta.index > chain.length) {
+                if (!exports.store.replace_mode) {
+                    const address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(block.meta.validatorPub));
+                    if (address != exports.store.my_address) {
+                        exports.store.checking(true);
+                        exports.client.publish("/checkchain", address);
+                    }
+                }
+                else
+                    exports.store.replaceing(false);
+                //await send_blocks();
+                await sleep(con_1.block_time);
+                return await exports.compute_yet();
+            }
+            else if (block.meta.index === chain.length) {
+                if (exports.store.replace_mode && chain[chain.length - 1].meta.index >= exports.store.replace_index)
+                    exports.store.replaceing(false);
+                await index_1.block_accept(_.copy(block), _.copy(exports.store.chain), _.copy(exports.store.candidates), _.copy(exports.store.roots), _.copy(exports.store.pool), _.copy(exports.store.not_refreshed_tx), exports.store.now_buying, _.copy(exports.store.unit_store));
+                const new_chain = _.copy(exports.store.chain);
+                console.log(exports.store.replace_mode);
+                console.log(chain.length);
+                console.log(new_chain.length);
+                if (exports.store.replace_mode && chain.length === new_chain.length)
+                    exports.store.replaceing(false);
+                if (new_chain.length === chain.length + 1) {
+                    const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx => tx.meta.kind === "refresh");
+                    const now_yets = _.copy(exports.store.yet_data);
+                    let units = [];
+                    const reduced = now_yets.filter(d => {
+                        if (d.type === "tx" && d.tx[0] != null) {
+                            const t = _.copy(d.tx[0]);
+                            return !refs.some(tx => {
+                                if (t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
+                                    const unit = {
+                                        request: t.meta.data.request,
+                                        index: t.meta.data.index,
+                                        nonce: t.meta.nonce,
+                                        payee: t.meta.data.payee,
+                                        output: t.meta.data.output,
+                                        unit_price: t.meta.unit_price
+                                    };
+                                    units.push(_.copy(unit));
+                                    return true;
+                                }
+                                //else if(t.meta.kind==="request"&&t.hash===tx.meta.data.request) return true;
+                                else
+                                    return false;
+                            });
+                        }
+                        else if (d.type === "block" && d.block[0] != null)
+                            return d.block[0].meta.index > block.meta.index;
+                        else
+                            return false;
+                    });
+                    exports.store.refresh_yet_data(_.copy(reduced));
+                    /*const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
+                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
+                        pre_unit_store,
+                        (store)=>{
+                            units.forEach(unit=>{
+                                const pre = store[unit.request] || [];
+                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
+                                store[unit.request] = pre.concat(unit);
+                            });
+                            return store;
+                        }
+                    );
+                    store.commit("refresh_unit_store",new_unit_store);*/
+                }
+                else {
+                    const now_yets = _.copy(exports.store.yet_data);
+                    const reduced = now_yets.filter(d => {
+                        if (d.type === "tx" && d.tx[0] != null)
+                            return true;
+                        else if (d.type === "block" && d.block[0] != null)
+                            return d.block[0].meta.index > block.meta.index;
+                        else
+                            return false;
+                    });
+                    exports.store.refresh_yet_data(reduced);
+                }
+                const balance = await index_1.get_balance(exports.store.my_address);
+                exports.store.refresh_balance(balance);
+                postMessage(balance);
+                let refreshed_hash = [];
+                let get_not_refresh = [];
+                for (let block of _.copy(new_chain).slice().reverse()) {
+                    for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
+                        if (_.copy(tx).meta.kind === "request" && refreshed_hash.indexOf(_.copy(tx).hash) === -1)
+                            get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx), _.copy(block))));
+                        else if (_.copy(tx).meta.kind === "refresh")
+                            refreshed_hash.push(_.copy(tx).meta.data.request);
+                        else if (get_not_refresh.length >= 10)
+                            break;
+                    }
+                }
+                const refreshes = _.copy(get_not_refresh);
+                const related = refreshes.filter(tx => {
+                    if (tx.meta.pre.flag === true) {
+                        const pres = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "pre");
+                        return pres.length > 0;
+                    }
+                    else if (tx.meta.next.flag === true) {
+                        const nexts = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "next");
+                        return nexts.length > 0;
+                    }
+                    else
+                        return true;
+                });
+                console.log('not refreshed:');
+                console.log(related);
+                if (related.length > 0) {
+                    const req_tx = related[0];
+                    const index = (() => {
+                        for (let block of _.copy(new_chain).slice().reverse()) {
+                            let txs = block.txs.concat(block.natives).concat(block.units);
+                            let i = txs.map(tx => tx.hash).indexOf(req_tx.hash);
+                            if (i != -1)
+                                return block.meta.index;
+                        }
+                        return 0;
+                    })();
+                    const code = exports.store.code[req_tx.meta.data.token];
+                    await index_1.send_refresh_tx(_.copy(exports.store.roots), exports.store.secret, _.copy(req_tx), index, code, _.copy(new_chain));
+                    //await send_blocks();
+                }
+                /*if(refs_pure.length>0){
+                    await P.forEach(refs_pure, async (pure:T.TxPure)=>{
+                        const req = pure.meta.data.request;
+                        const buy_units:T.Unit[] = store.state.unit_store[req];
+                        await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
+                    })
+                }*/
+                const unit_store_values = Object.values(exports.store.unit_store);
+                const units_sum = unit_store_values.reduce((sum, us) => sum + us.length, 0);
+                const reversed_chain = _.copy(new_chain).slice().reverse();
+                const refreshed = (() => {
+                    let result = [];
+                    let price_sum;
+                    let flag = false;
+                    for (let block of reversed_chain) {
+                        const txs = _.copy(block).txs.concat(block.natives).concat(block.units).slice();
+                        for (let tx of txs) {
+                            if (tx.meta.kind === "refresh") {
+                                result = result.concat(unit_store_values.reduce((result, us) => {
+                                    if (us.length > 0 && us[0].request === tx.meta.data.request) {
+                                        price_sum = result.reduce((sum, unit) => new bignumber_js_1.default(sum).plus(unit.unit_price).toNumber(), 0);
+                                        us.forEach(u => {
+                                            if (new bignumber_js_1.default(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new bignumber_js_1.default(balance).times(0.99))) {
+                                                flag = true;
+                                                return result;
+                                            }
+                                            else {
+                                                price_sum = new bignumber_js_1.default(price_sum).plus(u.unit_price).toNumber();
+                                                result.push(u);
+                                            }
+                                        });
+                                        return result;
+                                    }
+                                    else
+                                        return result;
+                                }, []));
+                            }
+                            if (result.length === units_sum || flag)
+                                break;
+                        }
+                    }
+                    return result;
+                })();
+                console.log(unit_store_values);
+                console.log('buy_units are:');
+                console.log(refreshed);
+                console.log(exports.store.now_buying);
+                if (refreshed.length > 0 && !exports.store.now_buying && !exports.store.replace_mode) {
+                    const validatorPub = BlockSet.search_key_block(_.copy(reversed_chain)).meta.validatorPub;
+                    const validator_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(validatorPub));
+                    const buy_units = refreshed;
+                    await index_1.unit_buying(exports.store.secret, _.copy(buy_units), _.copy(exports.store.roots), _.copy(new_chain));
+                    //await send_blocks();
+                }
+                console.log('yet:');
+                console.log(exports.store.yet_data);
+                await send_blocks();
+                await sleep(con_1.block_time);
+                return await exports.compute_yet();
+            }
+            else {
+                const now_yets = _.copy(exports.store.yet_data);
+                const reduced = now_yets.filter(d => {
+                    if (d.type === "tx" && d.tx[0] != null)
+                        return true;
+                    else if (d.type === "block" && d.block[0] != null)
+                        return d.block[0].meta.index != block.meta.index;
+                    else
+                        return false;
+                });
+                console.log(reduced);
+                exports.store.refresh_yet_data(_.copy(reduced));
+                console.log('yet:');
+                console.log(exports.store.yet_data);
+                await sleep(con_1.block_time);
+                return await exports.compute_yet();
+            }
+        }
+    }
+};
+//Vue.use(Vuex)
+//delete_db();
+/*export const store = new Vuex.Store({
+    state:{
+        apps:read_db('app',def_apps),
+        code:read_db('code',codes),
+        pool:read_db('pool',{}),
+        chain:read_db('chain',[gen.block]),
+        roots:read_db('roots',gen.roots),
+        candidates:read_db('candidates',gen.candidates),
+        unit_store:read_db('unit_store',{}),
+        secret:read_db('secret',CryptoSet.GenerateKeys()),
+        registed:Number(read_db('registed',0)),
+        balance:0,
+        yet_data:[],
+        check_mode:false,
+        replace_mode:false,
+        replace_index:0,
+        not_refreshed_tx:[],
+        now_buying:false,
+        now_refreshing:[]
+    },
+    mutations:{
+        add_app(state,obj:Installed){
+            state.apps[obj.name] = _.copy(obj);
+            write_db('apps',_.copy(state.apps));
+            self.postMessage({
+                key:'add_app',
+                val:_.copy(obj)
+            },location.protocol+'//'+location.host);
+        },
+        del_app(state,key:string){
+            delete state.apps[key];
+            write_db('apps',_.copy(state.apps));
+            self.postMessage({
+                key:'del_app',
+                val:key
+            },location.protocol+'//'+location.host);
+        },
+        refresh_pool(state,pool:T.Pool){
+            state.pool = _.copy(pool);
+            write_db('pool',_.copy(state.pool));
+            self.postMessage({
+                key:'refresh_pool',
+                val:_.copy(pool)
+            },location.protocol+'//'+location.host);
+        },
+        add_block(state,block:T.Block){
+            state.chain.push(block);
+            write_db('chain',_.copy(state.chain));
+            self.postMessage({
+                key:'add_block',
+                val:_.copy(block)
+            },location.protocol+'//'+location.host);
+        },
+        replace_chain(state,chain:T.Block[]){
+            state.chain = _.copy(chain).slice().sort((a:T.Block,b:T.Block)=>{
+                return a.meta.index - b.meta.index;
+            }).filter((b:T.Block,i:number)=>b.meta.index===i);
+            write_db('chain',_.copy(state.chain));
+            self.postMessage({
+                key:'replace_chain',
+                val:_.copy(chain)
+            },location.protocol+'//'+location.host);
+        },
+        refresh_roots(state,roots:{[key:string]:string}){
+            state.roots = _.copy(roots);
+            write_db('roots',_.copy(state.roots));
+            self.postMessage({
+                key:'refresh_roots',
+                val:_.copy(roots)
+            },location.protocol+'//'+location.host);
+        },
+        refresh_candidates(state,candidates:T.Candidates[]){
+            state.candidates = _.copy(candidates);
+            write_db('candidates',_.copy(state.candidates));
+            self.postMessage({
+                key:'refresh_candidates',
+                val:_.copy(candidates)
+            },location.protocol+'//'+location.host);
+        },
+        add_unit(state,unit:T.Unit){
+            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
+            if(!units.some(u=>u.index===unit.index&&u.payee===unit.payee)){
+                state.unit_store[unit.request] = _.copy(units).concat(unit);
+                write_db('unit_store',_.copy(state.unit_store));
+                self.postMessage({
+                    key:'add_unit',
+                    val:_.copy(unit)
+                },location.protocol+'//'+location.host);
+            }
+        },
+        delete_unit(state,unit:T.Unit){
+            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
+            const deleted = units.filter(u=>u.index===unit.index&&u.payee!=unit.payee&&u.output===unit.output);
+            state.unit_store[unit.request] = _.copy(deleted);
+            if(deleted.length<=0) delete state.unit_store[unit.request];
+            write_db('unit_store',_.copy(state.unit_store));
+            self.postMessage({
+                key:'delete_unit',
+                val:_.copy(unit)
+            },location.protocol+'//'+location.host);
+        },
+        refresh_unit_store(state,store:{[key:string]:T.Unit[]}){
+            state.unit_store = _.copy(store);
+            write_db('unit_store',_.copy(state.unit_store));
+            self.postMessage({
+                key:'refresh_unit_store',
+                val:_.copy(store)
+            },location.protocol+'//'+location.host);
+        },
+        refresh_secret(state,secret:string){
+            state.secret = secret;
+            write_db('secret',state.secret);
+            self.postMessage({
+                key:'refresh_secret',
+                val:secret
+            },location.protocol+'//'+location.host);
+        },
+        regist(state){
+            state.registed = 1;
+            write_db('registed',1);
+            self.postMessage({
+                key:'regist',
+                val:null
+            },location.protocol+'//'+location.host);
+        },
+        refresh_balance(state,amount:number){
+            state.balance = amount;
+            self.postMessage({
+                key:'refresh_balance',
+                val:amount
+            },location.protocol+'//'+location.host);
+        },
+        push_yet_data(state,data:Data){
+            state.yet_data.push(data);
+            self.postMessage({
+                key:'push_yet_data',
+                val:data
+            },location.protocol+'//'+location.host);
+        },
+        unshift_yet_data(state,data:Data){
+            state.yet_data.unshift(data);
+            self.postMessage({
+                key:'unshift_yet_data',
+                val:data
+            },location.protocol+'//'+location.host);
+        },
+        refresh_yet_data(state,data:Data[]){
+            state.yet_data = _.copy(data);
+            self.postMessage({
+                key:'refresh_yet_data',
+                val:data
+            },location.protocol+'//'+location.host);
+        },
+        checking(state,bool:boolean){
+            state.check_mode = bool;
+            if(bool===true){
+                setTimeout(()=>{
+                    state.check_mode = false;
+                },block_time*10);
+            }
+            self.postMessage({
+                key:'checking',
+                val:bool
+            },location.protocol+'//'+location.host);
+        },
+        replaceing(state,bool:boolean){
+            state.replace_mode = bool;
+            self.postMessage({
+                key:'replaceing',
+                val:bool
+            },location.protocol+'//'+location.host);
+        },
+        rep_limit(state,index:number){
+            state.replace_index = index;
+            self.postMessage({
+                key:'rep_limit',
+                val:index
+            },location.protocol+'//'+location.host);
+        },
+        add_not_refreshed(state,tx:T.Tx){
+            state.not_refreshed_tx = state.not_refreshed_tx.concat(_.copy(tx));
+            self.postMessage({
+                key:'add_not_refreshed',
+                val:_.copy(tx)
+            },location.protocol+'//'+location.host);
+        },
+        del_not_refreshed(state,hashes:string[]){
+            state.not_refreshed_tx = state.not_refreshed_tx.filter((tx:T.Tx)=>hashes.indexOf(tx.hash)===-1);
+            self.postMessage({
+                key:'del_not_refreshed',
+                val:_.copy(hashes)
+            },location.protocol+'//'+location.host);
+        },
+        buying_unit(state,bool:boolean){
+            state.now_buying =bool;
+            self.postMessage({
+                key:'buying_unit',
+                val:bool
+            },location.protocol+'//'+location.host);
+        },
+        new_refreshing(state,requests:string[]){
+            state.now_refreshing = requests;
+            self.postMessage({
+                key:'new_refreshing',
+                val:_.copy(requests)
+            },location.protocol+'//'+location.host);
+        }
+    },
+    getters:{
+        my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
+    }
+});*/
+const port = peer_list_1.peer_list[0].port || "57750";
+const ip = peer_list_1.peer_list[0].ip || "localhost";
+console.log(ip);
+exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
+exports.client.subscribe('/data', async (data) => {
+    if (data.type === "block")
+        exports.store.push_yet_data(_.copy(data));
+    const S_Trie = index_1.trie_ins(exports.store.roots.stateroot);
+    const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.secret));
+    const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0);
+    const unit_amount = unit_state.amount || 0;
+    if (data.type === "tx" && unit_amount > 0)
+        exports.store.push_yet_data(_.copy(data));
+});
+exports.client.subscribe('/checkchain', (address) => {
+    console.log('checked');
+    console.log(exports.store.check_mode);
+    if (exports.store.my_address === address)
+        exports.client.publish('/replacechain', _.copy(exports.store.chain));
+    return 0;
+});
+exports.client.subscribe('/replacechain', async (chain) => {
+    console.log("replace:");
+    if (!exports.store.replace_mode && exports.store.check_mode) {
+        console.log(chain);
+        await index_1.check_chain(_.copy(chain), _.copy(exports.store.chain), _.copy(exports.store.pool), _.copy(exports.store.code), exports.store.secret, _.copy(exports.store.unit_store));
+    }
+    exports.store.checking(false);
+    console.log(exports.store.yet_data);
+    return 0;
+});
+exports.client.bind('transport:down', () => {
+    console.log('lose connection');
+    exports.delete_db();
+});
+/*(async ()=>{
+    const gen_S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        await gen_S_Trie.put(s.owner,s);
+    });
+    const last_block:T.Block = _.copy(store.state.chain[store.state.chain.length-1]) || _.copy(gen.block);
+    const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
+    console.log(last_address);
+    if(last_address!=store.getters.my_address){
+        store.commit('checking',true);
+        client.publish("/checkchain",last_address);
+    }
+    const balance = await get_balance(store.getters.my_address);
+    console.log(balance);
+    store.commit("refresh_balance",balance);
+    console.log('yet:')
+    console.log(store.state.yet_data);;
+    await compute_yet();
+})()*/
+self.onmessage = async (event) => {
+    try {
+        const key = event.data.key;
+        const val = event.data.val;
+        if (key != null)
+            exports.store[key](val);
+        else if (event.data === "start") {
+            const gen_S_Trie = index_1.trie_ins("");
+            await P.forEach(gen.state, async (s) => {
+                await gen_S_Trie.put(s.owner, s);
+            });
+            const chain = exports.read_db('chain', [gen.block]);
+            const last_block = _.copy(chain[chain.length - 1]) || _.copy(gen.block);
+            const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
+            console.log(last_address);
+            if (last_address != exports.store.my_address) {
+                exports.store.checking(true);
+                exports.client.publish("/checkchain", last_address);
+            }
+            const balance = await index_1.get_balance(exports.store.my_address);
+            exports.store.refresh_balance(balance);
+            console.log(balance);
+            await exports.compute_yet();
+        }
+    }
+    catch (e) {
+        console.log(e);
+    }
+};
+
+
+/***/ }),
+
 /***/ "./wallet/client/index.js":
 /*!********************************!*\
   !*** ./wallet/client/index.js ***!
@@ -112450,11 +113372,10 @@ const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./cor
 const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
 const con_1 = __webpack_require__(/*! ../con */ "./wallet/con.js");
 const tx_pool_1 = __webpack_require__(/*! ../../core/tx_pool */ "./core/tx_pool.js");
-const script_1 = __webpack_require__(/*! ./script */ "./wallet/client/script.js");
 const level_browserify_1 = __importDefault(__webpack_require__(/*! level-browserify */ "./node_modules/level-browserify/browser.js"));
 const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
 const code_1 = __webpack_require__(/*! ../../core/code */ "./core/code.js");
-const script_2 = __webpack_require__(/*! ./script */ "./wallet/client/script.js");
+const background_1 = __webpack_require__(/*! ./background */ "./wallet/client/background.js");
 const bignumber_js_1 = __webpack_require__(/*! bignumber.js */ "./node_modules/bignumber.js/bignumber.js");
 const db = level_browserify_1.default('./db');
 exports.trie_ins = (root) => {
@@ -112654,7 +113575,7 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, candidates, unit_stor
                 store[tx.meta.data.request] = pre.concat(new_unit);
             return store;
         });
-        script_1.store.commit("add_unit", new_unit);
+        background_1.store.add_unit(_.copy(new_unit));
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
                 for(let tx of block.txs.concat(block.natives).concat(block.units)){
@@ -112667,7 +113588,7 @@ exports.tx_accept = async (tx, chain, roots, pool, secret, candidates, unit_stor
         console.log(already);*/
     }
     if (_.ObjectHash(new_pool) != _.ObjectHash(pool)) {
-        script_1.store.commit("refresh_pool", _.copy(new_pool));
+        background_1.store.refresh_pool(_.copy(new_pool));
         /*if(Object.keys(new_pool).length>=1&&unit_amount>0){
             await send_key_block(chain.slice(),secret,candidates.slice(),_.copy(roots),_.copy(new_pool),codes,validator_mode);
         }*/
@@ -112733,26 +113654,26 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
             return p;
         });
         const new_chain = _.copy(chain).concat(_.copy(accepted.block[0]));
-        await script_1.store.commit('refresh_pool', _.copy(new_pool));
-        await script_1.store.commit("refresh_roots", _.copy(new_roots));
-        await script_1.store.commit("refresh_candidates", _.copy(accepted.candidates));
-        await script_1.store.commit("add_block", _.copy(accepted.block[0]));
+        background_1.store.refresh_pool(_.copy(new_pool));
+        background_1.store.refresh_roots(_.copy(new_roots));
+        background_1.store.refresh_candidates(_.copy(accepted.candidates));
+        background_1.store.add_block(_.copy(accepted.block[0]));
         console.log(new_chain);
         const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
         const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
         const added_not_refresh_tx = reqs_pure.reduce((result, pure) => {
             const full_tx = TxSet.pure_to_tx(pure, block);
-            script_1.store.commit('add_not_refreshed', _.copy(full_tx));
+            background_1.store.add_not_refreshed(_.copy(full_tx));
             return result.concat(full_tx);
         }, not_refreshed);
         if (refs_pure.length > 0) {
             console.log(refs_pure);
-            script_1.store.commit('del_not_refreshed', _.copy(refs_pure).map(pure => pure.meta.data.request));
+            background_1.store.del_not_refreshed(_.copy(refs_pure).map(pure => pure.meta.data.request));
         }
-        const now_refreshing = _.copy(script_1.store.state.now_refreshing);
+        const now_refreshing = _.copy(background_1.store.now_refreshing);
         const refreshed = refs_pure.map(pure => pure.meta.data.request);
         const new_refreshing = now_refreshing.filter(key => refreshed.indexOf(key) === -1);
-        script_1.store.commit('new_refreshing', new_refreshing);
+        background_1.store.new_refreshing(new_refreshing);
         const new_not_refreshed_tx = refs_pure.reduce((result, pure) => {
             return result.filter(tx => tx.meta.kind === "request" && tx.hash != pure.meta.data.request);
         }, _.copy(added_not_refresh_tx));
@@ -112771,14 +113692,14 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
                 return false;
             const ref_tx = _.copy(TxSet.pure_to_tx(_.copy(tx), _.copy(block)));
             const req_tx = _.copy(TxSet.find_req_tx(_.copy(ref_tx), _.copy(chain)));
-            const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(script_1.store.state.secret));
+            const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(background_1.store.secret));
             return _.copy(req_tx).meta.data.address === unit_address;
         });
         console.log("my_unit_buying");
         console.log(my_unit_buying);
-        const new_now_buying = script_1.store.state.now_buying || !my_unit_buying;
+        const new_now_buying = background_1.store.now_buying || !my_unit_buying;
         if (my_unit_buying)
-            script_1.store.commit('buying_unit', false);
+            background_1.store.buying_unit(false);
         const new_unit_store = _.new_obj(unit_store, (store) => {
             bought_units.forEach(unit => {
                 const com = store[unit.request] || [];
@@ -112788,7 +113709,7 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
             return store;
         });
         bought_units.forEach(unit => {
-            script_1.store.commit("delete_unit", _.copy(unit));
+            background_1.store.delete_unit(_.copy(unit));
         });
         return {
             pool: _.copy(new_pool),
@@ -112822,11 +113743,11 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
                 return p;
             });
         }, _.copy(pool));
-        script_1.store.commit('refresh_pool', _.copy(deleted_pool));
-        const now_refreshing = _.copy(script_1.store.state.now_refreshing);
+        background_1.store.refresh_pool(_.copy(deleted_pool));
+        const now_refreshing = _.copy(background_1.store.now_refreshing);
         const refreshed = _.copy(block.txs.concat(block.natives).concat(block.units)).filter((pure, i) => pure.meta.kind === "refresh" && !valids[i]).map(pure => pure.meta.data.request);
         const new_refreshing = now_refreshing.filter(key => refreshed.indexOf(key) === -1);
-        script_1.store.commit('new_refreshing', _.copy(new_refreshing));
+        background_1.store.new_refreshing(_.copy(new_refreshing));
         /*const last_key = BlockSet.search_key_block(chain);
         const last_micros = BlockSet.search_micro_block(chain,last_key);
 
@@ -112881,7 +113802,7 @@ exports.tx_check = (block, chain, StateData, LocationData) => {
     }, -1);
 };
 exports.get_balance = async (address) => {
-    const S_Trie = exports.trie_ins(script_1.store.state.roots.stateroot || "");
+    const S_Trie = exports.trie_ins(background_1.store.roots.stateroot || "");
     const state = await S_Trie.get(address);
     if (state == null)
         return 0;
@@ -112904,7 +113825,7 @@ exports.send_request_tx = async (secret, type, token, base, input_raw, log, root
             console.log("invalid infomations");
         else {
             console.log('remit!');
-            script_2.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
+            background_1.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
             /*const pool = store.state.pool;
@@ -112986,7 +113907,7 @@ exports.send_refresh_tx = async (roots, secret, req_tx, index, code, chain) => {
     else {
         //store.commit('del_not_refreshed',[tx.meta.data.request]);
         console.log("create valid refresh tx");
-        script_2.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
+        background_1.client.publish('/data', { type: 'tx', tx: [tx], block: [] });
         //await store.dispatch("tx_accept",_.copy(tx));
         //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
         /*const pool = store.state.pool;
@@ -113012,7 +113933,7 @@ exports.send_key_block = async (chain, secret, candidates, roots) => {
         console.log("fail to create valid block");
     else {
         console.log('create valid key block');
-        script_2.client.publish('/data', { type: 'block', tx: [], block: [key_block] });
+        background_1.client.publish('/data', { type: 'block', tx: [], block: [key_block] });
         //await store.dispatch("block_accept",_.copy(key_block));
         //await block_accept(key_block,chain,candidates,roots,pool,codes,secret,mode,socket);
     }
@@ -113036,7 +113957,7 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
             return false;
     }));
     console.log(requested_bases);
-    const already_requests = _.copy(script_1.store.state.now_refreshing);
+    const already_requests = _.copy(background_1.store.now_refreshing);
     console.log(already_requests);
     const not_same = pool_txs.reduce((result, tx) => {
         const bases = result.reduce((r, t) => {
@@ -113119,10 +114040,10 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
             });
             return p;
         });
-        script_1.store.commit('refresh_pool', _.copy(new_pool));
+        background_1.store.refresh_pool(_.copy(new_pool));
         const new_refreshing = already_requests.concat(micro_block.txs.concat(micro_block.natives).concat(micro_block.units).filter(tx => tx.meta.kind === "refresh").map(tx => tx.meta.data.request));
-        script_1.store.commit('new_refreshing', _.copy(new_refreshing));
-        script_2.client.publish('/data', { type: 'block', tx: [], block: [micro_block] });
+        background_1.store.new_refreshing(_.copy(new_refreshing));
+        background_1.client.publish('/data', { type: 'block', tx: [], block: [micro_block] });
         //await store.dispatch("block_accept",_.copy(micro_block));
         //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
         console.log("create micro block");
@@ -113169,8 +114090,8 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
             output: target_pure.meta.data.output,
             unit_price: target_pure.meta.unit_price
         };
-        script_1.store.commit("refresh_pool", _.copy(del_pool));
-        script_1.store.commit("add_unit", _.copy(new_unit));
+        background_1.store.refresh_pool(_.copy(del_pool));
+        background_1.store.add_unit(_.copy(new_unit));
         await exports.send_micro_block(_.copy(del_pool), secret, _.copy(chain), _.copy(candidates), _.copy(roots), _.copy(unit_store));
     }
     else {
@@ -113219,7 +114140,7 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
         console.log(add_blocks);
         /*const back_chain:T.Block[] = [gen.block];
         const add_blocks = new_chain.slice(1);*/
-        script_1.store.commit("replace_chain", _.copy(back_chain));
+        background_1.store.replace_chain(_.copy(back_chain));
         const info = await (async () => {
             if (back_chain.length === 1) {
                 return {
@@ -113238,30 +114159,31 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
             };
         })();
         const add_blocks_data = add_blocks.map(block => {
-            return {
+            const data = {
                 type: 'block',
                 tx: [],
                 block: [block]
             };
+            return data;
         });
-        script_1.store.commit("refresh_roots", _.copy(info.roots));
-        script_1.store.commit("refresh_candidates", _.copy(info.candidates));
-        script_1.store.commit('replaceing', true);
-        script_1.store.commit('rep_limit', _.copy(add_blocks[add_blocks.length - 1]).meta.index);
+        background_1.store.refresh_roots(_.copy(info.roots));
+        background_1.store.refresh_candidates(_.copy(info.candidates));
+        background_1.store.replaceing(true);
+        background_1.store.rep_limit(_.copy(add_blocks[add_blocks.length - 1]).meta.index);
         /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
             const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
         },info);*/
-        script_1.store.commit('refresh_yet_data', _.copy(add_blocks_data).concat(_.copy(script_1.store.state.yet_data)));
+        background_1.store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(background_1.store.yet_data)));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         store.commit("checking",false);*/
-        const amount = await exports.get_balance(script_1.store.getters.my_address);
-        script_1.store.commit("refresh_balance", amount);
+        const amount = await exports.get_balance(background_1.store.my_address);
+        background_1.store.refresh_balance(amount);
     }
     else {
         console.log("not replace");
-        script_1.store.commit('replaceing', false);
+        background_1.store.replaceing(false);
     }
 };
 exports.unit_buying = async (secret, units, roots, chain) => {
@@ -113340,13 +114262,13 @@ exports.unit_buying = async (secret, units, roots, chain) => {
             console.log("fail to buy units");
         else {
             console.log("buy unit!");
-            script_1.store.commit('buying_unit', true);
+            background_1.store.buying_unit(true);
             //console.error(unit_tx.hash);
             units.forEach(u => {
-                script_1.store.commit('delete_unit', _.copy(u));
+                background_1.store.delete_unit(_.copy(u));
             });
-            script_2.client.publish('/data', { type: 'tx', tx: [native_tx], block: [] });
-            script_2.client.publish('/data', { type: 'tx', tx: [unit_tx], block: [] });
+            background_1.client.publish('/data', { type: 'tx', tx: [native_tx], block: [] });
+            background_1.client.publish('/data', { type: 'tx', tx: [unit_tx], block: [] });
         }
         /*const pre_tx = TxSet.CreateRequestTx(pub_key,remiter,Math.pow(2,-5),"issue",unit,[from],["buy",remiter,JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(10,-18));
         const tx = TxSet.SignTx(pre_tx,secret,pub_key[0
@@ -113416,374 +114338,13 @@ const index_1 = __webpack_require__(/*! ./index */ "./wallet/client/index.js");
 const CryptoSet = __importStar(__webpack_require__(/*! ../../core/crypto_set */ "./core/crypto_set.js"));
 const _ = __importStar(__webpack_require__(/*! ../../core/basic */ "./core/basic.js"));
 const con_1 = __webpack_require__(/*! ../con */ "./wallet/con.js");
-const peer_list_1 = __webpack_require__(/*! ./peer_list */ "./wallet/client/peer_list.js");
 const vue_1 = __importDefault(__webpack_require__(/*! vue */ "./node_modules/vue/dist/vue.js"));
 const vuex_1 = __importDefault(__webpack_require__(/*! vuex */ "./node_modules/vuex/dist/vuex.esm.js"));
 const at_ui_1 = __importDefault(__webpack_require__(/*! at-ui */ "./node_modules/at-ui/dist/at.js"));
 const vue_router_1 = __importDefault(__webpack_require__(/*! vue-router */ "./node_modules/vue-router/dist/vue-router.esm.js"));
 const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
-const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
-const faye_1 = __importDefault(__webpack_require__(/*! faye */ "./node_modules/faye/src/faye_browser.js"));
-const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.js"));
-const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
-const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
 const bignumber_js_1 = __importDefault(__webpack_require__(/*! bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
-const port = peer_list_1.peer_list[0].port || "57750";
-const ip = peer_list_1.peer_list[0].ip || "localhost";
-console.log(ip);
-/*const socket = new IO();
-socket.connect('http://'+ip+':'+port);*/
-exports.client = new faye_1.default.Client('http://' + ip + ':' + port + '/vreath');
-/*self.addEventListener('install',(event)=>{
-    console.log("let's install");
-    event.waitUntil(
-        caches.open('vreath').then(caches=>{
-            return caches.addAll([
-                './',
-                './img',
-                './json'
-            ]).then(() =>{console.log("loaded");self.skipWaiting();});
-        })
-    );
-});
-
-self.addEventListener('fetch',(event)=>{
-    event.respondWith(
-        caches.match(event.request,{
-            ignoreSearch:true
-        }).then(response=>{
-            return response || fetch(event.request);
-        })
-    )
-});*/
-localStorage.removeItem("data");
-localStorage.removeItem("apps");
-localStorage.removeItem("code");
-localStorage.removeItem("pool");
-localStorage.removeItem("chain");
-localStorage.removeItem("roots");
-localStorage.removeItem("candidates");
-localStorage.removeItem("unit_store");
-localStorage.removeItem("yet_data");
-const sleep = (msec) => {
-    return new Promise(function (resolve) {
-        setTimeout(function () { resolve(); }, msec);
-    });
-};
-const send_blocks = async () => {
-    const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
-    const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret));
-    const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0);
-    const unit_amount = unit_state.amount || 0;
-    const last_key = BlockSet.search_key_block(_.copy(exports.store.state.chain));
-    const last_micros = BlockSet.search_micro_block(_.copy(exports.store.state.chain), _.copy(last_key));
-    const date = new Date();
-    if (!exports.store.state.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.state.secret) && last_micros.length <= con_1.max_blocks)
-        await index_1.send_micro_block(_.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.chain), _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots), exports.store.state.unit_store);
-    else if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
-        await index_1.send_key_block(_.copy(exports.store.state.chain), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots));
-};
-const compute_yet = async () => {
-    const data = _.copy(exports.store.state.yet_data[0]);
-    if (data == null) {
-        exports.store.commit('replaceing', false);
-        await send_blocks();
-        console.log('yet:');
-        console.log(exports.store.state.yet_data);
-        await sleep(con_1.block_time);
-        return await compute_yet();
-    }
-    else if (data.type === "tx" && data.tx.length > 0) {
-        const target = _.copy(data.tx[0]);
-        console.log(target);
-        //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
-        await index_1.tx_accept(_.copy(target), _.copy(exports.store.state.chain), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.unit_store));
-        const now_yets = _.copy(exports.store.state.yet_data);
-        const reduced = now_yets.filter(d => {
-            if (d.type === "tx" && d.tx[0] != null)
-                return d.tx[0].hash != target.hash;
-            else if (d.type === "block" && d.block[0] != null)
-                return true;
-            else
-                return false;
-        });
-        exports.store.commit("refresh_yet_data", _.copy(reduced));
-        console.log(reduced);
-        console.log('yet:');
-        console.log(exports.store.state.yet_data);
-        await sleep(con_1.block_time);
-        return await compute_yet();
-        /*}
-        else{
-            const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
-            const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
-            const reduced = txs.concat(blocks);
-            const concated = reduced.concat(store.state.yet_data[0]);
-            store.commit("refresh_yet_data",concated);
-        }*/
-    }
-    else if (data.type === "block" && data.block.length > 0) {
-        const block = data.block[0];
-        const chain = _.copy(exports.store.state.chain);
-        console.log(block);
-        if (block.meta.version >= con_1.compatible_version) {
-            if (block.meta.index > chain.length) {
-                if (!exports.store.state.replace_mode) {
-                    const address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(block.meta.validatorPub));
-                    if (address != exports.store.getters.my_address) {
-                        exports.store.commit('checking', true);
-                        exports.client.publish("/checkchain", address);
-                    }
-                }
-                else
-                    exports.store.commit('replaceing', false);
-                //await send_blocks();
-                await sleep(con_1.block_time);
-                return await compute_yet();
-            }
-            else if (block.meta.index === chain.length) {
-                if (exports.store.state.replace_mode && chain[chain.length - 1].meta.index >= exports.store.state.replace_index)
-                    exports.store.commit('replaceing', false);
-                await index_1.block_accept(_.copy(block), _.copy(exports.store.state.chain), _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), _.copy(exports.store.state.not_refreshed_tx), exports.store.state.now_buying, _.copy(exports.store.state.unit_store));
-                const new_chain = _.copy(exports.store.state.chain);
-                console.log(exports.store.state.replace_mode);
-                console.log(chain.length);
-                console.log(new_chain.length);
-                if (exports.store.state.replace_mode && chain.length === new_chain.length)
-                    exports.store.commit('replaceing', false);
-                if (new_chain.length === chain.length + 1) {
-                    const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx => tx.meta.kind === "refresh");
-                    const now_yets = _.copy(exports.store.state.yet_data);
-                    let units = [];
-                    const reduced = now_yets.filter(d => {
-                        if (d.type === "tx" && d.tx[0] != null) {
-                            const t = _.copy(d.tx[0]);
-                            return !refs.some(tx => {
-                                if (t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
-                                    const unit = {
-                                        request: t.meta.data.request,
-                                        index: t.meta.data.index,
-                                        nonce: t.meta.nonce,
-                                        payee: t.meta.data.payee,
-                                        output: t.meta.data.output,
-                                        unit_price: t.meta.unit_price
-                                    };
-                                    units.push(_.copy(unit));
-                                    return true;
-                                }
-                                //else if(t.meta.kind==="request"&&t.hash===tx.meta.data.request) return true;
-                                else
-                                    return false;
-                            });
-                        }
-                        else if (d.type === "block" && d.block[0] != null)
-                            return d.block[0].meta.index > block.meta.index;
-                        else
-                            return false;
-                    });
-                    exports.store.commit("refresh_yet_data", reduced);
-                    /*const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
-                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
-                        pre_unit_store,
-                        (store)=>{
-                            units.forEach(unit=>{
-                                const pre = store[unit.request] || [];
-                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
-                                store[unit.request] = pre.concat(unit);
-                            });
-                            return store;
-                        }
-                    );
-                    store.commit("refresh_unit_store",new_unit_store);*/
-                }
-                else {
-                    const now_yets = _.copy(exports.store.state.yet_data);
-                    const reduced = now_yets.filter(d => {
-                        if (d.type === "tx" && d.tx[0] != null)
-                            return true;
-                        else if (d.type === "block" && d.block[0] != null)
-                            return d.block[0].meta.index > block.meta.index;
-                        else
-                            return false;
-                    });
-                    exports.store.commit("refresh_yet_data", reduced);
-                }
-                const balance = await index_1.get_balance(exports.store.getters.my_address);
-                exports.store.commit("refresh_balance", balance);
-                let refreshed_hash = [];
-                let get_not_refresh = [];
-                for (let block of _.copy(new_chain).slice().reverse()) {
-                    for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
-                        if (_.copy(tx).meta.kind === "request" && refreshed_hash.indexOf(_.copy(tx).hash) === -1)
-                            get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx), _.copy(block))));
-                        else if (_.copy(tx).meta.kind === "refresh")
-                            refreshed_hash.push(_.copy(tx).meta.data.request);
-                        else if (get_not_refresh.length >= 10)
-                            break;
-                    }
-                }
-                const refreshes = _.copy(get_not_refresh);
-                const related = refreshes.filter(tx => {
-                    if (tx.meta.pre.flag === true) {
-                        const pres = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "pre");
-                        return pres.length > 0;
-                    }
-                    else if (tx.meta.next.flag === true) {
-                        const nexts = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "next");
-                        return nexts.length > 0;
-                    }
-                    else
-                        return true;
-                });
-                console.log('not refreshed:');
-                console.log(related);
-                if (related.length > 0) {
-                    const req_tx = related[0];
-                    const index = (() => {
-                        for (let block of _.copy(new_chain).slice().reverse()) {
-                            let txs = block.txs.concat(block.natives).concat(block.units);
-                            let i = txs.map(tx => tx.hash).indexOf(req_tx.hash);
-                            if (i != -1)
-                                return block.meta.index;
-                        }
-                        return 0;
-                    })();
-                    const code = exports.store.state.code[req_tx.meta.data.token];
-                    await index_1.send_refresh_tx(_.copy(exports.store.state.roots), exports.store.state.secret, _.copy(req_tx), index, code, _.copy(new_chain));
-                    //await send_blocks();
-                }
-                /*if(refs_pure.length>0){
-                    await P.forEach(refs_pure, async (pure:T.TxPure)=>{
-                        const req = pure.meta.data.request;
-                        const buy_units:T.Unit[] = store.state.unit_store[req];
-                        await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
-                    })
-                }*/
-                const unit_store_values = Object.values(exports.store.state.unit_store);
-                const units_sum = unit_store_values.reduce((sum, us) => sum + us.length, 0);
-                const reversed_chain = _.copy(new_chain).slice().reverse();
-                const refreshed = (() => {
-                    let result = [];
-                    let price_sum;
-                    let flag = false;
-                    for (let block of reversed_chain) {
-                        const txs = _.copy(block).txs.concat(block.natives).concat(block.units).slice();
-                        for (let tx of txs) {
-                            if (tx.meta.kind === "refresh") {
-                                result = result.concat(unit_store_values.reduce((result, us) => {
-                                    if (us.length > 0 && us[0].request === tx.meta.data.request) {
-                                        price_sum = result.reduce((sum, unit) => new bignumber_js_1.default(sum).plus(unit.unit_price).toNumber(), 0);
-                                        us.forEach(u => {
-                                            if (new bignumber_js_1.default(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new bignumber_js_1.default(balance).times(0.99))) {
-                                                flag = true;
-                                                return result;
-                                            }
-                                            else {
-                                                price_sum = new bignumber_js_1.default(price_sum).plus(u.unit_price).toNumber();
-                                                result.push(u);
-                                            }
-                                        });
-                                        return result;
-                                    }
-                                    else
-                                        return result;
-                                }, []));
-                            }
-                            if (result.length === units_sum || flag)
-                                break;
-                        }
-                    }
-                    return result;
-                })();
-                console.log(unit_store_values);
-                console.log('buy_units are:');
-                console.log(refreshed);
-                console.log(exports.store.state.now_buying);
-                if (refreshed.length > 0 && !exports.store.state.now_buying && !exports.store.state.replace_mode) {
-                    const validatorPub = BlockSet.search_key_block(_.copy(reversed_chain)).meta.validatorPub;
-                    const validator_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(validatorPub));
-                    const buy_units = refreshed;
-                    await index_1.unit_buying(exports.store.state.secret, _.copy(buy_units), _.copy(exports.store.state.roots), _.copy(new_chain));
-                    //await send_blocks();
-                }
-                console.log('yet:');
-                console.log(exports.store.state.yet_data);
-                await send_blocks();
-                await sleep(con_1.block_time);
-                return await compute_yet();
-            }
-            else {
-                const now_yets = _.copy(exports.store.state.yet_data);
-                const reduced = now_yets.filter(d => {
-                    if (d.type === "tx" && d.tx[0] != null)
-                        return true;
-                    else if (d.type === "block" && d.block[0] != null)
-                        return d.block[0].meta.index != block.meta.index;
-                    else
-                        return false;
-                });
-                console.log(reduced);
-                exports.store.commit("refresh_yet_data", _.copy(reduced));
-                console.log('yet:');
-                console.log(exports.store.state.yet_data);
-                await sleep(con_1.block_time);
-                return await compute_yet();
-            }
-        }
-    }
-};
-exports.client.subscribe('/data', async (data) => {
-    if (data.type === "block")
-        exports.store.commit('push_yet_data', _.copy(data));
-    const S_Trie = index_1.trie_ins(exports.store.state.roots.stateroot);
-    const unit_address = CryptoSet.GenereateAddress(con_1.unit, CryptoSet.PublicFromPrivate(exports.store.state.secret));
-    const unit_state = await S_Trie.get(unit_address) || StateSet.CreateState(0, unit_address, con_1.unit, 0);
-    const unit_amount = unit_state.amount || 0;
-    if (data.type === "tx" && unit_amount > 0)
-        exports.store.commit('push_yet_data', _.copy(data));
-});
-exports.client.subscribe('/checkchain', (address) => {
-    console.log('checked');
-    console.log(exports.store.state.check_mode);
-    if (exports.store.getters.my_address === address)
-        exports.client.publish('/replacechain', _.copy(exports.store.state.chain));
-    return 0;
-});
-exports.client.subscribe('/replacechain', async (chain) => {
-    try {
-        console.log("replace:");
-        if (!exports.store.state.replace_mode && exports.store.state.check_mode) {
-            console.log(chain);
-            await index_1.check_chain(_.copy(chain), _.copy(exports.store.state.chain), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
-        }
-        exports.store.commit('checking', false);
-        console.log(exports.store.state.yet_data);
-        return 0;
-        //return await compute_yet(_.copy(store.state.roots),_.copy(store.state.chain),_.copy(store.state.pool),_.copy(store.state.candidates),_.copy(store.state.unit_store),_.copy(store.state.not_refreshed_tx),store.state.now_buying);
-        /*const S_Trie = trie_ins(store.state.roots.stateroot);
-        const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
-        console.log(await S_Trie.filter());*/
-        //if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.roots));
-    }
-    catch (e) {
-        throw new Error(e);
-    }
-});
-exports.client.bind('transport:down', () => {
-    console.log('lose connection');
-    localStorage.removeItem("data");
-    localStorage.removeItem("apps");
-    localStorage.removeItem("code");
-    localStorage.removeItem("pool");
-    localStorage.removeItem("chain");
-    localStorage.removeItem("roots");
-    localStorage.removeItem("candidates");
-    localStorage.removeItem("unit_store");
-    localStorage.removeItem("yet_data");
-});
-vue_1.default.use(vuex_1.default);
-vue_1.default.use(vue_router_1.default);
-vue_1.default.use(at_ui_1.default);
+const worker = new Worker('bg-bundle.js');
 const wallet = {
     name: "wallet",
     icon: "./img/vreathrogoi.jpg",
@@ -113804,210 +114365,214 @@ const codes = {
     "native": "const main = () => {};",
     "unit": "const main = () => {};"
 };
-const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
-exports.store = new vuex_1.default.Store({
-    state: {
-        data: JSON.parse(localStorage.getItem("data") || "{}"),
-        apps: JSON.parse(localStorage.getItem("apps") || JSON.stringify(def_apps)),
-        code: JSON.parse(localStorage.getItem("code") || JSON.stringify(codes)),
-        pool: JSON.parse(localStorage.getItem("pool") || "{}"),
-        chain: JSON.parse(localStorage.getItem("chain") || JSON.stringify([gen.block])),
-        roots: JSON.parse(localStorage.getItem("roots") || JSON.stringify(gen.roots)),
-        candidates: JSON.parse(localStorage.getItem("candidates") || JSON.stringify(gen.candidates)),
-        unit_store: JSON.parse(localStorage.getItem("unit_store") || JSON.stringify({})),
-        secret: localStorage.getItem("secret") || CryptoSet.GenerateKeys(),
-        registed: Number(localStorage.getItem("registed") || "0"),
-        balance: 0,
-        yet_data: JSON.parse(localStorage.getItem("yet_data") || "[]"),
-        check_mode: false,
-        replace_mode: false,
-        replace_index: 0,
-        not_refreshed_tx: [],
-        now_buying: false,
-        now_refreshing: []
+const storeName = 'vreath';
+let db;
+exports.read_db = (key, def) => {
+    const req = indexedDB.open('vreath', 2);
+    let result = def;
+    req.onerror = () => console.log('fail to open db');
+    req.onupgradeneeded = (event) => {
+        db = req.result;
+        db.createObjectStore(storeName, { keyPath: 'id' });
+    };
+    req.onsuccess = (event) => {
+        db = req.result;
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const get_req = store.get(key);
+        get_req.onsuccess = () => {
+            result = get_req.source.val;
+        };
+        db.close();
+    };
+    return result;
+};
+exports.write_db = (key, val) => {
+    const req = indexedDB.open('vreath', 2);
+    req.onerror = () => console.log('fail to open db');
+    req.onupgradeneeded = (event) => {
+        db = req.result;
+        db.createObjectStore(storeName, { keyPath: 'id' });
+    };
+    req.onsuccess = (event) => {
+        db = req.result;
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const data = {
+            id: key,
+            val: val
+        };
+        const put_req = store.put(data);
+        put_req.onsuccess = () => console.log('write data success');
+        tx.oncomplete = () => console.log('transaction complete');
+    };
+};
+exports.delete_db = () => {
+    const del_db = indexedDB.deleteDatabase('vreath');
+    del_db.onsuccess = () => console.log('db delete success');
+    del_db.onerror = () => console.log('db delete error');
+};
+const commit = (key, val) => {
+    worker.postMessage({
+        key: key,
+        val: val
+    });
+};
+vue_1.default.use(vuex_1.default);
+vue_1.default.use(vue_router_1.default);
+vue_1.default.use(at_ui_1.default);
+/*export const store = new Vuex.Store({
+    state:{
+        apps:read_db('app',def_apps),
+        code:read_db('code',codes),
+        pool:read_db('pool',{}),
+        chain:read_db('chain',[gen.block]),
+        roots:read_db('roots',gen.roots),
+        candidates:read_db('candidates',gen.candidates),
+        unit_store:read_db('unit_store',{}),
+        secret:read_db('secret',CryptoSet.GenerateKeys()),
+        registed:Number(read_db('registed',0)),
+        balance:0,
+        yet_data:[],
+        check_mode:false,
+        replace_mode:false,
+        replace_index:0,
+        not_refreshed_tx:[],
+        now_buying:false,
+        now_refreshing:[]
     },
-    mutations: {
-        add_app(state, obj) {
+    mutations:{
+        add_app(state,obj:Installed){
             state.apps[obj.name] = _.copy(obj);
-            localStorage.setItem("apps", JSON.stringify(_.copy(state.apps)));
         },
-        del_app(state, key) {
+        del_app(state,key:string){
             delete state.apps[key];
-            localStorage.setItem("apps", JSON.stringify(_.copy(state.apps)));
         },
-        refresh_pool(state, pool) {
+        refresh_pool(state,pool:T.Pool){
             state.pool = _.copy(pool);
-            localStorage.setItem("pool", JSON.stringify(_.copy(state.pool)));
         },
-        add_block(state, block) {
+        add_block(state,block:T.Block){
             state.chain.push(block);
-            localStorage.setItem("chain", JSON.stringify(_.copy(state.chain)));
         },
-        replace_chain(state, chain) {
-            state.chain = _.copy(chain).slice().sort((a, b) => {
+        replace_chain(state,chain:T.Block[]){
+            state.chain = _.copy(chain).slice().sort((a:T.Block,b:T.Block)=>{
                 return a.meta.index - b.meta.index;
-            }).filter((b, i) => b.meta.index === i);
-            localStorage.setItem("chain", JSON.stringify(_.copy(state.chain)));
+            }).filter((b:T.Block,i:number)=>b.meta.index===i);
         },
-        refresh_roots(state, roots) {
+        refresh_roots(state,roots:{[key:string]:string}){
             state.roots = _.copy(roots);
-            localStorage.setItem("roots", _.copy(state.roots));
         },
-        refresh_candidates(state, candidates) {
+        refresh_candidates(state,candidates:T.Candidates[]){
             state.candidates = _.copy(candidates);
-            localStorage.setItem("candidates", JSON.stringify(_.copy(state.candidates)));
         },
-        add_unit(state, unit) {
-            const units = _.copy(state.unit_store)[unit.request] || [];
-            if (!units.some(u => u.index === unit.index && u.payee === unit.payee)) {
+        add_unit(state,unit:T.Unit){
+            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
+            if(!units.some(u=>u.index===unit.index&&u.payee===unit.payee)){
                 state.unit_store[unit.request] = _.copy(units).concat(unit);
-                localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
             }
         },
-        delete_unit(state, unit) {
-            const units = _.copy(state.unit_store)[unit.request] || [];
-            const deleted = units.filter(u => u.index === unit.index && u.payee != unit.payee && u.output === unit.output);
+        delete_unit(state,unit:T.Unit){
+            const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
+            const deleted = units.filter(u=>u.index===unit.index&&u.payee!=unit.payee&&u.output===unit.output);
             state.unit_store[unit.request] = _.copy(deleted);
-            if (deleted.length <= 0)
-                delete state.unit_store[unit.request];
-            localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
+            if(deleted.length<=0) delete state.unit_store[unit.request];
         },
-        refresh_unit_store(state, store) {
+        refresh_unit_store(state,store:{[key:string]:T.Unit[]}){
             state.unit_store = _.copy(store);
-            localStorage.setItem("unit_store", JSON.stringify(_.copy(state.unit_store)));
         },
-        refresh_secret(state, secret) {
+        refresh_secret(state,secret:string){
             state.secret = secret;
-            localStorage.setItem("secret", state.secret);
         },
-        regist(state) {
+        regist(state){
             state.registed = 1;
-            localStorage.setItem("registed", "1");
         },
-        refresh_balance(state, amount) {
+        refresh_balance(state,amount:number){
             state.balance = amount;
         },
-        push_yet_data(state, data) {
+        push_yet_data(state,data:Data){
             state.yet_data.push(data);
         },
-        unshift_yet_data(state, data) {
+        unshift_yet_data(state,data:Data){
             state.yet_data.unshift(data);
         },
-        refresh_yet_data(state, data) {
+        refresh_yet_data(state,data:Data[]){
             state.yet_data = _.copy(data);
         },
-        checking(state, bool) {
+        checking(state,bool:boolean){
             state.check_mode = bool;
-            if (bool === true) {
-                setTimeout(() => {
+            if(bool===true){
+                setTimeout(()=>{
                     state.check_mode = false;
-                }, con_1.block_time * 10);
+                },block_time*10);
             }
         },
-        replaceing(state, bool) {
+        replaceing(state,bool:boolean){
             state.replace_mode = bool;
         },
-        rep_limit(state, index) {
+        rep_limit(state,index:number){
             state.replace_index = index;
         },
-        add_not_refreshed(state, tx) {
+        add_not_refreshed(state,tx:T.Tx){
             state.not_refreshed_tx = state.not_refreshed_tx.concat(_.copy(tx));
         },
-        del_not_refreshed(state, hashes) {
-            state.not_refreshed_tx = state.not_refreshed_tx.filter((tx) => hashes.indexOf(tx.hash) === -1);
+        del_not_refreshed(state,hashes:string[]){
+            state.not_refreshed_tx = state.not_refreshed_tx.filter((tx:T.Tx)=>hashes.indexOf(tx.hash)===-1);
         },
-        buying_unit(state, bool) {
-            state.now_buying = bool;
+        buying_unit(state,bool:boolean){
+            state.now_buying =bool;
         },
-        new_refreshing(state, requests) {
+        new_refreshing(state,requests:string[]){
             state.now_refreshing = requests;
         }
+    },
+    getters:{
+        my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
+    }
+});*/
+/*worker.addEventListener('message',e=>{
+    const key:string = e.data.key;
+    if(e.data.val==null) store.commit(key);
+    const val:any = e.data.val;
+    store.commit(key,val);
+});*/
+const store = new vuex_1.default.Store({
+    state: {
+        apps: exports.read_db('app', def_apps),
+        registed: false,
+        secret: CryptoSet.GenerateKeys(),
+        balance: 0
     },
     getters: {
         my_address: (state) => CryptoSet.GenereateAddress(con_1.native, CryptoSet.PublicFromPrivate(state.secret)) || ""
     },
-    actions: {
-    /*tx_accept(commit,tx:T.Tx){
-        try{
-            console.log(store.state.yet_tx)
-            console.log(store.state.check_mode)
-            if(!store.state.check_mode){
-                commit.commit("check",true);
-                tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.validator_mode,store.state.candidates.slice(),store.state.code,_.copy(store.state.unit_store)).then(()=>{
-                    console.log("tx accept");
-                    if(tx.meta.kind==="request"||tx.meta.data.index<=store.state.chain.length-1){
-                        const reduced:T.Tx[] = store.state.yet_tx.filter((t:T.Tx)=>t.hash!=tx.hash);
-                        commit.commit("refresh_yet_tx",reduced);
-                        commit.commit("check",false);
-                        if(store.state.yet_block.length>0) store.dispatch("block_accept",store.state.yet_block[0]).then(()=>{
-                            if(reduced.length>0) store.dispatch("tx_accept",reduced[0]);
-                        });
-                    }
-                    else{
-                        commit.commit("check",false);
-                        client.publish("/checkchain","");
-                    }
-                })
-            }
-            else commit.commit("refresh_yet_tx",store.state.yet_tx.concat(tx));
+    mutations: {
+        add_app(state, obj) {
+            state.apps[obj.name] = _.copy(obj);
+            exports.write_db('app', state.apps);
+        },
+        del_app(state, key) {
+            delete state.apps[key];
+            exports.write_db('app', state.apps);
+        },
+        refresh_secret(state, secret) {
+            state.secret = secret;
+            commit('refresh_secret', secret);
+        },
+        regist(state) {
+            state.registed = true;
+        },
+        refresh_balance(state, amount) {
+            state.balance = amount;
         }
-        catch(e){console.log(e)}
-    },
-    block_accept(commit,block:T.Block){
-        try{
-            if(!store.state.
-            ){
-                commit.commit("check",true);
-                block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),_.copy(store.state.unit_store)).then(()=>{
-                    console.log("block accept");
-                    get_balance(store.getters.my_address).then((amount)=>{
-                        commit.commit("refresh_balance",amount);
-                        commit.commit("check",false);
-                        console.log(store.state.yet_block);
-                        console.log(store.state.check_mode)
-                        const reduced = store.state.yet_block.filter((b:T.Block)=>b.hash!=block.hash);
-                        commit.commit("refresh_yet_block",reduced);
-                        if(store.state.yet_tx.length>0) store.dispatch("tx_accept",store.state.yet_tx[0]).then(()=>{
-                            if(reduced.length>0) store.dispatch("block_accept",reduced[0]).then(()=>console.log("block reduced"));
-                        })
-                    });
-                });
-            }
-            else commit.commit("refresh_yet_block",store.state.yet_block.concat(block));
-            console.log(store.state.yet_block);
-            console.log(store.state.check_mode)
-        }
-        catch(e){console.log(e);}
-    },*/
     }
 });
-(async () => {
-    const gen_S_Trie = index_1.trie_ins("");
-    await P.forEach(gen.state, async (s) => {
-        await gen_S_Trie.put(s.owner, s);
-    });
-    const last_block = _.copy(exports.store.state.chain[exports.store.state.chain.length - 1]) || _.copy(gen.block);
-    const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
-    console.log(last_address);
-    if (last_address != exports.store.getters.my_address) {
-        exports.store.commit('checking', true);
-        exports.client.publish("/checkchain", last_address);
-    }
-    const balance = await index_1.get_balance(exports.store.getters.my_address);
-    console.log(balance);
-    exports.store.commit("refresh_balance", balance);
-    console.log('yet:');
-    console.log(exports.store.state.yet_data);
-    ;
-    await compute_yet();
-})();
 const Home = {
     data: function () {
         return {
-            installed: _.copy(this.$store.state.apps)
+            installed: this.$store.state.apps
         };
     },
-    store: exports.store,
+    store,
     template: `
     <div id="vreath_home_apps">
         <ul>
@@ -114027,18 +114592,21 @@ const Home = {
     `
 };
 const Registration = {
-    data: function () {
-        return {
-            secret: this.$store.state.secret
-        };
+    computed: {
+        secret: function () {
+            return this.$store.state.secret;
+        },
+        registed: function () {
+            return this.$store.state.registed;
+        }
     },
-    store: exports.store,
+    store,
     methods: {
         regist: function () {
             try {
-                console.log(this.$secret);
-                this.$store.commit('refresh_secret', this.secret);
-                this.$store.commit('regist');
+                console.log(this.secret);
+                store.commit('refresh_secret', this.secret);
+                store.commit('regist');
                 router.push({ path: '/' });
             }
             catch (e) {
@@ -114055,27 +114623,19 @@ const Registration = {
     `
 };
 const Wallet = {
-    store: exports.store,
     data: function () {
         return {
             to: "",
             amount: ""
         };
     },
-    watch: {
-        refresh_balance: async function () {
-            const balance = await index_1.get_balance(this.from);
-            console.log(balance);
-            this.$store.commit("refresh_balance", balance);
-        }
-    },
+    store,
     computed: {
         from: function () {
             return this.$store.getters.my_address;
         },
         balance: function () {
-            const balance = this.$store.state.balance || 0;
-            return new bignumber_js_1.default(balance).toNumber();
+            return new bignumber_js_1.default(this.$store.state.balance).toNumber();
         },
         secret: function () {
             return this.$store.state.secret;
@@ -114085,7 +114645,9 @@ const Wallet = {
         remit: async function () {
             try {
                 console.log("request");
-                await index_1.send_request_tx(this.$store.state.secret, "issue", con_1.native, [this.from, this.to], ["remit", JSON.stringify([this.amount])], [], _.copy(this.$store.state.roots), _.copy(this.$store.state.chain));
+                const roots = exports.read_db('roots', gen.roots);
+                const chain = exports.read_db('chain', [gen.block]);
+                await index_1.send_request_tx(this.secret, "issue", con_1.native, [this.from, this.to], ["remit", JSON.stringify([this.amount])], [], _.copy(roots), _.copy(chain));
                 alert('remit!');
             }
             catch (e) {
@@ -114130,7 +114692,7 @@ const Setting = {
     `
 };
 const Account = {
-    store: exports.store,
+    store,
     data: function () {
         return {
             secret: this.$store.state.secret
@@ -114160,7 +114722,7 @@ const Account = {
     },
     methods: {
         save: function () {
-            this.$store.commit('refresh_secret', this.secret);
+            store.commit('refresh_secret', this.secret);
         }
     },
     template: `
@@ -114173,16 +114735,15 @@ const Account = {
     `
 };
 const Deposit = {
-    store: exports.store,
+    store,
     computed: {
         installed: function () {
-            console.log(this.$store.state.apps);
             return this.$store.state.apps;
         }
     },
     methods: {
         uninstall: function (key) {
-            this.$store.commit('del_app', key);
+            store.commit('del_app', key);
         }
     },
     template: `
@@ -114218,11 +114779,15 @@ let routes = [
 const router = new vue_router_1.default({
     routes: routes
 });
-if (exports.store.state.registed === 0)
+if (store.state.registed === false)
     router.push({ path: '/regist' });
 const app = new vue_1.default({
     router: router
 }).$mount('#app');
+worker.postMessage('start');
+worker.addEventListener('message', (event) => {
+    store.commit('refresh_balance', event.data);
+});
 
 
 /***/ }),

@@ -8,11 +8,10 @@ import * as StateSet from '../../core/state'
 import * as P from 'p-iteration'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate, pow_target,pos_diff,all_issue} from '../con'
 import { Tx_to_Pool } from '../../core/tx_pool';
-import {store} from './script'
 import level from 'level-browserify'
 import * as gen from '../../genesis/index';
 import { RunVM } from '../../core/code';
-import { client } from './script'
+import { client, store, Data } from './background'
 import {BigNumber} from 'bignumber.js'
 
 
@@ -210,7 +209,7 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
                 return store;
             }
         )
-        store.commit("add_unit",new_unit);
+        store.add_unit(_.copy(new_unit));
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
                 for(let tx of block.txs.concat(block.natives).concat(block.units)){
@@ -223,7 +222,7 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
         console.log(already);*/
     }
     if(_.ObjectHash(new_pool)!=_.ObjectHash(pool)){
-        store.commit("refresh_pool",_.copy(new_pool));
+        store.refresh_pool(_.copy(new_pool))
         /*if(Object.keys(new_pool).length>=1&&unit_amount>0){
             await send_key_block(chain.slice(),secret,candidates.slice(),_.copy(roots),_.copy(new_pool),codes,validator_mode);
         }*/
@@ -287,10 +286,10 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 }
             );
             const new_chain = _.copy(chain).concat(_.copy(accepted.block[0]));
-            await store.commit('refresh_pool',_.copy(new_pool));
-            await store.commit("refresh_roots",_.copy(new_roots));
-            await store.commit("refresh_candidates",_.copy(accepted.candidates));
-            await store.commit("add_block",_.copy(accepted.block[0]));
+            store.refresh_pool(_.copy(new_pool));
+            store.refresh_roots(_.copy(new_roots));
+            store.refresh_candidates(_.copy(accepted.candidates));
+            store.add_block(_.copy(accepted.block[0]));
             console.log(new_chain);
 
             const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
@@ -298,17 +297,17 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
 
             const added_not_refresh_tx = reqs_pure.reduce((result,pure)=>{
                 const full_tx = TxSet.pure_to_tx(pure,block)
-                store.commit('add_not_refreshed',_.copy(full_tx));
+                store.add_not_refreshed(_.copy(full_tx));
                 return result.concat(full_tx);
             },not_refreshed);
             if(refs_pure.length>0){
                 console.log(refs_pure)
-                store.commit('del_not_refreshed',_.copy(refs_pure).map(pure=>pure.meta.data.request));
+                store.del_not_refreshed(_.copy(refs_pure).map(pure=>pure.meta.data.request));
             }
-            const now_refreshing:string[] = _.copy(store.state.now_refreshing);
+            const now_refreshing:string[] = _.copy(store.now_refreshing);
             const refreshed = refs_pure.map(pure=>pure.meta.data.request);
             const new_refreshing = now_refreshing.filter(key=>refreshed.indexOf(key)===-1);
-            store.commit('new_refreshing',new_refreshing)
+            store.new_refreshing(new_refreshing);
             const new_not_refreshed_tx = refs_pure.reduce((result,pure)=>{
                 return result.filter(tx=>tx.meta.kind==="request"&&tx.hash!=pure.meta.data.request);
             },_.copy(added_not_refresh_tx));
@@ -326,13 +325,13 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 if(tx.meta.kind==="request") return false;
                 const ref_tx = _.copy(TxSet.pure_to_tx(_.copy(tx),_.copy(block)));
                 const req_tx = _.copy(TxSet.find_req_tx(_.copy(ref_tx),_.copy(chain)));
-                const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
+                const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.secret));
                 return _.copy(req_tx).meta.data.address===unit_address
             })
             console.log("my_unit_buying");
             console.log(my_unit_buying);
-            const new_now_buying = store.state.now_buying||!my_unit_buying
-            if(my_unit_buying) store.commit('buying_unit',false);
+            const new_now_buying = store.now_buying||!my_unit_buying
+            if(my_unit_buying) store.buying_unit(false);
             const new_unit_store = _.new_obj(
                 unit_store,
                 (store:{[key:string]:T.Unit[]})=>{
@@ -345,7 +344,7 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 }
             )
             bought_units.forEach(unit=>{
-                store.commit("delete_unit",_.copy(unit));
+                store.delete_unit(_.copy(unit));
             });
 
 
@@ -380,12 +379,12 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                     }
                 )
             },_.copy(pool));
-            store.commit('refresh_pool',_.copy(deleted_pool));
+            store.refresh_pool(_.copy(deleted_pool));
 
-            const now_refreshing:string[] = _.copy(store.state.now_refreshing);
+            const now_refreshing:string[] = _.copy(store.now_refreshing);
             const refreshed = _.copy(block.txs.concat(block.natives).concat(block.units)).filter((pure,i)=>pure.meta.kind==="refresh"&&!valids[i]).map(pure=>pure.meta.data.request);
             const new_refreshing = now_refreshing.filter(key=>refreshed.indexOf(key)===-1);
-            store.commit('new_refreshing',_.copy(new_refreshing));
+            store.new_refreshing(_.copy(new_refreshing));
             /*const last_key = BlockSet.search_key_block(chain);
             const last_micros = BlockSet.search_micro_block(chain,last_key);
 
@@ -442,7 +441,7 @@ export const tx_check = (block:T.Block,chain:T.Block[],StateData:T.State[],Locat
 }
 
 export const get_balance = async (address:string)=>{
-    const S_Trie = trie_ins(store.state.roots.stateroot||"");
+    const S_Trie = trie_ins(store.roots.stateroot||"");
     const state:T.State = await S_Trie.get(address);
     if(state==null) return 0;
     return new BigNumber(state.amount).toNumber();
@@ -593,7 +592,7 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         else return false;
     }));
     console.log(requested_bases);
-    const already_requests:string[] = _.copy(store.state.now_refreshing);
+    const already_requests:string[] = _.copy(store.now_refreshing);
     console.log(already_requests);
     const not_same = pool_txs.reduce((result:T.Tx[],tx)=>{
         const bases = result.reduce((r:string[],t)=>{
@@ -663,9 +662,9 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
                 return p;
             }
         );
-        store.commit('refresh_pool',_.copy(new_pool));
+        store.refresh_pool(_.copy(new_pool));
         const new_refreshing = already_requests.concat(micro_block.txs.concat(micro_block.natives).concat(micro_block.units).filter(tx=>tx.meta.kind==="refresh").map(tx=>tx.meta.data.request));
-        store.commit('new_refreshing',_.copy(new_refreshing));
+        store.new_refreshing(_.copy(new_refreshing));
         client.publish('/data',{type:'block',tx:[],block:[micro_block]});
             //await store.dispatch("block_accept",_.copy(micro_block));
             //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
@@ -708,8 +707,8 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
             output:target_pure.meta.data.output,
             unit_price:target_pure.meta.unit_price
         }
-        store.commit("refresh_pool",_.copy(del_pool));
-        store.commit("add_unit",_.copy(new_unit));
+        store.refresh_pool(_.copy(del_pool));
+        store.add_unit(_.copy(new_unit));
         await send_micro_block(_.copy(del_pool),secret,_.copy(chain),_.copy(candidates),_.copy(roots),_.copy(unit_store));
     }
     else{console.log("fall to create micro block;");}
@@ -755,7 +754,7 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
         console.log(add_blocks);
         /*const back_chain:T.Block[] = [gen.block];
         const add_blocks = new_chain.slice(1);*/
-        store.commit("replace_chain",_.copy(back_chain));
+        store.replace_chain(_.copy(back_chain));
         const info = await (async ()=>{
             if(back_chain.length===1){
                 return{
@@ -774,31 +773,32 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
             }
         })();
 
-        const add_blocks_data = add_blocks.map(block=>{
-            return {
+        const add_blocks_data:Data[] = add_blocks.map(block=>{
+            const data:Data = {
                 type:'block',
                 tx:[],
                 block:[block]
             }
+            return data;
         });
 
-        store.commit("refresh_roots",_.copy(info.roots));
-        store.commit("refresh_candidates",_.copy(info.candidates));
-        store.commit('replaceing',true);
-        store.commit('rep_limit',_.copy(add_blocks[add_blocks.length-1]).meta.index);
+        store.refresh_roots(_.copy(info.roots));
+        store.refresh_candidates(_.copy(info.candidates));
+        store.replaceing(true);
+        store.rep_limit(_.copy(add_blocks[add_blocks.length-1]).meta.index);
         /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
             const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
         },info);*/
-        store.commit('refresh_yet_data',_.copy(add_blocks_data).concat(_.copy(store.state.yet_data)));
+        store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(store.yet_data)));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         store.commit("checking",false);*/
-        const amount = await get_balance(store.getters.my_address);
-        store.commit("refresh_balance",amount);
+        const amount = await get_balance(store.my_address);
+        store.refresh_balance(amount);
     }else{
         console.log("not replace");
-        store.commit('replaceing',false);
+        store.replaceing(false);
     }
 }
 
@@ -891,10 +891,10 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         if(!TxSet.ValidRequestTx(native_tx,my_version,native,unit,false,native_StateData,native_LocationData)||!TxSet.ValidRequestTx(unit_tx,my_version,native,unit,false,unit_StateData,unit_LocationData)) console.log("fail to buy units");
         else{
             console.log("buy unit!");
-            store.commit('buying_unit',true);
+            store.buying_unit(true);
             //console.error(unit_tx.hash);
             units.forEach(u=>{
-                store.commit('delete_unit',_.copy(u));
+                store.delete_unit(_.copy(u));
             });
             client.publish('/data',{type:'tx',tx:[native_tx],block:[]});
             client.publish('/data',{type:'tx',tx:[unit_tx],block:[]});

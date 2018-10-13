@@ -1,4 +1,5 @@
 import {tx_accept,block_accept,get_balance,send_request_tx,send_refresh_tx,trie_ins,check_chain,send_key_block,send_micro_block,random_chose,unit_buying} from './index'
+
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
@@ -16,367 +17,24 @@ import { setInterval } from 'timers';
 import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
 import * as StateSet from '../../core/state'
+import {client,compute_yet} from './background'
 import BigNumber from 'bignumber.js';
+import { read } from 'fs';
 
-type Data = {
+const worker = new Worker('bg-bundle.js');
+
+export type Data = {
     type:'tx'|'block';
     tx:T.Tx[];
     block:T.Block[];
 }
 
-type Installed = {
+export type Installed = {
     name:string;
     icon:string;
     pub_keys:string[][];
     deposited:number;
-}
-
-
-const port = peer_list[0].port || "57750";
-const ip = peer_list[0].ip || "localhost";
-console.log(ip)
-
-/*const socket = new IO();
-socket.connect('http://'+ip+':'+port);*/
-
-export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
-
-
-/*self.addEventListener('install',(event)=>{
-    console.log("let's install");
-    event.waitUntil(
-        caches.open('vreath').then(caches=>{
-            return caches.addAll([
-                './',
-                './img',
-                './json'
-            ]).then(() =>{console.log("loaded");self.skipWaiting();});
-        })
-    );
-});
-
-self.addEventListener('fetch',(event)=>{
-    event.respondWith(
-        caches.match(event.request,{
-            ignoreSearch:true
-        }).then(response=>{
-            return response || fetch(event.request);
-        })
-    )
-});*/
-
-
-localStorage.removeItem("data");
-localStorage.removeItem("apps");
-localStorage.removeItem("code");
-localStorage.removeItem("pool");
-localStorage.removeItem("chain");
-localStorage.removeItem("roots");
-localStorage.removeItem("candidates");
-localStorage.removeItem("unit_store");
-localStorage.removeItem("yet_data");
-
-const sleep = (msec:number)=>{
-    return new Promise(function(resolve) {
-        setTimeout(function() {resolve()}, msec);
-     });
-}
-
-const send_blocks = async ()=>{
-    const S_Trie = trie_ins(store.state.roots.stateroot);
-    const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
-    const unit_state:T.State = await S_Trie.get(unit_address) || StateSet.CreateState(0,unit_address,unit,0);
-    const unit_amount = unit_state.amount || 0;
-    const last_key = BlockSet.search_key_block(_.copy(store.state.chain));
-    const last_micros = BlockSet.search_micro_block(_.copy(store.state.chain),_.copy(last_key));
-    const date = new Date();
-
-    if(!store.state.replace_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.state.pool),store.state.secret,_.copy(store.state.chain),_.copy(store.state.candidates),_.copy(store.state.roots),store.state.unit_store);
-    else if(!store.state.replace_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.state.chain),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.roots));
-}
-
-const compute_yet = async ():Promise<void>=>{
-    const data:Data = _.copy(store.state.yet_data[0]);
-    if(data==null){
-        store.commit('replaceing',false);
-        await send_blocks();
-        console.log('yet:')
-        console.log(store.state.yet_data);
-        await sleep(block_time);
-        return await compute_yet();
-    }
-    else if(data.type==="tx"&&data.tx.length>0){
-        const target:T.Tx = _.copy(data.tx[0]);
-        console.log(target);
-        //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
-        await tx_accept(_.copy(target),_.copy(store.state.chain),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.unit_store));
-        const now_yets:Data[] = _.copy(store.state.yet_data);
-        const reduced = now_yets.filter(d=>{
-            if(d.type==="tx"&&d.tx[0]!=null) return d.tx[0].hash!=target.hash;
-            else if(d.type==="block"&&d.block[0]!=null) return true;
-            else return false;
-        });
-        store.commit("refresh_yet_data",_.copy(reduced));
-        console.log(reduced);
-        console.log('yet:')
-        console.log(store.state.yet_data);
-        await sleep(block_time);
-        return await compute_yet();
-        /*}
-        else{
-            const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
-            const blocks:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="block");
-            const reduced = txs.concat(blocks);
-            const concated = reduced.concat(store.state.yet_data[0]);
-            store.commit("refresh_yet_data",concated);
-        }*/
-    }
-    else if(data.type==="block"&&data.block.length>0){
-        const block = data.block[0];
-        const chain:T.Block[] = _.copy(store.state.chain);
-        console.log(block);
-        if(block.meta.version>=compatible_version){
-            if(block.meta.index>chain.length){
-                if(!store.state.replace_mode){
-                    const address = CryptoSet.GenereateAddress(native,_.reduce_pub(block.meta.validatorPub));
-                    if(address!=store.getters.my_address){
-                        store.commit('checking',true);
-                        client.publish("/checkchain",address);
-                    }
-                }
-                else store.commit('replaceing',false);
-                //await send_blocks();
-                await sleep(block_time);
-                return await compute_yet();
-            }
-            else if(block.meta.index===chain.length){
-                if(store.state.replace_mode&&chain[chain.length-1].meta.index>=store.state.replace_index) store.commit('replaceing',false);
-                await block_accept(_.copy(block),_.copy(store.state.chain),_.copy(store.state.candidates),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.not_refreshed_tx),store.state.now_buying,_.copy(store.state.unit_store))
-                const new_chain:T.Block[] = _.copy(store.state.chain);
-                console.log(store.state.replace_mode)
-                console.log(chain.length)
-                console.log(new_chain.length)
-                if(store.state.replace_mode&&chain.length===new_chain.length) store.commit('replaceing',false);
-                if(new_chain.length===chain.length+1){
-                    const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx=>tx.meta.kind==="refresh");
-                    const now_yets:Data[] = _.copy(store.state.yet_data);
-                    let units:T.Unit[] = [];
-                    const reduced = now_yets.filter(d=>{
-                        if(d.type==="tx"&&d.tx[0]!=null){
-                            const t = _.copy(d.tx[0]);
-                            return !refs.some(tx=>{
-                                if(t.meta.kind==="refresh"&&t.meta.data.index===tx.meta.data.index&&t.meta.data.request===tx.meta.data.request){
-                                    const unit:T.Unit = {
-                                        request:t.meta.data.request,
-                                        index:t.meta.data.index,
-                                        nonce:t.meta.nonce,
-                                        payee:t.meta.data.payee,
-                                        output:t.meta.data.output,
-                                        unit_price:t.meta.unit_price
-                                    }
-                                    units.push(_.copy(unit));
-                                    return true;
-                                }
-                                //else if(t.meta.kind==="request"&&t.hash===tx.meta.data.request) return true;
-                                else return false;
-                            });
-                        }
-                        else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index;
-                        else return false;
-                    });
-                    store.commit("refresh_yet_data",reduced);
-                    /*const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
-                    const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
-                        pre_unit_store,
-                        (store)=>{
-                            units.forEach(unit=>{
-                                const pre = store[unit.request] || [];
-                                if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
-                                store[unit.request] = pre.concat(unit);
-                            });
-                            return store;
-                        }
-                    );
-                    store.commit("refresh_unit_store",new_unit_store);*/
-                }
-                else{
-                    const now_yets:Data[] = _.copy(store.state.yet_data);
-                    const reduced = now_yets.filter(d=>{
-                        if(d.type==="tx"&&d.tx[0]!=null) return true;
-                        else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
-                        else return false;
-                    });
-                    store.commit("refresh_yet_data",reduced)
-                }
-                const balance = await get_balance(store.getters.my_address);
-                store.commit("refresh_balance",balance);
-
-                let refreshed_hash:string[] = [];
-                let get_not_refresh:T.Tx[] = [];
-                for(let block of _.copy(new_chain).slice().reverse()){
-                    for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
-                        if(_.copy(tx).meta.kind==="request"&&refreshed_hash.indexOf(_.copy(tx).hash)===-1) get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx),_.copy(block))));
-                        else if(_.copy(tx).meta.kind==="refresh") refreshed_hash.push(_.copy(tx).meta.data.request);
-                        else if(get_not_refresh.length>=10) break;
-                    }
-                }
-                const refreshes:T.Tx[] = _.copy(get_not_refresh);
-                const related = refreshes.filter(tx=>{
-                    if(tx.meta.pre.flag===true){
-                        const pres = TxSet.list_up_related(new_chain,TxSet.tx_to_pure(tx).meta,"pre");
-                        return pres.length>0;
-                    }
-                    else if(tx.meta.next.flag===true){
-                        const nexts = TxSet.list_up_related(new_chain,TxSet.tx_to_pure(tx).meta,"next");
-                        return nexts.length>0;
-                    }
-                    else return true;
-                });
-                console.log('not refreshed:')
-                console.log(related);
-                if(related.length>0){
-                    const req_tx:T.Tx = related[0];
-                    const index = (()=>{
-                        for(let block of _.copy(new_chain).slice().reverse()){
-                            let txs = block.txs.concat(block.natives).concat(block.units);
-                            let i = txs.map(tx=>tx.hash).indexOf(req_tx.hash);
-                            if(i!=-1) return block.meta.index;
-                        }
-                        return 0;
-                    })();
-                    const code:string = store.state.code[req_tx.meta.data.token];
-                    await send_refresh_tx(_.copy(store.state.roots),store.state.secret,_.copy(req_tx),index,code,_.copy(new_chain));
-                    //await send_blocks();
-                }
-                /*if(refs_pure.length>0){
-                    await P.forEach(refs_pure, async (pure:T.TxPure)=>{
-                        const req = pure.meta.data.request;
-                        const buy_units:T.Unit[] = store.state.unit_store[req];
-                        await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
-                    })
-                }*/
-
-                const unit_store_values:T.Unit[][] = Object.values(store.state.unit_store);
-                const units_sum = unit_store_values.reduce((sum,us)=>sum+us.length,0);
-                const reversed_chain:T.Block[] = _.copy(new_chain).slice().reverse();
-                const refreshed = (()=>{
-                    let result:T.Unit[] = [];
-                    let price_sum:number;
-                    let flag = false;
-                    for(let block of reversed_chain){
-                        const txs = _.copy(block).txs.concat(block.natives).concat(block.units).slice();
-                        for(let tx of txs){
-                            if(tx.meta.kind==="refresh"){
-                                result = result.concat(unit_store_values.reduce((result,us)=>{
-                                    if(us.length>0&&us[0].request===tx.meta.data.request){
-                                        price_sum = result.reduce((sum,unit)=>new BigNumber(sum).plus(unit.unit_price).toNumber(),0);
-                                        us.forEach(u=>{
-                                            if(new BigNumber(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new BigNumber(balance).times(0.99))){
-                                                flag = true;
-                                                return result;
-                                            }
-                                            else{
-                                                price_sum = new BigNumber(price_sum).plus(u.unit_price).toNumber();
-                                                result.push(u);
-                                            }
-                                        });
-                                        return result;
-                                    }
-                                    else return result;
-                                },[]));
-                            }
-                            if(result.length===units_sum||flag) break;
-                        }
-                    }
-                    return result;
-                })();
-                console.log(unit_store_values);
-                console.log('buy_units are:')
-                console.log(refreshed)
-                console.log(store.state.now_buying)
-                if(refreshed.length>0&&!store.state.now_buying&&!store.state.replace_mode){
-                    const validatorPub = BlockSet.search_key_block(_.copy(reversed_chain)).meta.validatorPub;
-                    const validator_address = CryptoSet.GenereateAddress(native,_.reduce_pub(validatorPub));
-                    const buy_units = refreshed;
-                    await unit_buying(store.state.secret,_.copy(buy_units),_.copy(store.state.roots),_.copy(new_chain));
-                    //await send_blocks();
-                }
-                console.log('yet:')
-                console.log(store.state.yet_data);
-                await send_blocks();
-                await sleep(block_time);
-                return await compute_yet();
-            }
-            else{
-                const now_yets:Data[] = _.copy(store.state.yet_data);
-                const reduced = now_yets.filter(d=>{
-                    if(d.type==="tx"&&d.tx[0]!=null) return true;
-                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index!=block.meta.index;
-                    else return false;
-                });
-                console.log(reduced);
-                store.commit("refresh_yet_data",_.copy(reduced));
-                console.log('yet:')
-                console.log(store.state.yet_data);
-                await sleep(block_time);
-                return await compute_yet();
-            }
-        }
-    }
-}
-
-client.subscribe('/data',async (data:Data)=>{
-    if(data.type==="block") store.commit('push_yet_data',_.copy(data));
-    const S_Trie = trie_ins(store.state.roots.stateroot);
-    const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
-    const unit_state:T.State = await S_Trie.get(unit_address) || StateSet.CreateState(0,unit_address,unit,0);
-    const unit_amount = unit_state.amount || 0;
-    if(data.type==="tx"&&unit_amount>0) store.commit('push_yet_data',_.copy(data));
-});
-
-client.subscribe('/checkchain',(address:string)=>{
-    console.log('checked')
-    console.log(store.state.check_mode)
-    if(store.getters.my_address===address) client.publish('/replacechain',_.copy(store.state.chain));
-    return 0;
-});
-
-client.subscribe('/replacechain',async (chain:T.Block[])=>{
-    try{
-        console.log("replace:")
-        if(!store.state.replace_mode&&store.state.check_mode){
-            console.log(chain);
-            await check_chain(_.copy(chain),_.copy(store.state.chain),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store));
-        }
-        store.commit('checking',false);
-        console.log(store.state.yet_data);
-        return 0;
-        //return await compute_yet(_.copy(store.state.roots),_.copy(store.state.chain),_.copy(store.state.pool),_.copy(store.state.candidates),_.copy(store.state.unit_store),_.copy(store.state.not_refreshed_tx),store.state.now_buying);
-        /*const S_Trie = trie_ins(store.state.roots.stateroot);
-        const unit_state:T.State = await S_Trie.get(CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret)));
-        console.log(await S_Trie.filter());*/
-        //if(chain.length===1&&unit_state!=null&&unit_state.amount>0) await send_key_block(JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.roots));
-    }
-    catch(e){throw new Error(e);}
-});
-
-client.bind('transport:down', ()=>{
-    console.log('lose connection');
-    localStorage.removeItem("data");
-    localStorage.removeItem("apps");
-    localStorage.removeItem("code");
-    localStorage.removeItem("pool");
-    localStorage.removeItem("chain");
-    localStorage.removeItem("roots");
-    localStorage.removeItem("candidates");
-    localStorage.removeItem("unit_store");
-    localStorage.removeItem("yet_data");
-});
-
-Vue.use(Vuex)
-Vue.use(VueRouter)
-Vue.use(AtComponents)
-
+};
 
 const wallet:Installed = {
     name:"wallet",
@@ -401,23 +59,82 @@ const codes = {
     "unit":"const main = () => {};"
 }
 
+const storeName = 'vreath';
+let db;
 
-const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041"
+export const read_db = <T>(key:string,def:T)=>{
+    const req = indexedDB.open('vreath',2);
+    let result = def;
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
+        db = req.result;
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
+        db = req.result;
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const get_req = store.get(key);
+        get_req.onsuccess = ()=>{
+            result = get_req.source.val
+        }
+        db.close();
+    }
+    return result;
+}
 
-export const store = new Vuex.Store({
+export const write_db = <T>(key:string,val:T)=>{
+    const req = indexedDB.open('vreath',2);
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
+        db = req.result;
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
+        db = req.result;
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        const data = {
+            id:key,
+            val:val
+        };
+        const put_req = store.put(data);
+        put_req.onsuccess = ()=>console.log('write data success');
+        tx.oncomplete = ()=>console.log('transaction complete');
+    }
+}
+
+export const delete_db = ()=>{
+    const del_db = indexedDB.deleteDatabase('vreath');
+    del_db.onsuccess = ()=>console.log('db delete success');
+    del_db.onerror = ()=>console.log('db delete error');
+}
+
+
+const commit = <T>(key:string,val:T)=>{
+    worker.postMessage({
+        key:key,
+        val:val
+    });
+}
+
+Vue.use(Vuex)
+Vue.use(VueRouter)
+Vue.use(AtComponents)
+
+/*export const store = new Vuex.Store({
     state:{
-        data:JSON.parse(localStorage.getItem("data")||"{}"),
-        apps:JSON.parse(localStorage.getItem("apps")||JSON.stringify(def_apps)),
-        code:JSON.parse(localStorage.getItem("code")||JSON.stringify(codes)),
-        pool:JSON.parse(localStorage.getItem("pool")||"{}"),
-        chain:JSON.parse(localStorage.getItem("chain")||JSON.stringify([gen.block])),
-        roots:JSON.parse(localStorage.getItem("roots")||JSON.stringify(gen.roots)),
-        candidates:JSON.parse(localStorage.getItem("candidates")||JSON.stringify(gen.candidates)),
-        unit_store:JSON.parse(localStorage.getItem("unit_store")||JSON.stringify({})),
-        secret:localStorage.getItem("secret")||CryptoSet.GenerateKeys(),
-        registed:Number(localStorage.getItem("registed")||"0"),
+        apps:read_db('app',def_apps),
+        code:read_db('code',codes),
+        pool:read_db('pool',{}),
+        chain:read_db('chain',[gen.block]),
+        roots:read_db('roots',gen.roots),
+        candidates:read_db('candidates',gen.candidates),
+        unit_store:read_db('unit_store',{}),
+        secret:read_db('secret',CryptoSet.GenerateKeys()),
+        registed:Number(read_db('registed',0)),
         balance:0,
-        yet_data:JSON.parse(localStorage.getItem("yet_data")||"[]"),
+        yet_data:[],
         check_mode:false,
         replace_mode:false,
         replace_index:0,
@@ -428,39 +145,31 @@ export const store = new Vuex.Store({
     mutations:{
         add_app(state,obj:Installed){
             state.apps[obj.name] = _.copy(obj);
-            localStorage.setItem("apps",JSON.stringify(_.copy(state.apps)));
         },
         del_app(state,key:string){
             delete state.apps[key];
-            localStorage.setItem("apps",JSON.stringify(_.copy(state.apps)));
         },
         refresh_pool(state,pool:T.Pool){
             state.pool = _.copy(pool);
-            localStorage.setItem("pool",JSON.stringify(_.copy(state.pool)));
         },
         add_block(state,block:T.Block){
             state.chain.push(block);
-            localStorage.setItem("chain",JSON.stringify(_.copy(state.chain)));
         },
         replace_chain(state,chain:T.Block[]){
             state.chain = _.copy(chain).slice().sort((a:T.Block,b:T.Block)=>{
                 return a.meta.index - b.meta.index;
             }).filter((b:T.Block,i:number)=>b.meta.index===i);
-            localStorage.setItem("chain",JSON.stringify(_.copy(state.chain)));
         },
         refresh_roots(state,roots:{[key:string]:string}){
             state.roots = _.copy(roots);
-            localStorage.setItem("roots",_.copy(state.roots));
         },
         refresh_candidates(state,candidates:T.Candidates[]){
             state.candidates = _.copy(candidates);
-            localStorage.setItem("candidates",JSON.stringify(_.copy(state.candidates)));
         },
         add_unit(state,unit:T.Unit){
             const units:T.Unit[] = _.copy(state.unit_store)[unit.request] || [];
             if(!units.some(u=>u.index===unit.index&&u.payee===unit.payee)){
                 state.unit_store[unit.request] = _.copy(units).concat(unit);
-                localStorage.setItem("unit_store",JSON.stringify(_.copy(state.unit_store)));
             }
         },
         delete_unit(state,unit:T.Unit){
@@ -468,19 +177,15 @@ export const store = new Vuex.Store({
             const deleted = units.filter(u=>u.index===unit.index&&u.payee!=unit.payee&&u.output===unit.output);
             state.unit_store[unit.request] = _.copy(deleted);
             if(deleted.length<=0) delete state.unit_store[unit.request];
-            localStorage.setItem("unit_store",JSON.stringify(_.copy(state.unit_store)));
         },
         refresh_unit_store(state,store:{[key:string]:T.Unit[]}){
             state.unit_store = _.copy(store);
-            localStorage.setItem("unit_store",JSON.stringify(_.copy(state.unit_store)));
         },
         refresh_secret(state,secret:string){
             state.secret = secret;
-            localStorage.setItem("secret",state.secret);
         },
         regist(state){
             state.registed = 1;
-            localStorage.setItem("registed","1");
         },
         refresh_balance(state,amount:number){
             state.balance = amount;
@@ -523,88 +228,55 @@ export const store = new Vuex.Store({
     },
     getters:{
         my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
-    },
-    actions:{
-        /*tx_accept(commit,tx:T.Tx){
-            try{
-                console.log(store.state.yet_tx)
-                console.log(store.state.check_mode)
-                if(!store.state.check_mode){
-                    commit.commit("check",true);
-                    tx_accept(tx,store.state.chain.slice(),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,store.state.validator_mode,store.state.candidates.slice(),store.state.code,_.copy(store.state.unit_store)).then(()=>{
-                        console.log("tx accept");
-                        if(tx.meta.kind==="request"||tx.meta.data.index<=store.state.chain.length-1){
-                            const reduced:T.Tx[] = store.state.yet_tx.filter((t:T.Tx)=>t.hash!=tx.hash);
-                            commit.commit("refresh_yet_tx",reduced);
-                            commit.commit("check",false);
-                            if(store.state.yet_block.length>0) store.dispatch("block_accept",store.state.yet_block[0]).then(()=>{
-                                if(reduced.length>0) store.dispatch("tx_accept",reduced[0]);
-                            });
-                        }
-                        else{
-                            commit.commit("check",false);
-                            client.publish("/checkchain","");
-                        }
-                    })
-                }
-                else commit.commit("refresh_yet_tx",store.state.yet_tx.concat(tx));
-            }
-            catch(e){console.log(e)}
-        },
-        block_accept(commit,block:T.Block){
-            try{
-                if(!store.state.
-                ){
-                    commit.commit("check",true);
-                    block_accept(block,store.state.chain.slice(),store.state.candidates.slice(),_.copy(store.state.roots),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.code),_.copy(store.state.unit_store)).then(()=>{
-                        console.log("block accept");
-                        get_balance(store.getters.my_address).then((amount)=>{
-                            commit.commit("refresh_balance",amount);
-                            commit.commit("check",false);
-                            console.log(store.state.yet_block);
-                            console.log(store.state.check_mode)
-                            const reduced = store.state.yet_block.filter((b:T.Block)=>b.hash!=block.hash);
-                            commit.commit("refresh_yet_block",reduced);
-                            if(store.state.yet_tx.length>0) store.dispatch("tx_accept",store.state.yet_tx[0]).then(()=>{
-                                if(reduced.length>0) store.dispatch("block_accept",reduced[0]).then(()=>console.log("block reduced"));
-                            })
-                        });
-                    });
-                }
-                else commit.commit("refresh_yet_block",store.state.yet_block.concat(block));
-                console.log(store.state.yet_block);
-                console.log(store.state.check_mode)
-            }
-            catch(e){console.log(e);}
-        },*/
     }
-});
+});*/
 
-(async ()=>{
-    const gen_S_Trie = trie_ins("");
-    await P.forEach(gen.state,async (s:T.State)=>{
-        await gen_S_Trie.put(s.owner,s);
-    });
-    const last_block:T.Block = _.copy(store.state.chain[store.state.chain.length-1]) || _.copy(gen.block);
-    const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-    console.log(last_address);
-    if(last_address!=store.getters.my_address){
-        store.commit('checking',true);
-        client.publish("/checkchain",last_address);
+
+/*worker.addEventListener('message',e=>{
+    const key:string = e.data.key;
+    if(e.data.val==null) store.commit(key);
+    const val:any = e.data.val;
+    store.commit(key,val);
+});*/
+
+const store = new Vuex.Store({
+    state:{
+        apps:read_db('app',def_apps),
+        registed:false,
+        secret:CryptoSet.GenerateKeys(),
+        balance:0
+    },
+    getters:{
+        my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
+    },
+    mutations:{
+        add_app(state,obj:Installed){
+            state.apps[obj.name] = _.copy(obj);
+            write_db('app',state.apps);
+        },
+        del_app(state,key:string){
+            delete state.apps[key];
+            write_db('app',state.apps);
+        },
+        refresh_secret(state,secret:string){
+            state.secret = secret;
+            commit('refresh_secret',secret);
+        },
+        regist(state){
+            state.registed = true;
+        },
+        refresh_balance(state,amount:number){
+            state.balance = amount;
+        }
     }
-    const balance = await get_balance(store.getters.my_address);
-    console.log(balance);
-    store.commit("refresh_balance",balance);
-    console.log('yet:')
-    console.log(store.state.yet_data);;
-    await compute_yet();
-})()
+})
+
 
 
 const Home = {
     data:function(){
         return{
-            installed:_.copy(this.$store.state.apps)
+            installed:this.$store.state.apps
         }
     },
     store,
@@ -628,18 +300,21 @@ const Home = {
 }
 
 const Registration = {
-    data:function(){
-        return{
-            secret:this.$store.state.secret
+    computed:{
+        secret:function(){
+            return this.$store.state.secret;
+        },
+        registed:function(){
+            return this.$store.state.registed;
         }
     },
     store,
     methods:{
         regist:function(){
             try{
-                console.log(this.$secret)
-                this.$store.commit('refresh_secret',this.secret);
-                this.$store.commit('regist');
+                console.log(this.secret)
+                store.commit('refresh_secret',this.secret);
+                store.commit('regist');
                 router.push({ path: '/' });
             }
             catch(e){
@@ -657,27 +332,19 @@ const Registration = {
 }
 
 const Wallet = {
-    store,
     data:function(){
         return{
             to:"",
             amount:""
         }
     },
-    watch:{
-        refresh_balance:async function(){
-            const balance = await get_balance(this.from);
-            console.log(balance);
-            this.$store.commit("refresh_balance",balance);
-        }
-    },
+    store,
     computed:{
         from:function():string{
-            return this.$store.getters.my_address
+            return this.$store.getters.my_address;
         },
         balance:function():number{
-            const balance:number = this.$store.state.balance || 0;
-            return new BigNumber(balance).toNumber();
+            return new BigNumber(this.$store.state.balance).toNumber();
         },
         secret:function():string{
             return this.$store.state.secret;
@@ -687,7 +354,9 @@ const Wallet = {
         remit:async function(){
             try{
                 console.log("request");
-                await send_request_tx(this.$store.state.secret,"issue",native,[this.from,this.to],["remit",JSON.stringify([this.amount])],[],_.copy(this.$store.state.roots),_.copy(this.$store.state.chain));
+                const roots = read_db('roots',gen.roots);
+                const chain = read_db('chain',[gen.block]);
+                await send_request_tx(this.secret,"issue",native,[this.from,this.to],["remit",JSON.stringify([this.amount])],[],_.copy(roots),_.copy(chain));
                 alert('remit!');
             }
             catch(e){console.log(e)}
@@ -750,14 +419,14 @@ const Account = {
             if(this.pub_key==="") return "";
             try{
                 console.log(CryptoSet.GenereateAddress(native,this.pub_key))
-                return CryptoSet.GenereateAddress(native,this.pub_key);
+                return CryptoSet.GenereateAddress(native,this.pub_key)
             }
             catch(e){return ""}
         }
     },
     methods:{
         save:function(){
-            this.$store.commit('refresh_secret',this.secret)
+            store.commit('refresh_secret',this.secret);
         }
     },
     template:`
@@ -774,13 +443,12 @@ const Deposit = {
     store,
     computed:{
         installed:function(){
-            console.log(this.$store.state.apps)
             return this.$store.state.apps
         }
     },
     methods:{
         uninstall:function(key:string){
-            this.$store.commit('del_app',key)
+            store.commit('del_app',key);
         }
     },
     template:`
@@ -820,9 +488,14 @@ const router = new VueRouter({
     routes:routes
 });
 
-if(store.state.registed===0) router.push({ path: '/regist' });
+if(store.state.registed===false) router.push({ path: '/regist' });
 
 const app = new Vue({
     router: router
 }).$mount('#app');
 
+worker.postMessage('start');
+
+worker.addEventListener('message',(event)=>{
+    store.commit('refresh_balance',event.data);
+});

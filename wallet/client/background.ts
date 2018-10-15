@@ -26,7 +26,7 @@ import level from 'level-browserify'
       else if(reg.active) console.log('active');
     }).catch(error=>console.log(error));
 }*/
-const testdb = level('./db');
+
 
 
 
@@ -106,9 +106,12 @@ export const write_db = <T>(key:string,val:T)=>{
 }
 
 export const delete_db = ()=>{
-    const del_db = indexedDB.deleteDatabase('vreath');
-    del_db.onsuccess = ()=>console.log('db delete success');
-    del_db.onerror = ()=>console.log('db delete error');
+    const del_db_vreath = indexedDB.deleteDatabase('vreath');
+    del_db_vreath.onsuccess = ()=>console.log('db delete success');
+    del_db_vreath.onerror = ()=>console.log('db delete error');
+    const del_db_level = indexedDB.deleteDatabase('level-js-./db');
+    del_db_level.onsuccess = ()=>console.log('db delete success');
+    del_db_level.onerror = ()=>console.log('db delete error');
 }
 
 
@@ -216,7 +219,7 @@ export class Store {
         },location.protocol+'//'+location.host);*/
     }
     add_block(block:T.Block){
-        this._chain.push(block);
+        this._chain = _.copy(this._chain).concat(block).filter((b:T.Block,i:number)=>b.meta.index===i);
         write_db('chain',_.copy(this._chain));
         /*self.postMessage({
             key:'add_block',
@@ -443,6 +446,10 @@ export const compute_yet = async ():Promise<void>=>{
                         store.checking(true);
                         client.publish("/checkchain",address);
                     }
+                    else{
+                        const deled_yet = _.copy(store.yet_data).slice(1);
+                        store.refresh_yet_data(deled_yet);
+                    }
                 }
                 else store.replaceing(false);
                 //await send_blocks();
@@ -457,6 +464,18 @@ export const compute_yet = async ():Promise<void>=>{
                 console.log(chain.length)
                 console.log(new_chain.length)
                 if(store.replace_mode&&chain.length===new_chain.length) store.replaceing(false);
+                if(store.replace_mode){
+                    postMessage({
+                        key:'replaceing',
+                        val:true
+                    });
+                }
+                else{
+                    postMessage({
+                        key:'replaceing',
+                        val:false
+                    });
+                }
                 if(new_chain.length===chain.length+1){
                     const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx=>tx.meta.kind==="refresh");
                     const now_yets:Data[] = _.copy(store.yet_data);
@@ -510,7 +529,10 @@ export const compute_yet = async ():Promise<void>=>{
                 }
                 const balance = await get_balance(store.my_address);
                 store.refresh_balance(balance);
-                postMessage(balance);
+                postMessage({
+                    key:'refresh_balance',
+                    val:balance
+                });
 
                 let refreshed_hash:string[] = [];
                 let get_not_refresh:T.Tx[] = [];
@@ -605,7 +627,7 @@ export const compute_yet = async ():Promise<void>=>{
                 console.log('yet:')
                 console.log(store.yet_data);
                 await send_blocks();
-                await sleep(block_time);
+                if(!store.replace_mode) await sleep(block_time);
                 return await compute_yet();
             }
             else{
@@ -622,6 +644,20 @@ export const compute_yet = async ():Promise<void>=>{
                 await sleep(block_time);
                 return await compute_yet();
             }
+        }
+        else{
+            const now_yets:Data[] = _.copy(store.yet_data);
+            const reduced = now_yets.filter(d=>{
+                if(d.type==="tx"&&d.tx[0]!=null) return true;
+                else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index!=block.meta.index;
+                else return false;
+            });
+            console.log(reduced);
+            store.refresh_yet_data(_.copy(reduced));
+            console.log('yet:')
+            console.log(store.yet_data);
+            await sleep(block_time);
+            return await compute_yet();
         }
     }
 }
@@ -694,27 +730,47 @@ client.bind('transport:down', ()=>{
 
 self.onmessage = async (event)=>{
     try{
-        const key:string = event.data.key;
-        const val:any = event.data.val;
-        if(key!=null) store[key](val);
-        else if(event.data==="start"){
-            const gen_S_Trie = trie_ins("");
-            await P.forEach(gen.state,async (s:T.State)=>{
-                await gen_S_Trie.put(s.owner,s);
-            });
-            const chain = read_db('chain',[gen.block]);
-            const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
-            const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-            console.log(last_address);
-            if(last_address!=store.my_address){
-                store.checking(true);
-                client.publish("/checkchain",last_address);
-            }
-            const balance =  await get_balance(store.my_address);
-            store.refresh_balance(balance);
-            console.log(balance);
-            await compute_yet();
+        const type = event.data.type;
+        switch(type){
+            case 'commit':
+                const key:string = event.data.key;
+                const val:any = event.data.val;
+                if(key!=null) store[key](val);
+            case 'start':
+                delete_db();
+                const gen_S_Trie = trie_ins("");
+                await P.forEach(gen.state,async (s:T.State)=>{
+                    await gen_S_Trie.put(s.owner,s);
+                });
+                const chain = read_db('chain',[gen.block]);
+                const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
+                const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
+                console.log(last_address);
+                if(last_address!=store.my_address){
+                    store.checking(true);
+                    client.publish("/checkchain",last_address);
+                }
+                const balance =  await get_balance(store.my_address);
+                store.refresh_balance(balance);
+                postMessage({
+                    key:'refresh_balance',
+                    val:balance
+                });
+                console.log(balance);
+                await compute_yet();
+            case 'send_request':
+                const options = event.data;
+                await send_request_tx(store.secret,options.tx_type,options.token,options.base,options.input_raw,options.log,_.copy(store.roots),_.copy(store.chain));
+            case 'get_balance':
+                const got_balance = await get_balance(event.data.address) || 0;
+                postMessage({
+                    address:event.data.address,
+                    amount:got_balance
+                });
         }
     }
-    catch(e){console.log(e)}
+    catch(e){
+        console.log(e)
+        await compute_yet();
+    }
 }

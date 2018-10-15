@@ -1,5 +1,3 @@
-import {tx_accept,block_accept,get_balance,send_request_tx,send_refresh_tx,trie_ins,check_chain,send_key_block,send_micro_block,random_chose,unit_buying} from './index'
-
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
@@ -17,9 +15,9 @@ import { setInterval } from 'timers';
 import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
 import * as StateSet from '../../core/state'
-import {client,compute_yet} from './background'
 import BigNumber from 'bignumber.js';
-import { read } from 'fs';
+import {Chart} from 'chart.js'
+import {Bar, mixins} from 'vue-chartjs'
 
 const worker = new Worker('bg-bundle.js');
 
@@ -49,9 +47,17 @@ const setting:Installed = {
     deposited:0
 }
 
+const best_lang:Installed = {
+    name:"best-lang",
+    icon:"./img/best_lang_icon.jpg",
+    pub_keys:[],
+    deposited:0
+}
+
 const def_apps:{[key:string]:Installed} = {
     wallet:wallet,
-    setting:setting
+    setting:setting,
+    best_lang:best_lang
 }
 
 const codes = {
@@ -113,6 +119,7 @@ export const delete_db = ()=>{
 
 const commit = <T>(key:string,val:T)=>{
     worker.postMessage({
+        type:'commit',
         key:key,
         val:val
     });
@@ -244,7 +251,8 @@ const store = new Vuex.Store({
         apps:read_db('app',def_apps),
         registed:false,
         secret:CryptoSet.GenerateKeys(),
-        balance:0
+        balance:0,
+        replace_mode:false
     },
     getters:{
         my_address:(state) => CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(state.secret)) || ""
@@ -267,6 +275,9 @@ const store = new Vuex.Store({
         },
         refresh_balance(state,amount:number){
             state.balance = amount;
+        },
+        replaceing(state,bool:boolean){
+            state.replace_mode = bool;
         }
     }
 })
@@ -348,15 +359,37 @@ const Wallet = {
         },
         secret:function():string{
             return this.$store.state.secret;
+        },
+        replace_mode:function():boolean{
+            return this.$store.state.replace_mode;
         }
+    },
+    created:function(){
+        worker.postMessage({
+            type:'get_balance',
+            address:store.getters.my_address
+        })
+        worker.addEventListener('message',(event)=>{
+            const key:string = event.data.key;
+            const val:any = event.data.val;
+            if(key!=null) store.commit(key,val);
+        });
     },
     methods:{
         remit:async function(){
             try{
                 console.log("request");
-                const roots = read_db('roots',gen.roots);
+                /*const roots = read_db('roots',gen.roots);
                 const chain = read_db('chain',[gen.block]);
-                await send_request_tx(this.secret,"issue",native,[this.from,this.to],["remit",JSON.stringify([this.amount])],[],_.copy(roots),_.copy(chain));
+                await send_request_tx(this.secret,"issue",native,[this.from,this.to],["remit",JSON.stringify([this.amount])],[],_.copy(roots),_.copy(chain));*/
+                worker.postMessage({
+                    type:'send_request',
+                    tx_type:"issue",
+                    token:native,
+                    base:[this.from,this.to],
+                    input_raw:["remit",JSON.stringify([this.amount])],
+                    log:[]
+                })
                 alert('remit!');
             }
             catch(e){console.log(e)}
@@ -371,6 +404,7 @@ const Wallet = {
         <at-input placeholder="secret" type="password" v-model="secret"></at-input>
         <at-button v-on:click="remit">Remit</at-button>
         <h3>Balance:{{ balance }}</h3>
+        <h3 v-if="replace_mode">Syncing...</h3>
     </div>
     `
 }
@@ -471,11 +505,207 @@ const Deposit = {
     `
 }
 
+const Bar_Chart = {
+    name:'Bar_Chart',
+    extends: Bar,
+    mixins: [mixins.reactiveProp],
+    props: ['chartData','options'],
+    mounted(){
+        this.renderChart(this.chartData,this.options)
+    },
+    watch:{
+        data:function(val){
+            this.renderChart(this.chartData,this.options)
+        },
+        options:function(val){
+            this.renderChart(this.chartData,this.options)
+        }
+    }
+};
+Vue.component('Bar_Chart',Bar_Chart);
+
+
+const Best_lang = {
+    component:{
+        Bar_Chart
+    },
+    store,
+    data:function(){
+        return{
+            langs:[
+                {
+                    name:'assembler',
+                    pub_key:'03aa38de946e77a2e3d05b8a54233832d6eeef7c14a81547e51595006663c9c00d',
+                    address:'Vr:native:f6b717219a0a3af7647f2b2f5a3d9b6aa35db636a6151ec222f1b436aec259cc'
+                },
+                {
+                    name:'C (C++)',
+                    pub_key:'0228bedacb6119552db1d1030185d5168ebee3a4d6b95491a49364acbe06643828',
+                    address:'Vr:native:2d6226fc297fd848009a323109d13adda069a348b4498caa2f34d52a71244393'
+                },
+                {
+                    name:'Lisp',
+                    pub_key:'033f73f651a79354799c916619a8dac9277b447733acadbb597488720c7fbf122c',
+                    address:'Vr:native:5ce2b23cf74c0dfc332e5b02f54a1ce7d8aa9357eff4506545edbaa8267281be'
+                },
+                {
+                    name:'Java',
+                    pub_key:'03ec193dc65db101a2f639135c3b043de5f979421a8911378fb405bddf0e132dd3',
+                    address:'Vr:native:a6b7f01f9d344d26c141ea34b54e7ed1daf7b260737e5c6f5188fcb0807e7e97'
+                },
+                {
+                    name:'Python',
+                    pub_key:'027a8944b06fa1f10a6c35c01459a54e42cb2cd6cb6253bfd8e3d2e67866d621eb',
+                    address:'Vr:native:fd490acc1a034c7756d513b9d3ef8cb2029a6860516931fa181aa1632e15e26e'
+                },
+                {
+                    name:'Ruby',
+                    pub_key:'02b66c22c749eac27da3a5f6861fed4d89383fa630e4eac11b2cadcac24a0309ff',
+                    address:'Vr:native:94eabdd12d27139d0680dc548374d499cbc62009c9bd50e0bbacaeba613f73c4'
+                },
+                {
+                    name:'PHP',
+                    pub_key:'02414c2fb9602db603d055e7331b0ce1a2934f63c153c6b5819222c8c775979406',
+                    address:'Vr:native:2abab3d305c2ee83200b96ac2c2ad31afcbb0d69d5dbec7587642c38f1baa73c'
+                },
+                {
+                    name:'Javascript',
+                    pub_key:'03a14288fb828a3ea2afcc569d37484dff4feff86d5ed3a7ceece259b8b73c526e',
+                    address:'Vr:native:de3bbcf59ba41457ebce6a8d91d700be57d50343c86840fc80c010d20421ddbf'
+                },
+                {
+                    name:'Swift',
+                    pub_key:'0281ea491d77d42afafe971d8d7e5728472b8b69f39044c8d577f8360915852da9',
+                    address:'Vr:native:c93e2f4ac4a4d4e4fd8b9dcf4eb8e61d1dd974b03ed0f6553f750b540c45799a'
+                },
+                {
+                    name:'Go',
+                    pub_key:'03f97b8992697b80d520d6400b032b0edc4795509d018b508d4a4d4c53f168ff61',
+                    address:'Vr:native:fd6b6cfc8be436a2db999ae24a107a54542af251093fd120ff7f56c1723070f8'
+                },
+                {
+                    name:'Rust',
+                    pub_key:'02c48de4ec759e9d32c58ffa06ecaa646ef54ff40d1c3ee9567d744d1fc0a133d2',
+                    address:'Vr:native:da9dd3e850459ed450f6ff942c879f60d721a6eacaff050b985cfefafaf4ba81'
+                },
+                {
+                    name:'Haskell',
+                    pub_key:'0308536b7cb90d58a40a6ae76950c7416268ad34eb3a28cfa33b64e8fafa5c8b97',
+                    address:'Vr:native:7435451c51790ef2bfaa4d1b9b7742eee8feba5a0b9bca8bb6bfc674fe4af562'
+                },
+                {
+                    name:'Elixir',
+                    pub_key:'0265e0f265855277b985294d3265bb5ca9d73e2ae308adeae09d0e6e476ce2b355',
+                    address:'Vr:native:ce3cdd38ed1817f54b4f6865510ba1d35b322ed7cc9bb1479480fc9788fad4bb'
+                },
+                {
+                    name:'Solidity',
+                    pub_key:'03cd869c99371faae8cd3185b61f196683e1595d42139502a5af9282481de2e67a',
+                    address:'Vr:native:7ed085230d7f4de84ecc7452ed4643f8aeac5ca3a6f0ed1dc1f02546f0a99a2d'
+                }
+            ],
+            balances:[0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+        }
+    },
+    computed:{
+        bar_data:function(){
+            const names:string[] = this.langs.map(lang=>lang.name);
+            const balances:number[] = this.balances;
+            return {
+                labels:names,
+                datasets:[{
+                    label:'vote',
+                    data:balances,
+                    backgroundColor: '#f87979',
+                }]
+            }
+        },
+        bar_options:function(){
+            return {
+                title:{
+                    display:true,
+                    text:'best-lang'
+                }
+            }
+        }
+    },
+    /*computed:{
+        graph:function(){
+            const ctx:HTMLElement = document.getElementById("Chart");
+            console.error(ctx);
+            const names:string[] = this.langs.map(lang=>lang.name);
+            const balances:number[] = this.balances;
+            return new Chart(ctx,{
+                type:'bar',
+                data:{
+                    labels:names,
+                    datasets:[{
+                        label:'lang',
+                        data:balances
+                    }]
+                }
+            });
+        }
+    },*/
+    methods:{
+        vote:async function(address:string){
+            /*const roots = read_db('roots',gen.roots);
+            const chain = read_db('chain',[gen.block]);
+            await send_request_tx(this.$store.state.secret,'issue',native,[this.$store.getters.my_address,address],["remit",JSON.stringify([0.01])],[],_.copy(roots),_.copy(chain))*/
+            worker.postMessage({
+                type:'send_request',
+                tx_type:"issue",
+                token:native,
+                base:[this.$store.getters.my_address,address],
+                input_raw:["remit",JSON.stringify([0.01])],
+                log:[]
+            });
+            alert('vote!');
+        }
+    },
+    created:async function(){
+        setInterval(()=>{
+            this.langs.forEach((lang:{name:string,pub_key:string,address:string})=>{
+                worker.postMessage({
+                    type:'get_balance',
+                    address:lang.address
+                });
+            });
+        },block_time);
+        worker.addEventListener('message',(event)=>{
+            const index = this.langs.map((lang:{name:string,pub_key:string,address:string})=>lang.address).indexOf(event.data.address);
+            if(index!=-1){
+                this.balances = _.new_obj(
+                    this.balances,
+                    (bs:number[])=>{
+                        bs[index] = new BigNumber(event.data.amount).times(100).toNumber() || 0;
+                        return bs;
+                    }
+                );
+            }
+        });
+    },
+    template:`
+    <div>
+        <h2>Best-Lang!</h2>
+        <Bar_Chart :width="900" :height="300" :chartData="bar_data" :options="bar_options"></Bar_Chart>
+        <h3>You need 0.01 VRH/vote</h3>
+        <ul id="best_langs_ul" style="list-style: none;">
+            <li v-for="(lang,i) in langs">
+            <h4>{{lang.name}}</h4>
+            <at-button v-on:click="vote(lang.address)">vote</at-button>
+            </li>
+        </ul>
+    </div>
+    `
+}
+
 
 let routes = [
     { path: '/', component:Home},
     { path:'/regist', component:Registration},
     { path: '/wallet', component:Wallet},
+    { path: '/best-lang', component:Best_lang},
     { path: '/setting', component:Setting,
       children: [
         { path: 'account', component: Account },
@@ -494,8 +724,7 @@ const app = new Vue({
     router: router
 }).$mount('#app');
 
-worker.postMessage('start');
-
-worker.addEventListener('message',(event)=>{
-    store.commit('refresh_balance',event.data);
+worker.postMessage({
+    type:'start'
 });
+

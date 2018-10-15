@@ -315,6 +315,10 @@ const compute_yet = async ():Promise<void>=>{
                         store.commit('checking',true);
                         client.publish("/checkchain",address);
                     }
+                    else{
+                        const del_yet = _.copy(store.state.yet_data).slice(1);
+                        store.commit('refresh_yet_data',del_yet);
+                    }
                 }
                 else store.commit('replaceing',false);
                 //await send_blocks();

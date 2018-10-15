@@ -84458,15 +84458,6 @@ const TxSet = __importStar(__webpack_require__(/*! ../../core/tx */ "./core/tx.j
 const BlockSet = __importStar(__webpack_require__(/*! ../../core/block */ "./core/block.js"));
 const StateSet = __importStar(__webpack_require__(/*! ../../core/state */ "./core/state.js"));
 const bignumber_js_1 = __importDefault(__webpack_require__(/*! bignumber.js */ "./node_modules/bignumber.js/bignumber.js"));
-const level_browserify_1 = __importDefault(__webpack_require__(/*! level-browserify */ "./node_modules/level-browserify/browser.js"));
-/*if('serviceWorker' in navigator){
-    navigator.serviceWorker.register("sw_bundle.js").then(reg=>{
-      if(reg.installing) console.log('installing');
-      else if(reg.waiting) console.log('waiting');
-      else if(reg.active) console.log('active');
-    }).catch(error=>console.log(error));
-}*/
-const testdb = level_browserify_1.default('./db');
 const storeName = 'vreath';
 let db;
 /*const open_req = indexedDB.open(storeName,1);
@@ -84521,9 +84512,12 @@ exports.write_db = (key, val) => {
     };
 };
 exports.delete_db = () => {
-    const del_db = indexedDB.deleteDatabase('vreath');
-    del_db.onsuccess = () => console.log('db delete success');
-    del_db.onerror = () => console.log('db delete error');
+    const del_db_vreath = indexedDB.deleteDatabase('vreath');
+    del_db_vreath.onsuccess = () => console.log('db delete success');
+    del_db_vreath.onerror = () => console.log('db delete error');
+    const del_db_level = indexedDB.deleteDatabase('level-js-./db');
+    del_db_level.onsuccess = () => console.log('db delete success');
+    del_db_level.onerror = () => console.log('db delete error');
 };
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
 const wallet = {
@@ -84621,7 +84615,7 @@ class Store {
         },location.protocol+'//'+location.host);*/
     }
     add_block(block) {
-        this._chain.push(block);
+        this._chain = _.copy(this._chain).concat(block).filter((b, i) => b.meta.index === i);
         exports.write_db('chain', _.copy(this._chain));
         /*self.postMessage({
             key:'add_block',
@@ -84848,6 +84842,10 @@ exports.compute_yet = async () => {
                         exports.store.checking(true);
                         exports.client.publish("/checkchain", address);
                     }
+                    else {
+                        const deled_yet = _.copy(exports.store.yet_data).slice(1);
+                        exports.store.refresh_yet_data(deled_yet);
+                    }
                 }
                 else
                     exports.store.replaceing(false);
@@ -84865,6 +84863,18 @@ exports.compute_yet = async () => {
                 console.log(new_chain.length);
                 if (exports.store.replace_mode && chain.length === new_chain.length)
                     exports.store.replaceing(false);
+                if (exports.store.replace_mode) {
+                    postMessage({
+                        key: 'replaceing',
+                        val: true
+                    });
+                }
+                else {
+                    postMessage({
+                        key: 'replaceing',
+                        val: false
+                    });
+                }
                 if (new_chain.length === chain.length + 1) {
                     const refs = _.copy(block.txs.concat(block.natives).concat(block.units)).filter(tx => tx.meta.kind === "refresh");
                     const now_yets = _.copy(exports.store.yet_data);
@@ -84924,7 +84934,10 @@ exports.compute_yet = async () => {
                 }
                 const balance = await index_1.get_balance(exports.store.my_address);
                 exports.store.refresh_balance(balance);
-                postMessage(balance);
+                postMessage({
+                    key: 'refresh_balance',
+                    val: balance
+                });
                 let refreshed_hash = [];
                 let get_not_refresh = [];
                 for (let block of _.copy(new_chain).slice().reverse()) {
@@ -85024,7 +85037,8 @@ exports.compute_yet = async () => {
                 console.log('yet:');
                 console.log(exports.store.yet_data);
                 await send_blocks();
-                await sleep(con_1.block_time);
+                if (!exports.store.replace_mode)
+                    await sleep(con_1.block_time);
                 return await exports.compute_yet();
             }
             else {
@@ -85044,6 +85058,23 @@ exports.compute_yet = async () => {
                 await sleep(con_1.block_time);
                 return await exports.compute_yet();
             }
+        }
+        else {
+            const now_yets = _.copy(exports.store.yet_data);
+            const reduced = now_yets.filter(d => {
+                if (d.type === "tx" && d.tx[0] != null)
+                    return true;
+                else if (d.type === "block" && d.block[0] != null)
+                    return d.block[0].meta.index != block.meta.index;
+                else
+                    return false;
+            });
+            console.log(reduced);
+            exports.store.refresh_yet_data(_.copy(reduced));
+            console.log('yet:');
+            console.log(exports.store.yet_data);
+            await sleep(con_1.block_time);
+            return await exports.compute_yet();
         }
     }
 };
@@ -85104,31 +85135,48 @@ exports.client.bind('transport:down', () => {
 })()*/
 self.onmessage = async (event) => {
     try {
-        const key = event.data.key;
-        const val = event.data.val;
-        if (key != null)
-            exports.store[key](val);
-        else if (event.data === "start") {
-            const gen_S_Trie = index_1.trie_ins("");
-            await P.forEach(gen.state, async (s) => {
-                await gen_S_Trie.put(s.owner, s);
-            });
-            const chain = exports.read_db('chain', [gen.block]);
-            const last_block = _.copy(chain[chain.length - 1]) || _.copy(gen.block);
-            const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
-            console.log(last_address);
-            if (last_address != exports.store.my_address) {
-                exports.store.checking(true);
-                exports.client.publish("/checkchain", last_address);
-            }
-            const balance = await index_1.get_balance(exports.store.my_address);
-            exports.store.refresh_balance(balance);
-            console.log(balance);
-            await exports.compute_yet();
+        const type = event.data.type;
+        switch (type) {
+            case 'commit':
+                const key = event.data.key;
+                const val = event.data.val;
+                if (key != null)
+                    exports.store[key](val);
+            case 'start':
+                const gen_S_Trie = index_1.trie_ins("");
+                await P.forEach(gen.state, async (s) => {
+                    await gen_S_Trie.put(s.owner, s);
+                });
+                const chain = exports.read_db('chain', [gen.block]);
+                const last_block = _.copy(chain[chain.length - 1]) || _.copy(gen.block);
+                const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
+                console.log(last_address);
+                if (last_address != exports.store.my_address) {
+                    exports.store.checking(true);
+                    exports.client.publish("/checkchain", last_address);
+                }
+                const balance = await index_1.get_balance(exports.store.my_address);
+                exports.store.refresh_balance(balance);
+                postMessage({
+                    key: 'refresh_balance',
+                    val: balance
+                });
+                console.log(balance);
+                await exports.compute_yet();
+            case 'send_request':
+                const options = event.data;
+                await index_1.send_request_tx(exports.store.secret, options.tx_type, options.token, options.base, options.input_raw, options.log, _.copy(exports.store.roots), _.copy(exports.store.chain));
+            case 'get_balance':
+                const got_balance = await index_1.get_balance(event.data.address) || 0;
+                postMessage({
+                    address: event.data.address,
+                    amount: got_balance
+                });
         }
     }
     catch (e) {
         console.log(e);
+        await exports.compute_yet();
     }
 };
 

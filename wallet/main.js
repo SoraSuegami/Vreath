@@ -305,6 +305,10 @@ const compute_yet = async () => {
                         exports.store.commit('checking', true);
                         exports.client.publish("/checkchain", address);
                     }
+                    else {
+                        const del_yet = _.copy(exports.store.state.yet_data).slice(1);
+                        exports.store.commit('refresh_yet_data', del_yet);
+                    }
                 }
                 else
                     exports.store.commit('replaceing', false);

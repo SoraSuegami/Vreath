@@ -57,9 +57,7 @@ export const states_for_tx = async (tx:T.Tx,chain:T.Block[],S_Trie:Trie)=>{
         if(getted==null) return result.concat(StateSet.CreateState(0,key,native,0));
         else return result.concat(getted);
     },[]);
-    console.log(pay_states);
     const concated = base_states.concat(output_states).concat(pay_states);
-    console.log(concated);
     const hashes = concated.map(state=>_.ObjectHash(state));
     return concated.filter((val,i)=>hashes.indexOf(_.ObjectHash(val))===i);
 }
@@ -180,7 +178,15 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
             output:tx.meta.data.output,
             unit_price:tx.meta.unit_price
         }
-        store.commit("add_unit",_.copy(new_unit));
+        const ref_tx = (()=>{
+            for(let block of _.copy(chain).slice().reverse()){
+                for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
+                    if(tx.meta.kind==="refresh"&&tx.meta.data.request===new_unit.request&&tx.meta.data.index===new_unit.index&&tx.meta.data.output===new_unit.output) return _.copy(tx);
+                }
+            }
+            return TxSet.empty_tx_pure();
+        })()
+        if((_.ObjectHash(new_pool)!=_.ObjectHash(pool)&&ref_tx.hash===TxSet.empty_tx_pure().hash)||ref_tx.hash!=TxSet.empty_tx_pure().hash) store.commit("add_unit",_.copy(new_unit));
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
                 for(let tx of block.txs.concat(block.natives).concat(block.units)){
@@ -236,8 +242,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             await P.forEach(accepted.location, async (loc:T.Location)=>{
                 await L_Trie.put(loc.address,loc);
             });
-            console.log(await S_Trie.filter());
-            console.log(await L_Trie.filter());
             const new_roots = {
                 stateroot:S_Trie.now_root(),
                 locationroot:L_Trie.now_root()
@@ -261,7 +265,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             await store.commit("refresh_roots",_.copy(new_roots));
             await store.commit("refresh_candidates",_.copy(accepted.candidates));
             await store.commit("add_block",_.copy(accepted.block[0]));
-            console.log(new_chain);
 
             const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
             const refs_pure = block.txs.filter(tx=>tx.meta.kind==="refresh").concat(block.natives.filter(tx=>tx.meta.kind==="refresh")).concat(block.units.filter(tx=>tx.meta.kind==="refresh"));
@@ -272,7 +275,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 return result.concat(full_tx);
             },not_refreshed);
             if(refs_pure.length>0){
-                console.log(refs_pure)
                 store.commit('del_not_refreshed',_.copy(refs_pure).map(pure=>pure.meta.data.request));
             }
             const now_refreshing:string[] = _.copy(store.state.now_refreshing);
@@ -282,7 +284,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             const new_not_refreshed_tx = refs_pure.reduce((result,pure)=>{
                 return result.filter(tx=>tx.meta.kind==="request"&&tx.hash!=pure.meta.data.request);
             },_.copy(added_not_refresh_tx));
-            console.log(refs_pure);
 
             const bought_units = block.units.reduce((result:T.Unit[],u)=>{
                 if(u.meta.kind==="request") return result;
@@ -299,8 +300,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.state.secret));
                 return _.copy(req_tx).meta.data.address===unit_address
             })
-            console.log("my_unit_buying");
-            console.log(my_unit_buying);
             const new_now_buying = store.state.now_buying||!my_unit_buying
             if(my_unit_buying) store.commit('buying_unit',false);
             const new_unit_store = _.new_obj(
@@ -336,7 +335,6 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 if(tx.meta.kind==="request") return TxSet.ValidRequestTx(_.copy(tx),my_version,native,unit,false,_.copy(StateData),_.copy(LocationData));
                 else return TxSet.ValidRefreshTx(_.copy(tx),_.copy(chain),my_version,native,unit,true,token_name_maxsize,_.copy(StateData),_.copy(LocationData));
             })
-            console.log(valids);
             const deleted_pool = _.copy(block.txs.concat(block.natives).concat(block.units)).reduce((pool:T.Pool,tx,i)=>{
                 const target_tx = pool[tx.hash];
                 if(target_tx==null) return pool;
@@ -556,16 +554,13 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
     const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)];
     const native_validator = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
     const unit_validator = CryptoSet.GenereateAddress(unit,_.reduce_pub(pub_key));
-    console.log(Object.values(pool))
     const pool_txs:T.Tx[] = Object.values(_.copy(pool))
     const requested_bases:string[] = Object.keys(await L_Trie.filter((key,val)=>{
         const getted:T.Location = val;
         if(getted.state==="already") return true;
         else return false;
     }));
-    console.log(requested_bases);
     const already_requests:string[] = _.copy(store.state.now_refreshing);
-    console.log(already_requests);
     const not_same = pool_txs.reduce((result:T.Tx[],tx)=>{
         const bases = result.reduce((r:string[],t)=>{
             if(t.meta.kind==="request") return r.concat(t.meta.data.base);
@@ -579,8 +574,6 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         else if(tx.meta.kind==="refresh"&&requests.indexOf(tx.meta.data.request)===-1) return result.concat(tx);
         else return result;
     },[]);
-    console.log('not_same:')
-    console.log(not_same);
     const related = not_same.filter(tx=>{
         if(tx.meta.kind==="request") return true;
         const req_tx = TxSet.find_req_tx(tx,chain);
@@ -594,8 +587,6 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         }
         else return true;
     });
-    console.log('related');
-    console.log(related);
     let size_sum = new BigNumber(0);
     const choosed = related.reduce((result:T.Tx[],tx)=>{
         if(size_sum.isGreaterThan(new BigNumber(block_size).times(0.9))) return result;
@@ -605,8 +596,6 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
         if(added_size.isGreaterThan(new BigNumber(block_size).times(0.9))) return result;
         else return result.concat(tx);
     },[]);
-    console.log('choosed')
-    console.log(choosed);
     const reduced = choosed.reduce((result:{txs:T.Tx[],natives:T.Tx[],units:T.Tx[]},tx)=>{
         if(tx.meta.data.token===native) result.natives.push(tx);
         else if(tx.meta.data.token===unit) result.units.push(tx);
@@ -622,7 +611,6 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
     const LocationData = await locations_for_block(micro_block,chain,L_Trie);
     //console.log(BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData))
     const invalid_index = tx_check(micro_block,chain,StateData,LocationData);
-    console.log(invalid_index);
     const block_check = BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData);
     if(invalid_index===-1&&block_check){
         const new_pool = _.new_obj(
@@ -663,7 +651,15 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
             unit_price:target_pure.meta.unit_price
         }
         store.commit("refresh_pool",_.copy(del_pool));
-        store.commit("add_unit",_.copy(new_unit));
+        const ref_tx = (()=>{
+            for(let block of _.copy(chain).slice().reverse()){
+                for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
+                    if(tx.meta.kind==="refresh"&&tx.meta.data.request===new_unit.request&&tx.meta.data.index===new_unit.index&&tx.meta.data.output===new_unit.output) return _.copy(tx);
+                }
+            }
+            return TxSet.empty_tx_pure();
+        })()
+        if(ref_tx.hash!=TxSet.empty_tx_pure().hash) store.commit("add_unit",_.copy(new_unit));
         await send_micro_block(_.copy(del_pool),secret,_.copy(chain),_.copy(candidates),_.copy(roots),_.copy(unit_store));
     }
     else{console.log("fall to create micro block;");}
@@ -705,8 +701,6 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
         }
         const add_blocks = _.copy(target).slice().reverse();
         const back_chain = my_chain.slice(0,add_blocks[0].meta.index);
-        console.log("add_block:");
-        console.log(add_blocks);
         /*const back_chain:T.Block[] = [gen.block];
         const add_blocks = new_chain.slice(1);*/
         store.commit("replace_chain",_.copy(back_chain));
@@ -762,9 +756,7 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         const pub_key:string[] = [CryptoSet.PublicFromPrivate(secret)]
         const native_remiter = CryptoSet.GenereateAddress(native,_.reduce_pub(pub_key));
         const unit_remiter = CryptoSet.GenereateAddress(unit,_.reduce_pub(pub_key));
-        console.log(native_remiter)
         const unit_sellers = units.map(u=>u.payee);
-        console.log(unit_sellers);
         const native_sellers = unit_sellers.reduce((res:string[],add)=>{
             const index = res.indexOf(add);
             if(index===-1) return res.concat(add);
@@ -793,7 +785,6 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         },{}));
         const pure_native_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",native,_.copy([native_remiter].concat(native_sellers)),["remit",JSON.stringify(prices)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
         const pure_unit_tx = TxSet.CreateRequestTx(pub_key,native_remiter,Math.pow(2,-3),"issue",unit,_.copy([unit_remiter].concat("Vr:"+unit+":"+_.toHash(''))),["buy",JSON.stringify(units)],[],my_version,TxSet.empty_tx_pure().meta.pre,TxSet.empty_tx_pure().meta.next,Math.pow(2,-18));
-        console.log(pure_native_tx);
         const native_pure_hash = _.copy(pure_native_tx).meta.purehash;
         const unit_pure_hash = _.copy(pure_unit_tx).meta.purehash;
         const next_rel:T.Relation = {

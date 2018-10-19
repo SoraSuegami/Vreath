@@ -406,7 +406,7 @@ export const compute_yet = async ():Promise<void>=>{
         console.log('yet:')
         console.log(store.yet_data);
         await sleep(block_time);
-        return await compute_yet();
+        //return await compute_yet();
     }
     else if(data.type==="tx"&&data.tx.length>0){
         const target:T.Tx = _.copy(data.tx[0]);
@@ -424,7 +424,7 @@ export const compute_yet = async ():Promise<void>=>{
         console.log('yet:')
         console.log(store.yet_data);
         await sleep(block_time);
-        return await compute_yet();
+        //return await compute_yet();
         /*}
         else{
             const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
@@ -454,7 +454,7 @@ export const compute_yet = async ():Promise<void>=>{
                 else store.replaceing(false);
                 //await send_blocks();
                 await sleep(block_time);
-                return await compute_yet();
+                //return await compute_yet();
             }
             else if(block.meta.index===chain.length){
                 if(store.replace_mode&&chain[chain.length-1].meta.index>=store.replace_index) store.replaceing(false);
@@ -628,7 +628,7 @@ export const compute_yet = async ():Promise<void>=>{
                 console.log(store.yet_data);
                 await send_blocks();
                 if(!store.replace_mode) await sleep(block_time);
-                return await compute_yet();
+                //return await compute_yet();
             }
             else{
                 const now_yets:Data[] = _.copy(store.yet_data);
@@ -642,7 +642,7 @@ export const compute_yet = async ():Promise<void>=>{
                 console.log('yet:')
                 console.log(store.yet_data);
                 await sleep(block_time);
-                return await compute_yet();
+                //return await compute_yet();
             }
         }
         else{
@@ -657,9 +657,10 @@ export const compute_yet = async ():Promise<void>=>{
             console.log('yet:')
             console.log(store.yet_data);
             await sleep(block_time);
-            return await compute_yet();
+            //return await compute_yet();
         }
     }
+    setImmediate(compute_yet);
 }
 
 
@@ -757,7 +758,7 @@ self.onmessage = async (event)=>{
                     val:balance
                 });
                 console.log(balance);
-                await compute_yet();
+                setImmediate(compute_yet);
             case 'send_request':
                 const options = event.data;
                 await send_request_tx(store.secret,options.tx_type,options.token,options.base,options.input_raw,options.log,_.copy(store.roots),_.copy(store.chain));

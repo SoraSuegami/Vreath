@@ -84434,7 +84434,7 @@ function extend() {
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-
+/* WEBPACK VAR INJECTION */(function(setImmediate) {
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -84799,7 +84799,7 @@ exports.compute_yet = async () => {
         console.log('yet:');
         console.log(exports.store.yet_data);
         await sleep(con_1.block_time);
-        return await exports.compute_yet();
+        //return await compute_yet();
     }
     else if (data.type === "tx" && data.tx.length > 0) {
         const target = _.copy(data.tx[0]);
@@ -84820,7 +84820,7 @@ exports.compute_yet = async () => {
         console.log('yet:');
         console.log(exports.store.yet_data);
         await sleep(con_1.block_time);
-        return await exports.compute_yet();
+        //return await compute_yet();
         /*}
         else{
             const txs:Data[] = store.state.yet_data.filter((d:Data)=>d.type==="tx"&&d.tx[0]!=null&&d.tx[0].hash!=target.hash);
@@ -84851,7 +84851,7 @@ exports.compute_yet = async () => {
                     exports.store.replaceing(false);
                 //await send_blocks();
                 await sleep(con_1.block_time);
-                return await exports.compute_yet();
+                //return await compute_yet();
             }
             else if (block.meta.index === chain.length) {
                 if (exports.store.replace_mode && chain[chain.length - 1].meta.index >= exports.store.replace_index)
@@ -85039,7 +85039,7 @@ exports.compute_yet = async () => {
                 await send_blocks();
                 if (!exports.store.replace_mode)
                     await sleep(con_1.block_time);
-                return await exports.compute_yet();
+                //return await compute_yet();
             }
             else {
                 const now_yets = _.copy(exports.store.yet_data);
@@ -85056,7 +85056,7 @@ exports.compute_yet = async () => {
                 console.log('yet:');
                 console.log(exports.store.yet_data);
                 await sleep(con_1.block_time);
-                return await exports.compute_yet();
+                //return await compute_yet();
             }
         }
         else {
@@ -85074,9 +85074,10 @@ exports.compute_yet = async () => {
             console.log('yet:');
             console.log(exports.store.yet_data);
             await sleep(con_1.block_time);
-            return await exports.compute_yet();
+            //return await compute_yet();
         }
     }
+    setImmediate(exports.compute_yet);
 };
 const port = peer_list_1.peer_list[0].port || "57750";
 const ip = peer_list_1.peer_list[0].ip || "localhost";
@@ -85143,6 +85144,7 @@ self.onmessage = async (event) => {
                 if (key != null)
                     exports.store[key](val);
             case 'start':
+                exports.delete_db();
                 const gen_S_Trie = index_1.trie_ins("");
                 await P.forEach(gen.state, async (s) => {
                     await gen_S_Trie.put(s.owner, s);
@@ -85162,7 +85164,7 @@ self.onmessage = async (event) => {
                     val: balance
                 });
                 console.log(balance);
-                await exports.compute_yet();
+                setImmediate(exports.compute_yet);
             case 'send_request':
                 const options = event.data;
                 await index_1.send_request_tx(exports.store.secret, options.tx_type, options.token, options.base, options.input_raw, options.log, _.copy(exports.store.roots), _.copy(exports.store.chain));
@@ -85180,6 +85182,7 @@ self.onmessage = async (event) => {
     }
 };
 
+/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/timers-browserify/main.js */ "./node_modules/timers-browserify/main.js").setImmediate))
 
 /***/ }),
 

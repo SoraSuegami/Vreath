@@ -190,7 +190,7 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
             output:tx.meta.data.output,
             unit_price:tx.meta.unit_price
         }
-        const new_unit_store = _.new_obj(
+        /*const new_unit_store = _.new_obj(
             unit_store,
             (store)=>{
                 const valid_ref_tx = (()=>{
@@ -208,7 +208,7 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
                 else store[tx.meta.data.request] = pre.concat(new_unit);
                 return store;
             }
-        )
+        )*/
         store.add_unit(_.copy(new_unit));
         /*const already = (()=>{
             for(let block of chain.slice().reverse()){
@@ -249,7 +249,7 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             else if(new BigNumber(tx.meta.data.index).isGreaterThanOrEqualTo(min)) return min;
             else return tx.meta.data.index;
         },_.copy(chain).length-1);
-        const reqested = (()=>{
+        /*const reqested = (()=>{
             for(let block of _.copy(chain).slice(requested_index_min)){
                 const txs = block.txs.concat(block.natives).concat(block.units);
                 for(let tx of _.copy(txs)){
@@ -257,8 +257,8 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 }
             }
             return false;
-        })();
-        if(accepted.block.length>0&&!reqested){
+        })();*/
+        if(accepted.block.length>0/*&&!reqested*/){
             await P.forEach(accepted.state, async (state:T.State)=>{
                 await S_Trie.put(state.owner,state);
             });
@@ -300,6 +300,10 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 store.add_not_refreshed(_.copy(full_tx));
                 return result.concat(full_tx);
             },not_refreshed);
+
+            if(reqs_pure.length>0){
+                reqs_pure.map(pure=>pure.hash).forEach(key=>store.add_req_index(key,_.copy(block).meta.index));
+            }
             if(refs_pure.length>0){
                 console.log(refs_pure)
                 store.del_not_refreshed(_.copy(refs_pure).map(pure=>pure.meta.data.request));
@@ -499,12 +503,17 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         })
         const relate_pre_tx = (()=>{
             if(req_tx.meta.pre.flag===false) return TxSet.empty_tx();
-            for(let block of _.copy(chain).slice().reverse()){
-                let txs = _.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
-                let hashes = _.copy(txs).map(tx=>tx.meta.purehash);
-                let i = hashes.indexOf(req_tx.meta.pre.hash);
+            let block:T.Block;
+            let txs:T.TxPure[];
+            let hashes:string[];
+            let i:number;
+            let tx:T.TxPure;
+            for(block of _.copy(chain).slice().reverse()){
+                txs = _.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
+                hashes = _.copy(txs).map(tx=>tx.meta.purehash);
+                i = hashes.indexOf(req_tx.meta.pre.hash);
                 if(i!=-1){
-                    let tx = _.copy(_.copy(txs)[i]);
+                    tx = _.copy(_.copy(txs)[i]);
                     if(tx.meta.kind=="request"&&tx.meta.next.flag===true&&tx.meta.next.hash===req_tx.meta.purehash){
                         return TxSet.pure_to_tx(_.copy(tx),_.copy(block));
                     }
@@ -514,12 +523,17 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         })();
         const relate_next_tx = (()=>{
             if(req_tx.meta.next.flag===false) return TxSet.empty_tx();
-            for(let block of _.copy(chain).slice().reverse()){
-                let txs =_.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
-                let hashes = _.copy(txs).map(tx=>tx.meta.purehash);
-                let i = hashes.indexOf(req_tx.meta.next.hash);
+            let block:T.Block;
+            let txs:T.TxPure[];
+            let hashes:string[];
+            let i:number;
+            let tx:T.TxPure;
+            for(block of _.copy(chain).slice().reverse()){
+                txs =_.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
+                hashes = _.copy(txs).map(tx=>tx.meta.purehash);
+                i = hashes.indexOf(req_tx.meta.next.hash);
                 if(i!=-1){
-                    let tx = _.copy(_.copy(txs)[i]);
+                    tx = _.copy(_.copy(txs)[i]);
                     if(tx.meta.kind=="request"&&tx.meta.pre.flag===true&&tx.meta.pre.hash===req_tx.meta.purehash){
                         return TxSet.pure_to_tx(_.copy(tx),_.copy(block));
                     }
@@ -539,7 +553,8 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         const LocationData = await locations_for_tx(tx,chain,L_Trie);
         if(!TxSet.ValidRefreshTx(tx,chain,my_version,native,unit,false,token_name_maxsize,StateData,LocationData)) console.log("fail to create valid refresh");
         else{
-            //store.commit('del_not_refreshed',[tx.meta.data.request]);
+            store.del_not_refreshed([tx.meta.data.request]);
+            store.del_req_index(_.copy(req_tx).hash);
             console.log("create valid refresh tx");
             client.publish('/data',{type:'tx',tx:[tx],block:[]});
             //await store.dispatch("tx_accept",_.copy(tx));
@@ -635,83 +650,85 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
     },[]);
     console.log('choosed')
     console.log(choosed);
-    const reduced = choosed.reduce((result:{txs:T.Tx[],natives:T.Tx[],units:T.Tx[]},tx)=>{
-        if(tx.meta.data.token===native) result.natives.push(tx);
-        else if(tx.meta.data.token===unit) result.units.push(tx);
-        else result.txs.push(tx);
-        return result;
-    },{txs:[],natives:[],units:[]});
-    const txs = reduced.txs;
-    const natives = reduced.natives;
-    const units = reduced.units;
-    const pre_block = BlockSet.CreateMicroBlock(my_version,0,chain,pow_target,pos_diff,pub_key,_.ObjectHash(candidates),stateroot,locationroot,txs,natives,units,block_time);
-    const micro_block = BlockSet.SignBlock(pre_block,secret,pub_key[0]);
-    const StateData = await states_for_block(micro_block,chain,S_Trie);
-    const LocationData = await locations_for_block(micro_block,chain,L_Trie);
-    //console.log(BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData))
-    const invalid_index = tx_check(micro_block,chain,StateData,LocationData);
-    console.log(invalid_index);
-    const block_check = BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData);
-    if(invalid_index===-1&&block_check){
-        const new_pool = _.new_obj(
-            pool,
-            p=>{
-                micro_block.txs.concat(micro_block.natives).concat(micro_block.units).forEach(tx=>{
-                    if(tx.meta.kind==="refresh") delete p[tx.hash];
-                });
-                return p;
-            }
-        );
-        store.refresh_pool(_.copy(new_pool));
-        const new_refreshing = already_requests.concat(micro_block.txs.concat(micro_block.natives).concat(micro_block.units).filter(tx=>tx.meta.kind==="refresh").map(tx=>tx.meta.data.request));
-        store.new_refreshing(_.copy(new_refreshing));
-        client.publish('/data',{type:'block',tx:[],block:[micro_block]});
-            //await store.dispatch("block_accept",_.copy(micro_block));
-            //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
-        console.log("create micro block");
-            //await send_micro_block(socket);
-    }
-    else if(invalid_index!=-1){
-        const target_pure = micro_block.txs.concat(micro_block.natives).concat(micro_block.units)[invalid_index];
-        const target_tx = TxSet.pure_to_tx(_.copy(target_pure),_.copy(micro_block));
-        const valid = (()=>{
-            if(target_tx.meta.kind==="request") return !TxSet.ValidRequestTx(_.copy(target_tx),my_version,native,unit,false,_.copy(StateData),_.copy(LocationData));
-            else return true;
-        })();
-        const del_pool = ((p)=>{
-            if(valid) delete p[target_pure.hash];
-            return p;
-        })(_.copy(pool));
-        const add_unit_store = ((store)=>{
-            if(target_pure.meta.kind==="refresh"){
-                const new_unit:T.Unit = {
-                    request:target_pure.meta.data.request,
-                    index:target_pure.meta.data.index,
-                    nonce:target_pure.meta.nonce,
-                    payee:target_pure.meta.data.payee,
-                    output:target_pure.meta.data.output,
-                    unit_price:target_pure.meta.unit_price
+    if(choosed.length>0){
+        const reduced = choosed.reduce((result:{txs:T.Tx[],natives:T.Tx[],units:T.Tx[]},tx)=>{
+            if(tx.meta.data.token===native) result.natives.push(tx);
+            else if(tx.meta.data.token===unit) result.units.push(tx);
+            else result.txs.push(tx);
+            return result;
+        },{txs:[],natives:[],units:[]});
+        const txs = reduced.txs;
+        const natives = reduced.natives;
+        const units = reduced.units;
+        const pre_block = BlockSet.CreateMicroBlock(my_version,0,chain,pow_target,pos_diff,pub_key,_.ObjectHash(candidates),stateroot,locationroot,txs,natives,units,block_time);
+        const micro_block = BlockSet.SignBlock(pre_block,secret,pub_key[0]);
+        const StateData = await states_for_block(micro_block,chain,S_Trie);
+        const LocationData = await locations_for_block(micro_block,chain,L_Trie);
+        //console.log(BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData))
+        const invalid_index = tx_check(micro_block,chain,StateData,LocationData);
+        console.log(invalid_index);
+        const block_check = BlockSet.ValidMicroBlock(micro_block,chain,0,my_version,candidates,stateroot,locationroot,block_time,max_blocks,block_size,native,unit,token_name_maxsize,StateData,LocationData);
+        if(invalid_index===-1&&block_check){
+            const new_pool = _.new_obj(
+                pool,
+                p=>{
+                    micro_block.txs.concat(micro_block.natives).concat(micro_block.units).forEach(tx=>{
+                        if(tx.meta.kind==="refresh") delete p[tx.hash];
+                    });
+                    return p;
                 }
-                const pre = store[target_pure.meta.data.request] || []
-                if(pre.length>0&&(pre.map(u=>_.toHash(u.payee+u.request+u.index)).indexOf(_.toHash(new_unit.payee+new_unit.request+new_unit.index))!=-1||pre[0].output!=new_unit.output)) return store;
-                store[target_pure.meta.data.request] = pre.concat(new_unit);
-                return store;
-            }
-            else return store;
-        })(_.copy(unit_store))
-        const new_unit:T.Unit = {
-            request:target_pure.meta.data.request,
-            index:target_pure.meta.data.index,
-            nonce:target_pure.meta.nonce,
-            payee:target_pure.meta.data.payee,
-            output:target_pure.meta.data.output,
-            unit_price:target_pure.meta.unit_price
+            );
+            store.refresh_pool(_.copy(new_pool));
+            const new_refreshing = already_requests.concat(micro_block.txs.concat(micro_block.natives).concat(micro_block.units).filter(tx=>tx.meta.kind==="refresh").map(tx=>tx.meta.data.request));
+            store.new_refreshing(_.copy(new_refreshing));
+            client.publish('/data',{type:'block',tx:[],block:[micro_block]});
+                //await store.dispatch("block_accept",_.copy(micro_block));
+                //await block_accept(micro_block,chain,candidates,roots,pool,codes,secret,mode,socket);
+            console.log("create micro block");
+                //await send_micro_block(socket);
         }
-        store.refresh_pool(_.copy(del_pool));
-        store.add_unit(_.copy(new_unit));
-        await send_micro_block(_.copy(del_pool),secret,_.copy(chain),_.copy(candidates),_.copy(roots),_.copy(unit_store));
+        else if(invalid_index!=-1){
+            const target_pure = micro_block.txs.concat(micro_block.natives).concat(micro_block.units)[invalid_index];
+            const target_tx = TxSet.pure_to_tx(_.copy(target_pure),_.copy(micro_block));
+            const valid = (()=>{
+                if(target_tx.meta.kind==="request") return !TxSet.ValidRequestTx(_.copy(target_tx),my_version,native,unit,false,_.copy(StateData),_.copy(LocationData));
+                else return true;
+            })();
+            const del_pool = ((p)=>{
+                if(valid) delete p[target_pure.hash];
+                return p;
+            })(_.copy(pool));
+            const add_unit_store = ((store)=>{
+                if(target_pure.meta.kind==="refresh"){
+                    const new_unit:T.Unit = {
+                        request:target_pure.meta.data.request,
+                        index:target_pure.meta.data.index,
+                        nonce:target_pure.meta.nonce,
+                        payee:target_pure.meta.data.payee,
+                        output:target_pure.meta.data.output,
+                        unit_price:target_pure.meta.unit_price
+                    }
+                    const pre = store[target_pure.meta.data.request] || []
+                    if(pre.length>0&&(pre.map(u=>_.toHash(u.payee+u.request+u.index)).indexOf(_.toHash(new_unit.payee+new_unit.request+new_unit.index))!=-1||pre[0].output!=new_unit.output)) return store;
+                    store[target_pure.meta.data.request] = pre.concat(new_unit);
+                    return store;
+                }
+                else return store;
+            })(_.copy(unit_store))
+            const new_unit:T.Unit = {
+                request:target_pure.meta.data.request,
+                index:target_pure.meta.data.index,
+                nonce:target_pure.meta.nonce,
+                payee:target_pure.meta.data.payee,
+                output:target_pure.meta.data.output,
+                unit_price:target_pure.meta.unit_price
+            }
+            store.refresh_pool(_.copy(del_pool));
+            store.add_unit(_.copy(new_unit));
+            await send_micro_block(_.copy(del_pool),secret,_.copy(chain),_.copy(candidates),_.copy(roots),_.copy(unit_store));
+        }
+        else{console.log("fall to create micro block;");}
     }
-    else{console.log("fall to create micro block;");}
 }
 
 const get_pre_info = async (chain:T.Block[]):Promise<[{stateroot:string,locationroot:string},T.Candidates[]]>=>{

@@ -21,7 +21,6 @@ const faye_1 = __importDefault(require("faye"));
 const TxSet = __importStar(require("../../core/tx"));
 const BlockSet = __importStar(require("../../core/block"));
 const StateSet = __importStar(require("../../core/state"));
-const bignumber_js_1 = __importDefault(require("bignumber.js"));
 const storeName = 'vreath';
 let db;
 /*const open_req = indexedDB.open(storeName,1);
@@ -121,6 +120,7 @@ class Store {
         this._not_refreshed_tx = [];
         this._now_buying = false;
         this._now_refreshing = [];
+        this._req_index_map = {};
     }
     get code() {
         return this._code;
@@ -166,6 +166,9 @@ class Store {
     }
     get now_refreshing() {
         return this._now_refreshing;
+    }
+    get req_index_map() {
+        return this._req_index_map;
     }
     get my_address() {
         return CryptoSet.GenereateAddress(con_1.native, CryptoSet.PublicFromPrivate(this._secret)) || "";
@@ -334,6 +337,12 @@ class Store {
             val:_.copy(requests)
         },location.protocol+'//'+location.host);*/
     }
+    add_req_index(key, index) {
+        this._req_index_map[key] = index;
+    }
+    del_req_index(key) {
+        delete this._req_index_map[key];
+    }
 }
 exports.Store = Store;
 exports.store = new Store();
@@ -352,7 +361,7 @@ const send_blocks = async () => {
     const date = new Date();
     if (!exports.store.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.secret) && last_micros.length <= con_1.max_blocks)
         await index_1.send_micro_block(_.copy(exports.store.pool), exports.store.secret, _.copy(exports.store.chain), _.copy(exports.store.candidates), _.copy(exports.store.roots), exports.store.unit_store);
-    else if (!exports.store.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
+    if (!exports.store.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
         await index_1.send_key_block(_.copy(exports.store.chain), exports.store.secret, _.copy(exports.store.candidates), _.copy(exports.store.roots));
 };
 exports.compute_yet = async () => {
@@ -502,19 +511,16 @@ exports.compute_yet = async () => {
                     key: 'refresh_balance',
                     val: balance
                 });
-                let refreshed_hash = [];
-                let get_not_refresh = [];
-                for (let block of _.copy(new_chain).slice().reverse()) {
-                    for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
-                        if (_.copy(tx).meta.kind === "request" && refreshed_hash.indexOf(_.copy(tx).hash) === -1)
-                            get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx), _.copy(block))));
-                        else if (_.copy(tx).meta.kind === "refresh")
-                            refreshed_hash.push(_.copy(tx).meta.data.request);
-                        else if (get_not_refresh.length >= 10)
-                            break;
+                /*let refreshed_hash:string[] = [];
+                let get_not_refresh:T.Tx[] = [];
+                for(let block of _.copy(new_chain).slice().reverse()){
+                    for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
+                        if(_.copy(tx).meta.kind==="request"&&refreshed_hash.indexOf(_.copy(tx).hash)===-1) get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx),_.copy(block))));
+                        else if(_.copy(tx).meta.kind==="refresh") refreshed_hash.push(_.copy(tx).meta.data.request);
+                        else if(get_not_refresh.length>=10) break;
                     }
-                }
-                const refreshes = _.copy(get_not_refresh);
+                }*/
+                const refreshes = _.copy(exports.store.not_refreshed_tx);
                 const related = refreshes.filter(tx => {
                     if (tx.meta.pre.flag === true) {
                         const pres = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "pre");
@@ -531,15 +537,7 @@ exports.compute_yet = async () => {
                 console.log(related);
                 if (related.length > 0) {
                     const req_tx = related[0];
-                    const index = (() => {
-                        for (let block of _.copy(new_chain).slice().reverse()) {
-                            let txs = block.txs.concat(block.natives).concat(block.units);
-                            let i = txs.map(tx => tx.hash).indexOf(req_tx.hash);
-                            if (i != -1)
-                                return block.meta.index;
-                        }
-                        return 0;
-                    })();
+                    const index = exports.store.req_index_map[req_tx.hash] || 0;
                     const code = exports.store.code[req_tx.meta.data.token];
                     await index_1.send_refresh_tx(_.copy(exports.store.roots), exports.store.secret, _.copy(req_tx), index, code, _.copy(new_chain));
                     //await send_blocks();
@@ -551,58 +549,55 @@ exports.compute_yet = async () => {
                         await unit_buying(store.state.secret,buy_units.slice(),_.copy(store.state.roots),store.state.chain.slice());
                     })
                 }*/
-                const unit_store_values = Object.values(exports.store.unit_store);
-                const units_sum = unit_store_values.reduce((sum, us) => sum + us.length, 0);
-                const reversed_chain = _.copy(new_chain).slice().reverse();
-                const refreshed = (() => {
-                    let result = [];
-                    let price_sum;
+                /*const unit_store_values:T.Unit[][] = Object.values(store.unit_store);
+                const units_sum = unit_store_values.reduce((sum,us)=>sum+us.length,0);
+                const reversed_chain:T.Block[] = _.copy(new_chain).slice().reverse();
+                const refreshed = (()=>{
+                    let result:T.Unit[] = [];
+                    let price_sum:number;
                     let flag = false;
-                    for (let block of reversed_chain) {
+                    for(let block of reversed_chain){
                         const txs = _.copy(block).txs.concat(block.natives).concat(block.units).slice();
-                        for (let tx of txs) {
-                            if (tx.meta.kind === "refresh") {
-                                result = result.concat(unit_store_values.reduce((result, us) => {
-                                    if (us.length > 0 && us[0].request === tx.meta.data.request) {
-                                        price_sum = result.reduce((sum, unit) => new bignumber_js_1.default(sum).plus(unit.unit_price).toNumber(), 0);
-                                        us.forEach(u => {
-                                            if (new bignumber_js_1.default(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new bignumber_js_1.default(balance).times(0.99))) {
+                        for(let tx of txs){
+                            if(tx.meta.kind==="refresh"){
+                                result = result.concat(unit_store_values.reduce((result,us)=>{
+                                    if(us.length>0&&us[0].request===tx.meta.data.request){
+                                        price_sum = result.reduce((sum,unit)=>new BigNumber(sum).plus(unit.unit_price).toNumber(),0);
+                                        us.forEach(u=>{
+                                            if(new BigNumber(price_sum).plus(u.unit_price).isGreaterThanOrEqualTo(new BigNumber(balance).times(0.99))){
                                                 flag = true;
                                                 return result;
                                             }
-                                            else {
-                                                price_sum = new bignumber_js_1.default(price_sum).plus(u.unit_price).toNumber();
+                                            else{
+                                                price_sum = new BigNumber(price_sum).plus(u.unit_price).toNumber();
                                                 result.push(u);
                                             }
                                         });
                                         return result;
                                     }
-                                    else
-                                        return result;
-                                }, []));
+                                    else return result;
+                                },[]));
                             }
-                            if (result.length === units_sum || flag)
-                                break;
+                            if(result.length===units_sum||flag) break;
                         }
                     }
                     return result;
                 })();
                 console.log(unit_store_values);
-                console.log('buy_units are:');
-                console.log(refreshed);
-                console.log(exports.store.now_buying);
-                if (refreshed.length > 0 && !exports.store.now_buying && !exports.store.replace_mode) {
+                console.log('buy_units are:')
+                console.log(refreshed)
+                console.log(store.now_buying)
+                if(refreshed.length>0&&!store.now_buying&&!store.replace_mode){
                     const validatorPub = BlockSet.search_key_block(_.copy(reversed_chain)).meta.validatorPub;
-                    const validator_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(validatorPub));
+                    const validator_address = CryptoSet.GenereateAddress(native,_.reduce_pub(validatorPub));
                     const buy_units = refreshed;
-                    await index_1.unit_buying(exports.store.secret, _.copy(buy_units), _.copy(exports.store.roots), _.copy(new_chain));
+                    await unit_buying(store.secret,_.copy(buy_units),_.copy(store.roots),_.copy(new_chain));
                     //await send_blocks();
-                }
+                }*/
                 console.log('yet:');
                 console.log(exports.store.yet_data);
                 await send_blocks();
-                if (!exports.store.replace_mode)
-                    await sleep(con_1.block_time);
+                //if(!store.replace_mode) await sleep(block_time);
                 //return await compute_yet();
             }
             else {
@@ -611,7 +606,7 @@ exports.compute_yet = async () => {
                     if (d.type === "tx" && d.tx[0] != null)
                         return true;
                     else if (d.type === "block" && d.block[0] != null)
-                        return d.block[0].meta.index != block.meta.index;
+                        return d.block[0].meta.index > block.meta.index;
                     else
                         return false;
                 });
@@ -629,7 +624,7 @@ exports.compute_yet = async () => {
                 if (d.type === "tx" && d.tx[0] != null)
                     return true;
                 else if (d.type === "block" && d.block[0] != null)
-                    return d.block[0].meta.index != block.meta.index;
+                    return d.block[0].meta.index > block.meta.index;
                 else
                     return false;
             });

@@ -160,6 +160,7 @@ export class Store {
     private _not_refreshed_tx:T.Tx[] = [];
     private _now_buying:boolean = false;
     private _now_refreshing:string[] = [];
+    private _req_index_map:{[key:string]:number} = {};
 
     get code(){
         return this._code;
@@ -205,6 +206,9 @@ export class Store {
     }
     get now_refreshing(){
         return this._now_refreshing;
+    }
+    get req_index_map(){
+        return this._req_index_map
     }
     get my_address(){
         return CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(this._secret)) || ""
@@ -373,6 +377,12 @@ export class Store {
             val:_.copy(requests)
         },location.protocol+'//'+location.host);*/
     }
+    add_req_index(key:string,index:number){
+        this._req_index_map[key] = index;
+    }
+    del_req_index(key:string){
+        delete this._req_index_map[key];
+    }
 
 }
 
@@ -395,7 +405,7 @@ const send_blocks = async ()=>{
     const date = new Date();
 
     if(!store.replace_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.pool),store.secret,_.copy(store.chain),_.copy(store.candidates),_.copy(store.roots),store.unit_store);
-    else if(!store.replace_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.chain),store.secret,_.copy(store.candidates),_.copy(store.roots));
+    if(!store.replace_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.chain),store.secret,_.copy(store.candidates),_.copy(store.roots));
 }
 
 export const compute_yet = async ():Promise<void>=>{
@@ -534,7 +544,7 @@ export const compute_yet = async ():Promise<void>=>{
                     val:balance
                 });
 
-                let refreshed_hash:string[] = [];
+                /*let refreshed_hash:string[] = [];
                 let get_not_refresh:T.Tx[] = [];
                 for(let block of _.copy(new_chain).slice().reverse()){
                     for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
@@ -542,8 +552,8 @@ export const compute_yet = async ():Promise<void>=>{
                         else if(_.copy(tx).meta.kind==="refresh") refreshed_hash.push(_.copy(tx).meta.data.request);
                         else if(get_not_refresh.length>=10) break;
                     }
-                }
-                const refreshes:T.Tx[] = _.copy(get_not_refresh);
+                }*/
+                const refreshes:T.Tx[] = _.copy(store.not_refreshed_tx);
                 const related = refreshes.filter(tx=>{
                     if(tx.meta.pre.flag===true){
                         const pres = TxSet.list_up_related(new_chain,TxSet.tx_to_pure(tx).meta,"pre");
@@ -559,14 +569,7 @@ export const compute_yet = async ():Promise<void>=>{
                 console.log(related);
                 if(related.length>0){
                     const req_tx:T.Tx = related[0];
-                    const index = (()=>{
-                        for(let block of _.copy(new_chain).slice().reverse()){
-                            let txs = block.txs.concat(block.natives).concat(block.units);
-                            let i = txs.map(tx=>tx.hash).indexOf(req_tx.hash);
-                            if(i!=-1) return block.meta.index;
-                        }
-                        return 0;
-                    })();
+                    const index = store.req_index_map[req_tx.hash] || 0;
                     const code:string = store.code[req_tx.meta.data.token];
                     await send_refresh_tx(_.copy(store.roots),store.secret,_.copy(req_tx),index,code,_.copy(new_chain));
                     //await send_blocks();
@@ -579,7 +582,7 @@ export const compute_yet = async ():Promise<void>=>{
                     })
                 }*/
 
-                const unit_store_values:T.Unit[][] = Object.values(store.unit_store);
+                /*const unit_store_values:T.Unit[][] = Object.values(store.unit_store);
                 const units_sum = unit_store_values.reduce((sum,us)=>sum+us.length,0);
                 const reversed_chain:T.Block[] = _.copy(new_chain).slice().reverse();
                 const refreshed = (()=>{
@@ -623,18 +626,18 @@ export const compute_yet = async ():Promise<void>=>{
                     const buy_units = refreshed;
                     await unit_buying(store.secret,_.copy(buy_units),_.copy(store.roots),_.copy(new_chain));
                     //await send_blocks();
-                }
+                }*/
                 console.log('yet:')
                 console.log(store.yet_data);
                 await send_blocks();
-                if(!store.replace_mode) await sleep(block_time);
+                //if(!store.replace_mode) await sleep(block_time);
                 //return await compute_yet();
             }
             else{
                 const now_yets:Data[] = _.copy(store.yet_data);
                 const reduced = now_yets.filter(d=>{
                     if(d.type==="tx"&&d.tx[0]!=null) return true;
-                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index!=block.meta.index;
+                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
                     else return false;
                 });
                 console.log(reduced);
@@ -649,7 +652,7 @@ export const compute_yet = async ():Promise<void>=>{
             const now_yets:Data[] = _.copy(store.yet_data);
             const reduced = now_yets.filter(d=>{
                 if(d.type==="tx"&&d.tx[0]!=null) return true;
-                else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index!=block.meta.index;
+                else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
                 else return false;
             });
             console.log(reduced);

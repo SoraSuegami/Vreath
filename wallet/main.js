@@ -246,11 +246,66 @@ const send_blocks = async () => {
     const date = new Date();
     if (!exports.store.state.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.state.secret) && last_micros.length <= con_1.max_blocks)
         await index_1.send_micro_block(_.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.chain), _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots), exports.store.state.unit_store);
-    else if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
+    if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
         await index_1.send_key_block(_.copy(exports.store.state.chain), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots));
     if (exports.store.state.first_request && !exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && _.copy(exports.store.state.chain).filter(b => b.natives.length > 0).length === 0) {
         await index_1.send_request_tx(exports.store.state.secret, "issue", con_1.native, [exports.store.getters.my_address, exports.store.getters.my_address], ["remit", JSON.stringify([0])], [], _.copy(exports.store.state.roots), _.copy(exports.store.state.chain));
     }
+};
+const compute_tx = async () => {
+    const now_yets = _.copy(exports.store.state.yet_data);
+    const data = now_yets.filter(d => d.type === "tx" && d.tx[0] != null)[0];
+    if (data != null) {
+        const target = _.copy(data.tx[0]);
+        //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
+        await index_1.tx_accept(_.copy(target), _.copy(exports.store.state.chain), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.unit_store));
+    }
+    let units = [];
+    const reduced = now_yets.filter(d => {
+        if (d.type === "tx" && d.tx[0] != null && data != null && d.tx[0].hash === data.tx[0].hash)
+            return false;
+        else if (d.type === "tx" && d.tx[0] != null) {
+            const t = _.copy(d.tx[0]);
+            if (t.meta.kind === "request")
+                return true;
+            for (let block of _.copy(exports.store.state.chain).slice(t.meta.data.index)) {
+                for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
+                    if (tx.meta.kind === "refresh" && tx.meta.data.index === t.meta.data.index && tx.meta.data.request === t.meta.data.request) {
+                        console.log('remove');
+                        const unit = {
+                            request: t.meta.data.request,
+                            index: t.meta.data.index,
+                            nonce: t.meta.nonce,
+                            payee: t.meta.data.payee,
+                            output: t.meta.data.output,
+                            unit_price: t.meta.unit_price
+                        };
+                        units.push(_.copy(unit));
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        else if (d.type === "block" && d.block[0] != null)
+            return true;
+        else
+            return false;
+    });
+    exports.store.commit("refresh_yet_data", _.copy(reduced));
+    const pre_unit_store = _.copy(exports.store.state.unit_store);
+    const new_unit_store = _.new_obj(pre_unit_store, (store) => {
+        units.forEach(unit => {
+            const pre = store[unit.request] || [];
+            if (store[unit.request] != null && store[unit.request].some(u => _.toHash(u.payee + u.request + u.index.toString()) === _.toHash(unit.payee + unit.request + unit.index.toString()) || u.output != unit.output))
+                return store;
+            store[unit.request] = pre.concat(unit);
+        });
+        return store;
+    });
+    exports.store.commit("refresh_unit_store", new_unit_store);
+    await sleep(con_1.block_time);
+    setImmediate(compute_yet);
 };
 const compute_yet = async () => {
     const data = _.copy(exports.store.state.yet_data[0]);
@@ -260,31 +315,29 @@ const compute_yet = async () => {
         await sleep(con_1.block_time);
         //return await compute_yet();
     }
-    else if (data.type === "tx" && data.tx.length > 0) {
-        const target = _.copy(data.tx[0]);
+    /*else if(data.type==="tx"&&data.tx.length>0){
+        const target:T.Tx = _.copy(data.tx[0]);
         //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
-        await index_1.tx_accept(_.copy(target), _.copy(exports.store.state.chain), _.copy(exports.store.state.roots), _.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.unit_store));
-        const now_yets = _.copy(exports.store.state.yet_data);
-        let units = [];
-        const reduced = now_yets.filter((d, i) => {
-            if (i === 0)
-                return false;
-            else if (d.type === "tx" && d.tx[0] != null) {
+        await tx_accept(_.copy(target),_.copy(store.state.chain),_.copy(store.state.roots),_.copy(store.state.pool),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.unit_store));
+        const now_yets:Data[] = _.copy(store.state.yet_data);
+        let units:T.Unit[] = [];
+        const reduced = now_yets.filter((d,i)=>{
+            if(i===0) return false;
+            else if(d.type==="tx"&&d.tx[0]!=null){
                 const t = _.copy(d.tx[0]);
-                if (t.meta.kind === "request")
-                    return true;
-                for (let block of _.copy(exports.store.state.chain).slice(t.meta.data.index)) {
-                    for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
-                        if (tx.meta.kind === "refresh" && tx.meta.data.index === t.meta.data.index && tx.meta.data.request === t.meta.data.request) {
-                            console.log('remove');
-                            const unit = {
-                                request: t.meta.data.request,
-                                index: t.meta.data.index,
-                                nonce: t.meta.nonce,
-                                payee: t.meta.data.payee,
-                                output: t.meta.data.output,
-                                unit_price: t.meta.unit_price
-                            };
+                if(t.meta.kind==="request") return true;
+                for(let block of _.copy(store.state.chain).slice(t.meta.data.index)){
+                    for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
+                        if(tx.meta.kind==="refresh"&&tx.meta.data.index===t.meta.data.index&&tx.meta.data.request===t.meta.data.request){
+                            console.log('remove')
+                            const unit:T.Unit = {
+                                request:t.meta.data.request,
+                                index:t.meta.data.index,
+                                nonce:t.meta.nonce,
+                                payee:t.meta.data.payee,
+                                output:t.meta.data.output,
+                                unit_price:t.meta.unit_price
+                            }
                             units.push(_.copy(unit));
                             return false;
                         }
@@ -292,24 +345,24 @@ const compute_yet = async () => {
                 }
                 return true;
             }
-            else if (d.type === "block" && d.block[0] != null)
-                return true;
-            else
-                return false;
+            else if(d.type==="block"&&d.block[0]!=null) return true;
+            else return false;
         });
-        exports.store.commit("refresh_yet_data", _.copy(reduced));
-        const pre_unit_store = _.copy(exports.store.state.unit_store);
-        const new_unit_store = _.new_obj(pre_unit_store, (store) => {
-            units.forEach(unit => {
-                const pre = store[unit.request] || [];
-                if (store[unit.request] != null && store[unit.request].some(u => _.toHash(u.payee + u.request + u.index.toString()) === _.toHash(unit.payee + unit.request + unit.index.toString()) || u.output != unit.output))
-                    return store;
-                store[unit.request] = pre.concat(unit);
-            });
-            return store;
-        });
-        exports.store.commit("refresh_unit_store", new_unit_store);
-        await sleep(con_1.block_time);
+        store.commit("refresh_yet_data",_.copy(reduced));
+        const pre_unit_store:{[key:string]:T.Unit[]} = _.copy(store.state.unit_store);
+        const new_unit_store:{[key:string]:T.Unit[]} = _.new_obj(
+            pre_unit_store,
+            (store)=>{
+                units.forEach(unit=>{
+                    const pre = store[unit.request] || [];
+                    if(store[unit.request]!=null&&store[unit.request].some(u=>_.toHash(u.payee+u.request+u.index.toString())===_.toHash(unit.payee+unit.request+unit.index.toString())||u.output!=unit.output)) return store;
+                    store[unit.request] = pre.concat(unit);
+                });
+                return store;
+            }
+        );
+        store.commit("refresh_unit_store",new_unit_store);
+        await sleep(block_time);
         //return await compute_yet();
         /*}
         else{
@@ -319,7 +372,7 @@ const compute_yet = async () => {
             const concated = reduced.concat(store.state.yet_data[0]);
             store.commit("refresh_yet_data",concated);
         }*/
-    }
+    /*}*/
     else if (data.type === "block" && data.block.length > 0) {
         const block = data.block[0];
         const chain = _.copy(exports.store.state.chain);
@@ -563,7 +616,7 @@ const compute_yet = async () => {
             }
         }
     }
-    setImmediate(compute_yet);
+    setImmediate(compute_tx);
 };
 (async () => {
     exports.json_write("./wallet/json/code.json", {});
@@ -572,6 +625,7 @@ const compute_yet = async () => {
     exports.json_write("./wallet/json/roots.json", gen.roots);
     exports.json_write("./wallet/json/candidates.json", gen.candidates);
     exports.json_write("./wallet/json/unit_store.json", {});
+    exports.json_write('./wallet/json/yet_data.json', []);
     const secret = readline_sync_1.default.question("What is your secret?");
     exports.store.commit('refresh_secret', secret);
     const gen_S_Trie = db_1.trie_ins("");
@@ -586,7 +640,8 @@ const compute_yet = async () => {
     }
     const balance = await index_1.get_balance(exports.store.getters.my_address);
     exports.store.commit("refresh_balance", balance);
-    setImmediate(compute_yet);
+    setImmediate(compute_tx);
+    //setImmediate(compute_yet);
 })();
 /*if(cluster.isMaster){
     (async ()=>{

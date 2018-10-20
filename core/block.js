@@ -41,7 +41,8 @@ exports.empty_block = () => {
     };
 };
 exports.search_key_block = (chain) => {
-    for (let block of chain.slice().reverse()) {
+    let block;
+    for (block of chain.slice().reverse()) {
         if (block.meta.kind === "key")
             return block;
     }

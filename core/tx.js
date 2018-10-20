@@ -174,11 +174,15 @@ const output_check = (type, base_states, output_raw, token_name_maxsize, StateDa
     }
 };
 const search_related_tx = (chain, hash, order, caller_hash) => {
-    for (let block of chain) {
-        let txs = block.txs.concat(block.natives).concat(block.units);
-        let i = txs.map(tx => tx.meta.purehash).indexOf(hash);
+    let block;
+    let txs;
+    let i;
+    let tx;
+    for (block of chain.slice().reverse()) {
+        txs = block.txs.concat(block.natives).concat(block.units);
+        i = txs.map(tx => tx.meta.purehash).indexOf(hash);
         if (i != -1) {
-            let tx = _.copy(txs[i]);
+            tx = _.copy(txs[i]);
             if (tx.meta.kind == "request" && tx.meta[order].flag === true && tx.meta[order].hash === caller_hash)
                 return tx.meta;
         }
@@ -724,9 +728,12 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
     const units = JSON.parse(inputs[1]);
     const unit_check = units.some(u => {
         const unit_ref_tx = (() => {
-            for (let block of _.copy(chain).slice().reverse()) {
-                let txs = block.txs.concat(block.natives).concat(block.units);
-                for (let tx of _.copy(txs)) {
+            let block;
+            let txs;
+            let tx;
+            for (block of _.copy(chain).slice().reverse()) {
+                txs = block.txs.concat(block.natives).concat(block.units);
+                for (tx of _.copy(txs)) {
                     if (tx.meta.kind === "refresh" && tx.meta.data.request === u.request && tx.meta.data.index === u.index)
                         return tx;
                 }

@@ -36,7 +36,8 @@ export const empty_block = ():T.Block=>{
 }
 
 export const search_key_block = (chain:T.Block[])=>{
-    for(let block of chain.slice().reverse()){
+    let block:T.Block;
+    for(block of chain.slice().reverse()){
         if(block.meta.kind==="key") return block;
     }
     return empty_block();

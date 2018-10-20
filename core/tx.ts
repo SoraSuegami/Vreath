@@ -194,7 +194,6 @@ export const list_up_related = (chain:T.Block[],tx:T.TxMeta,order:'pre'|'next'):
     if(order==='pre') return 'next';
     else return 'pre'
   })();
-  console.log(ori_order);
   const searched = search_related_tx(chain,tx[ori_order].hash,count_order,tx.purehash);
   if(searched.purehash===empty_tx_pure().meta.purehash||searched.kind!="request") return [];
   return [searched];
@@ -484,8 +483,6 @@ export const ValidRequestTx = (tx:T.Tx,my_version:number,native:string,unit:stri
   const base = tx_data.base;
   const input = tx_data.input;
   const raw_data = tx.raw.raw;
-  console.log(_.tx_fee(tx));
-  console.log(gas);
   const solvency_state:T.State = StateData.filter(s=>{
     return s.kind==="state"&&s.token===native&&s.owner===solvency&&new BigNumber(s.amount).minus(_.tx_fee(tx)).minus(gas).isGreaterThanOrEqualTo(0);
   })[0];
@@ -741,8 +738,6 @@ export const unit_code = (StateData:T.State[],req_tx:T.Tx,pre_tx:T.Tx,native:str
     )
   });
   const pre = _.copy(pre_tx);
-  console.log(pre);
-  console.log(chain);
   const pre_base = _.copy(pre).meta.data.base;
   if(req_tx.meta.data.token!=unit||req_tx.meta.data.type!="issue"&&req_tx.raw.raw[0]!="buy") return not_changed;
   const inputs = req_tx.raw.raw;
@@ -889,7 +884,6 @@ export const SignTx = (tx:T.Tx,my_private:string,my_pub:string)=>{
   const pub_keys = tx.meta.data.pub_key;
   const index = pub_keys.indexOf(my_pub);
   if(index===-1) return tx;
-  console.log(index);
   const sign = CryptoSet.SignData(tx.hash,my_private);
   return _.new_obj(
     tx,

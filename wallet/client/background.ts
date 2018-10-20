@@ -414,13 +414,12 @@ export const compute_yet = async ():Promise<void>=>{
         store.replaceing(false);
         await send_blocks();
         console.log('yet:')
-        console.log(store.yet_data);
+        console.log(store.yet_data.length);
         await sleep(block_time);
         //return await compute_yet();
     }
     else if(data.type==="tx"&&data.tx.length>0){
         const target:T.Tx = _.copy(data.tx[0]);
-        console.log(target);
         //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
         await tx_accept(_.copy(target),_.copy(store.chain),_.copy(store.roots),_.copy(store.pool),store.secret,_.copy(store.candidates),_.copy(store.unit_store));
         const now_yets:Data[] = _.copy(store.yet_data);
@@ -430,9 +429,8 @@ export const compute_yet = async ():Promise<void>=>{
             else return false;
         });
         store.refresh_yet_data(_.copy(reduced));
-        console.log(reduced);
         console.log('yet:')
-        console.log(store.yet_data);
+        console.log(store.yet_data.length);
         await sleep(block_time);
         //return await compute_yet();
         /*}
@@ -447,7 +445,6 @@ export const compute_yet = async ():Promise<void>=>{
     else if(data.type==="block"&&data.block.length>0){
         const block = data.block[0];
         const chain:T.Block[] = _.copy(store.chain);
-        console.log(block);
         if(block.meta.version>=compatible_version){
             if(block.meta.index>chain.length){
                 if(!store.replace_mode){
@@ -470,9 +467,6 @@ export const compute_yet = async ():Promise<void>=>{
                 if(store.replace_mode&&chain[chain.length-1].meta.index>=store.replace_index) store.replaceing(false);
                 await block_accept(_.copy(block),_.copy(store.chain),_.copy(store.candidates),_.copy(store.roots),_.copy(store.pool),_.copy(store.not_refreshed_tx),store.now_buying,_.copy(store.unit_store))
                 const new_chain:T.Block[] = _.copy(store.chain);
-                console.log(store.replace_mode)
-                console.log(chain.length)
-                console.log(new_chain.length)
                 if(store.replace_mode&&chain.length===new_chain.length) store.replaceing(false);
                 if(store.replace_mode){
                     postMessage({
@@ -565,8 +559,6 @@ export const compute_yet = async ():Promise<void>=>{
                     }
                     else return true;
                 });
-                console.log('not refreshed:')
-                console.log(related);
                 if(related.length>0){
                     const req_tx:T.Tx = related[0];
                     const index = store.req_index_map[req_tx.hash] || 0;
@@ -628,9 +620,9 @@ export const compute_yet = async ():Promise<void>=>{
                     //await send_blocks();
                 }*/
                 console.log('yet:')
-                console.log(store.yet_data);
+                console.log(store.yet_data.length);
                 await send_blocks();
-                //if(!store.replace_mode) await sleep(block_time);
+                if(!store.replace_mode||store.yet_data.length>10) await sleep(block_time);
                 //return await compute_yet();
             }
             else{
@@ -640,10 +632,9 @@ export const compute_yet = async ():Promise<void>=>{
                     else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
                     else return false;
                 });
-                console.log(reduced);
                 store.refresh_yet_data(_.copy(reduced));
                 console.log('yet:')
-                console.log(store.yet_data);
+                console.log(store.yet_data.length);
                 await sleep(block_time);
                 //return await compute_yet();
             }
@@ -655,10 +646,9 @@ export const compute_yet = async ():Promise<void>=>{
                 else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
                 else return false;
             });
-            console.log(reduced);
             store.refresh_yet_data(_.copy(reduced));
             console.log('yet:')
-            console.log(store.yet_data);
+            console.log(store.yet_data.length);
             await sleep(block_time);
             //return await compute_yet();
         }
@@ -695,11 +685,10 @@ client.subscribe('/checkchain',(address:string)=>{
 client.subscribe('/replacechain',async (chain:T.Block[])=>{
     console.log("replace:")
     if(!store.replace_mode&&store.check_mode){
-        console.log(chain);
         await check_chain(_.copy(chain),_.copy(store.chain),_.copy(store.pool),_.copy(store.code),store.secret,_.copy(store.unit_store));
     }
     store.checking(false);
-    console.log(store.yet_data);
+    console.log(store.yet_data.length);
     return 0;
 });
 
@@ -749,7 +738,6 @@ self.onmessage = async (event)=>{
                 const chain = read_db('chain',[gen.block]);
                 const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
                 const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-                console.log(last_address);
                 if(last_address!=store.my_address){
                     store.checking(true);
                     client.publish("/checkchain",last_address);
@@ -760,7 +748,6 @@ self.onmessage = async (event)=>{
                     key:'refresh_balance',
                     val:balance
                 });
-                console.log(balance);
                 setImmediate(compute_yet);
             case 'send_request':
                 const options = event.data;
@@ -775,6 +762,5 @@ self.onmessage = async (event)=>{
     }
     catch(e){
         console.log(e)
-        await compute_yet();
     }
 }

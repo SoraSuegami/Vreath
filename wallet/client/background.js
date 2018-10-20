@@ -370,13 +370,12 @@ exports.compute_yet = async () => {
         exports.store.replaceing(false);
         await send_blocks();
         console.log('yet:');
-        console.log(exports.store.yet_data);
+        console.log(exports.store.yet_data.length);
         await sleep(con_1.block_time);
         //return await compute_yet();
     }
     else if (data.type === "tx" && data.tx.length > 0) {
         const target = _.copy(data.tx[0]);
-        console.log(target);
         //if(target.meta.kind==="request"||target.meta.data.index<store.state.chain.length){
         await index_1.tx_accept(_.copy(target), _.copy(exports.store.chain), _.copy(exports.store.roots), _.copy(exports.store.pool), exports.store.secret, _.copy(exports.store.candidates), _.copy(exports.store.unit_store));
         const now_yets = _.copy(exports.store.yet_data);
@@ -389,9 +388,8 @@ exports.compute_yet = async () => {
                 return false;
         });
         exports.store.refresh_yet_data(_.copy(reduced));
-        console.log(reduced);
         console.log('yet:');
-        console.log(exports.store.yet_data);
+        console.log(exports.store.yet_data.length);
         await sleep(con_1.block_time);
         //return await compute_yet();
         /*}
@@ -406,7 +404,6 @@ exports.compute_yet = async () => {
     else if (data.type === "block" && data.block.length > 0) {
         const block = data.block[0];
         const chain = _.copy(exports.store.chain);
-        console.log(block);
         if (block.meta.version >= con_1.compatible_version) {
             if (block.meta.index > chain.length) {
                 if (!exports.store.replace_mode) {
@@ -431,9 +428,6 @@ exports.compute_yet = async () => {
                     exports.store.replaceing(false);
                 await index_1.block_accept(_.copy(block), _.copy(exports.store.chain), _.copy(exports.store.candidates), _.copy(exports.store.roots), _.copy(exports.store.pool), _.copy(exports.store.not_refreshed_tx), exports.store.now_buying, _.copy(exports.store.unit_store));
                 const new_chain = _.copy(exports.store.chain);
-                console.log(exports.store.replace_mode);
-                console.log(chain.length);
-                console.log(new_chain.length);
                 if (exports.store.replace_mode && chain.length === new_chain.length)
                     exports.store.replaceing(false);
                 if (exports.store.replace_mode) {
@@ -533,8 +527,6 @@ exports.compute_yet = async () => {
                     else
                         return true;
                 });
-                console.log('not refreshed:');
-                console.log(related);
                 if (related.length > 0) {
                     const req_tx = related[0];
                     const index = exports.store.req_index_map[req_tx.hash] || 0;
@@ -595,9 +587,10 @@ exports.compute_yet = async () => {
                     //await send_blocks();
                 }*/
                 console.log('yet:');
-                console.log(exports.store.yet_data);
+                console.log(exports.store.yet_data.length);
                 await send_blocks();
-                //if(!store.replace_mode) await sleep(block_time);
+                if (!exports.store.replace_mode || exports.store.yet_data.length > 10)
+                    await sleep(con_1.block_time);
                 //return await compute_yet();
             }
             else {
@@ -610,10 +603,9 @@ exports.compute_yet = async () => {
                     else
                         return false;
                 });
-                console.log(reduced);
                 exports.store.refresh_yet_data(_.copy(reduced));
                 console.log('yet:');
-                console.log(exports.store.yet_data);
+                console.log(exports.store.yet_data.length);
                 await sleep(con_1.block_time);
                 //return await compute_yet();
             }
@@ -628,10 +620,9 @@ exports.compute_yet = async () => {
                 else
                     return false;
             });
-            console.log(reduced);
             exports.store.refresh_yet_data(_.copy(reduced));
             console.log('yet:');
-            console.log(exports.store.yet_data);
+            console.log(exports.store.yet_data.length);
             await sleep(con_1.block_time);
             //return await compute_yet();
         }
@@ -662,11 +653,10 @@ exports.client.subscribe('/checkchain', (address) => {
 exports.client.subscribe('/replacechain', async (chain) => {
     console.log("replace:");
     if (!exports.store.replace_mode && exports.store.check_mode) {
-        console.log(chain);
         await index_1.check_chain(_.copy(chain), _.copy(exports.store.chain), _.copy(exports.store.pool), _.copy(exports.store.code), exports.store.secret, _.copy(exports.store.unit_store));
     }
     exports.store.checking(false);
-    console.log(exports.store.yet_data);
+    console.log(exports.store.yet_data.length);
     return 0;
 });
 exports.client.bind('transport:down', () => {
@@ -711,7 +701,6 @@ self.onmessage = async (event) => {
                 const chain = exports.read_db('chain', [gen.block]);
                 const last_block = _.copy(chain[chain.length - 1]) || _.copy(gen.block);
                 const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
-                console.log(last_address);
                 if (last_address != exports.store.my_address) {
                     exports.store.checking(true);
                     exports.client.publish("/checkchain", last_address);
@@ -722,7 +711,6 @@ self.onmessage = async (event) => {
                     key: 'refresh_balance',
                     val: balance
                 });
-                console.log(balance);
                 setImmediate(exports.compute_yet);
             case 'send_request':
                 const options = event.data;
@@ -737,6 +725,5 @@ self.onmessage = async (event) => {
     }
     catch (e) {
         console.log(e);
-        await exports.compute_yet();
     }
 };

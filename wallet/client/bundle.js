@@ -1205,7 +1205,6 @@ exports.list_up_related = (chain, tx, order) => {
         else
             return 'pre';
     })();
-    console.log(ori_order);
     const searched = search_related_tx(chain, tx[ori_order].hash, count_order, tx.purehash);
     if (searched.purehash === exports.empty_tx_pure().meta.purehash || searched.kind != "request")
         return [];
@@ -1488,8 +1487,6 @@ exports.ValidRequestTx = (tx, my_version, native, unit, request_mode, StateData,
     const base = tx_data.base;
     const input = tx_data.input;
     const raw_data = tx.raw.raw;
-    console.log(_.tx_fee(tx));
-    console.log(gas);
     const solvency_state = StateData.filter(s => {
         return s.kind === "state" && s.token === native && s.owner === solvency && new bignumber_js_1.BigNumber(s.amount).minus(_.tx_fee(tx)).minus(gas).isGreaterThanOrEqualTo(0);
     })[0];
@@ -1718,8 +1715,6 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
         });
     });
     const pre = _.copy(pre_tx);
-    console.log(pre);
-    console.log(chain);
     const pre_base = _.copy(pre).meta.data.base;
     if (req_tx.meta.data.token != unit || req_tx.meta.data.type != "issue" && req_tx.raw.raw[0] != "buy")
         return not_changed;
@@ -1861,7 +1856,6 @@ exports.SignTx = (tx, my_private, my_pub) => {
     const index = pub_keys.indexOf(my_pub);
     if (index === -1)
         return tx;
-    console.log(index);
     const sign = CryptoSet.SignData(tx.hash, my_private);
     return _.new_obj(tx, tx => {
         tx.raw.signature[index] = sign;
@@ -107190,7 +107184,6 @@ const Registration = {
     methods: {
         regist: function () {
             try {
-                console.log(this.secret);
                 store.commit('refresh_secret', this.secret);
                 store.commit('regist');
                 router.push({ path: '/' });
@@ -107311,7 +107304,6 @@ const Account = {
     computed: {
         pub_key: function () {
             try {
-                console.log(CryptoSet.PublicFromPrivate(this.secret));
                 return CryptoSet.PublicFromPrivate(this.secret);
             }
             catch (e) {
@@ -107322,7 +107314,6 @@ const Account = {
             if (this.pub_key === "")
                 return "";
             try {
-                console.log(CryptoSet.GenereateAddress(con_1.native, this.pub_key));
                 return CryptoSet.GenereateAddress(con_1.native, this.pub_key);
             }
             catch (e) {

@@ -22,7 +22,6 @@ const vuex_1 = __importDefault(require("vuex"));
 const _ = __importStar(require("../core/basic"));
 const CryptoSet = __importStar(require("../core/crypto_set"));
 const StateSet = __importStar(require("../core/state"));
-const TxSet = __importStar(require("../core/tx"));
 const BlockSet = __importStar(require("../core/block"));
 const bignumber_js_1 = __importDefault(require("bignumber.js"));
 const db_1 = require("./client/db");
@@ -246,7 +245,7 @@ const send_blocks = async () => {
     const date = new Date();
     if (!exports.store.state.replace_mode && _.reduce_pub(last_key.meta.validatorPub) === CryptoSet.PublicFromPrivate(exports.store.state.secret) && last_micros.length <= con_1.max_blocks)
         await index_1.send_micro_block(_.copy(exports.store.state.pool), exports.store.state.secret, _.copy(exports.store.state.chain), _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots), exports.store.state.unit_store);
-    if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
+    else if (!exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && date.getTime() - last_key.meta.timestamp > con_1.block_time * con_1.max_blocks)
         await index_1.send_key_block(_.copy(exports.store.state.chain), exports.store.state.secret, _.copy(exports.store.state.candidates), _.copy(exports.store.state.roots));
     if (exports.store.state.first_request && !exports.store.state.replace_mode && unit_state != null && unit_amount > 0 && _.copy(exports.store.state.chain).filter(b => b.natives.length > 0).length === 0) {
         await index_1.send_request_tx(exports.store.state.secret, "issue", con_1.native, [exports.store.getters.my_address, exports.store.getters.my_address], ["remit", JSON.stringify([0])], [], _.copy(exports.store.state.roots), _.copy(exports.store.state.chain));
@@ -506,46 +505,41 @@ const compute_yet = async () => {
                 }
                 const balance = await index_1.get_balance(exports.store.getters.my_address);
                 exports.store.commit("refresh_balance", balance);
-                let refreshed_hash = [];
-                let get_not_refresh = [];
-                for (let block of _.copy(new_chain).slice().reverse()) {
-                    for (let tx of _.copy(block.txs.concat(block.natives).concat(block.units))) {
-                        if (_.copy(tx).meta.kind === "request" && refreshed_hash.indexOf(_.copy(tx).hash) === -1)
-                            get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx), _.copy(block))));
-                        else if (_.copy(tx).meta.kind === "refresh")
-                            refreshed_hash.push(_.copy(tx).meta.data.request);
-                        else if (get_not_refresh.length >= 10)
-                            break;
+                /*let refreshed_hash:string[] = [];
+                let get_not_refresh:T.Tx[] = [];
+                for(let block of _.copy(new_chain).slice().reverse()){
+                    for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
+                        if(_.copy(tx).meta.kind==="request"&&refreshed_hash.indexOf(_.copy(tx).hash)===-1) get_not_refresh.push(_.copy(TxSet.pure_to_tx(_.copy(tx),_.copy(block))));
+                        else if(_.copy(tx).meta.kind==="refresh") refreshed_hash.push(_.copy(tx).meta.data.request);
+                        else if(get_not_refresh.length>=10) break;
                     }
                 }
-                const refreshes = _.copy(get_not_refresh);
-                const related = refreshes.filter(tx => {
-                    if (tx.meta.pre.flag === true) {
-                        const pres = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "pre");
-                        return pres.length > 0;
+                const refreshes:T.Tx[] = _.copy(get_not_refresh);
+                const related = refreshes.filter(tx=>{
+                    if(tx.meta.pre.flag===true){
+                        const pres = TxSet.list_up_related(new_chain,TxSet.tx_to_pure(tx).meta,"pre");
+                        return pres.length>0;
                     }
-                    else if (tx.meta.next.flag === true) {
-                        const nexts = TxSet.list_up_related(new_chain, TxSet.tx_to_pure(tx).meta, "next");
-                        return nexts.length > 0;
+                    else if(tx.meta.next.flag===true){
+                        const nexts = TxSet.list_up_related(new_chain,TxSet.tx_to_pure(tx).meta,"next");
+                        return nexts.length>0;
                     }
-                    else
-                        return true;
+                    else return true;
                 });
-                if (related.length > 0) {
-                    const req_tx = related[0];
-                    const index = (() => {
-                        for (let block of _.copy(new_chain).slice().reverse()) {
+                if(related.length>0){
+                    const req_tx:T.Tx = related[0];
+                    const index = (()=>{
+                        for(let block of _.copy(new_chain).slice().reverse()){
                             let txs = block.txs.concat(block.natives).concat(block.units);
-                            let i = txs.map(tx => tx.hash).indexOf(req_tx.hash);
-                            if (i != -1)
-                                return block.meta.index;
+                            let i = txs.map(tx=>tx.hash).indexOf(req_tx.hash);
+                            if(i!=-1) return block.meta.index;
                         }
                         return 0;
                     })();
-                    const code = exports.store.state.code[req_tx.meta.data.token];
+                    const code:string = store.state.code[req_tx.meta.data.token];
                     //await send_refresh_tx(_.copy(store.state.roots),store.state.secret,_.copy(req_tx),index,code,_.copy(new_chain));
                     //await send_blocks();
-                }
+                }*/
                 /*if(refs_pure.length>0){
                     await P.forEach(refs_pure, async (pure:T.TxPure)=>{
                         const req = pure.meta.data.request;

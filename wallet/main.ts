@@ -261,7 +261,7 @@ const send_blocks = async ()=>{
     const date = new Date();
 
     if(!store.state.replace_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.state.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.state.pool),store.state.secret,_.copy(store.state.chain),_.copy(store.state.candidates),_.copy(store.state.roots),store.state.unit_store);
-    if(!store.state.replace_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.state.chain),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.roots));
+    else if(!store.state.replace_mode&&unit_state!=null&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.state.chain),store.state.secret,_.copy(store.state.candidates),_.copy(store.state.roots));
 
     if(store.state.first_request&&!store.state.replace_mode&&unit_state!=null&&unit_amount>0&&_.copy(store.state.chain).filter(b=>b.natives.length>0).length===0) {
         await send_request_tx(store.state.secret,"issue",native,[store.getters.my_address,store.getters.my_address],["remit",JSON.stringify([0])],[],_.copy(store.state.roots),_.copy(store.state.chain));
@@ -518,7 +518,7 @@ const compute_yet = async ():Promise<void>=>{
                 const balance = await get_balance(store.getters.my_address);
                 store.commit("refresh_balance",balance);
 
-                let refreshed_hash:string[] = [];
+                /*let refreshed_hash:string[] = [];
                 let get_not_refresh:T.Tx[] = [];
                 for(let block of _.copy(new_chain).slice().reverse()){
                     for(let tx of _.copy(block.txs.concat(block.natives).concat(block.units))){
@@ -552,7 +552,7 @@ const compute_yet = async ():Promise<void>=>{
                     const code:string = store.state.code[req_tx.meta.data.token];
                     //await send_refresh_tx(_.copy(store.state.roots),store.state.secret,_.copy(req_tx),index,code,_.copy(new_chain));
                     //await send_blocks();
-                }
+                }*/
                 /*if(refs_pure.length>0){
                     await P.forEach(refs_pure, async (pure:T.TxPure)=>{
                         const req = pure.meta.data.request;

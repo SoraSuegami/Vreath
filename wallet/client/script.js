@@ -292,7 +292,6 @@ const Registration = {
     methods: {
         regist: function () {
             try {
-                console.log(this.secret);
                 store.commit('refresh_secret', this.secret);
                 store.commit('regist');
                 router.push({ path: '/' });
@@ -413,7 +412,6 @@ const Account = {
     computed: {
         pub_key: function () {
             try {
-                console.log(CryptoSet.PublicFromPrivate(this.secret));
                 return CryptoSet.PublicFromPrivate(this.secret);
             }
             catch (e) {
@@ -424,7 +422,6 @@ const Account = {
             if (this.pub_key === "")
                 return "";
             try {
-                console.log(CryptoSet.GenereateAddress(con_1.native, this.pub_key));
                 return CryptoSet.GenereateAddress(con_1.native, this.pub_key);
             }
             catch (e) {

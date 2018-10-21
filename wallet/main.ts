@@ -107,14 +107,14 @@ client.subscribe('/data',async (data:Data)=>{
 client.subscribe('/checkchain',(address:string)=>{
     console.log('checked')
     console.log(store.state.check_mode)
-    if(store.getters.my_address===address) client.publish('/replacechain',_.copy(store.state.chain));
+    if(!store.state.check_mode&&!store.state.replace_mode&&!store.state.return_chain) store.commit('refresh_return_chain',true);
     return 0;
 });
 
 client.subscribe('/replacechain',async (chain:T.Block[])=>{
     try{
         console.log("replace:")
-        if(!store.state.replace_mode&&store.state.check_mode){
+        if(!store.state.replace_mode&&store.state.check_mode&&!store.state.return_chain){
             await check_chain(_.copy(chain),_.copy(store.state.chain),_.copy(store.state.pool),_.copy(store.state.code),store.state.secret,_.copy(store.state.unit_store));
         }
         store.commit('checking',false);
@@ -148,7 +148,8 @@ export const store = new Vuex.Store({
         not_refreshed_tx:[],
         now_buying:false,
         now_refreshing:[],
-        first_request:true
+        first_request:true,
+        return_chain:false
     },
     mutations:{
         refresh_pool(state,pool:T.Pool){
@@ -238,6 +239,9 @@ export const store = new Vuex.Store({
         },
         requested(state){
             state.first_request = false;
+        },
+        refresh_return_chain(state,bool:boolean){
+            state.return_chain = bool;
         }
     },
     getters:{
@@ -618,6 +622,10 @@ const compute_yet = async ():Promise<void>=>{
                 //return await compute_yet();
             }
         }
+    }
+    if(store.state.return_chain){
+        client.publish('/replacechain',_.copy(store.state.chain));
+        store.commit('refresh_return_chain',false);
     }
     setImmediate(compute_tx);
 }

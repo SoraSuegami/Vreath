@@ -97,14 +97,14 @@ exports.client.subscribe('/data', async (data) => {
 exports.client.subscribe('/checkchain', (address) => {
     console.log('checked');
     console.log(exports.store.state.check_mode);
-    if (exports.store.getters.my_address === address)
-        exports.client.publish('/replacechain', _.copy(exports.store.state.chain));
+    if (!exports.store.state.check_mode && !exports.store.state.replace_mode && !exports.store.state.return_chain)
+        exports.store.commit('refresh_return_chain', true);
     return 0;
 });
 exports.client.subscribe('/replacechain', async (chain) => {
     try {
         console.log("replace:");
-        if (!exports.store.state.replace_mode && exports.store.state.check_mode) {
+        if (!exports.store.state.replace_mode && exports.store.state.check_mode && !exports.store.state.return_chain) {
             await index_1.check_chain(_.copy(chain), _.copy(exports.store.state.chain), _.copy(exports.store.state.pool), _.copy(exports.store.state.code), exports.store.state.secret, _.copy(exports.store.state.unit_store));
         }
         exports.store.commit('checking', false);
@@ -133,7 +133,8 @@ exports.store = new vuex_1.default.Store({
         not_refreshed_tx: [],
         now_buying: false,
         now_refreshing: [],
-        first_request: true
+        first_request: true,
+        return_chain: false
     },
     mutations: {
         refresh_pool(state, pool) {
@@ -224,6 +225,9 @@ exports.store = new vuex_1.default.Store({
         },
         requested(state) {
             state.first_request = false;
+        },
+        refresh_return_chain(state, bool) {
+            state.return_chain = bool;
         }
     },
     getters: {
@@ -609,6 +613,10 @@ const compute_yet = async () => {
                 //return await compute_yet();
             }
         }
+    }
+    if (exports.store.state.return_chain) {
+        exports.client.publish('/replacechain', _.copy(exports.store.state.chain));
+        exports.store.commit('refresh_return_chain', false);
     }
     setImmediate(compute_tx);
 };

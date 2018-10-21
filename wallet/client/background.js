@@ -121,6 +121,7 @@ class Store {
         this._now_buying = false;
         this._now_refreshing = [];
         this._req_index_map = {};
+        this._return_chain = false;
     }
     get code() {
         return this._code;
@@ -169,6 +170,9 @@ class Store {
     }
     get req_index_map() {
         return this._req_index_map;
+    }
+    get return_chain() {
+        return this._return_chain;
     }
     get my_address() {
         return CryptoSet.GenereateAddress(con_1.native, CryptoSet.PublicFromPrivate(this._secret)) || "";
@@ -342,6 +346,9 @@ class Store {
     }
     del_req_index(key) {
         delete this._req_index_map[key];
+    }
+    refresh_return_chain(bool) {
+        this._return_chain = bool;
     }
 }
 exports.Store = Store;
@@ -627,6 +634,10 @@ exports.compute_yet = async () => {
             //return await compute_yet();
         }
     }
+    if (exports.store.return_chain) {
+        exports.client.publish('/replacechain', _.copy(exports.store.chain));
+        exports.store.refresh_return_chain(false);
+    }
     setImmediate(exports.compute_yet);
 };
 const port = peer_list_1.peer_list[0].port || "57750";
@@ -646,13 +657,13 @@ exports.client.subscribe('/data', async (data) => {
 exports.client.subscribe('/checkchain', (address) => {
     console.log('checked');
     console.log(exports.store.check_mode);
-    if (exports.store.my_address === address)
-        exports.client.publish('/replacechain', _.copy(exports.store.chain));
+    if (!exports.store.check_mode && !exports.store.replace_mode && !exports.store.return_chain)
+        exports.store.refresh_return_chain(true); //client.publish('/replacechain',_.copy(store.chain));
     return 0;
 });
 exports.client.subscribe('/replacechain', async (chain) => {
-    console.log("replace:");
-    if (!exports.store.replace_mode && exports.store.check_mode) {
+    if (!exports.store.replace_mode && exports.store.check_mode && !exports.store.return_chain) {
+        console.log("replace:");
         await index_1.check_chain(_.copy(chain), _.copy(exports.store.chain), _.copy(exports.store.pool), _.copy(exports.store.code), exports.store.secret, _.copy(exports.store.unit_store));
     }
     exports.store.checking(false);

@@ -161,6 +161,7 @@ export class Store {
     private _now_buying:boolean = false;
     private _now_refreshing:string[] = [];
     private _req_index_map:{[key:string]:number} = {};
+    private _return_chain:boolean = false;
 
     get code(){
         return this._code;
@@ -209,6 +210,9 @@ export class Store {
     }
     get req_index_map(){
         return this._req_index_map
+    }
+    get return_chain(){
+        return this._return_chain
     }
     get my_address(){
         return CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(this._secret)) || ""
@@ -382,6 +386,9 @@ export class Store {
     }
     del_req_index(key:string){
         delete this._req_index_map[key];
+    }
+    refresh_return_chain(bool:boolean){
+        this._return_chain = bool;
     }
 
 }
@@ -653,6 +660,10 @@ export const compute_yet = async ():Promise<void>=>{
             //return await compute_yet();
         }
     }
+    if(store.return_chain){
+        client.publish('/replacechain',_.copy(store.chain));
+        store.refresh_return_chain(false);
+    }
     setImmediate(compute_yet);
 }
 
@@ -678,13 +689,13 @@ client.subscribe('/data',async (data:Data)=>{
 client.subscribe('/checkchain',(address:string)=>{
     console.log('checked')
     console.log(store.check_mode)
-    if(store.my_address===address) client.publish('/replacechain',_.copy(store.chain));
+    if(!store.check_mode&&!store.replace_mode&&!store.return_chain) store.refresh_return_chain(true);//client.publish('/replacechain',_.copy(store.chain));
     return 0;
 });
 
 client.subscribe('/replacechain',async (chain:T.Block[])=>{
-    console.log("replace:")
-    if(!store.replace_mode&&store.check_mode){
+    if(!store.replace_mode&&store.check_mode&&!store.return_chain){
+        console.log("replace:")
         await check_chain(_.copy(chain),_.copy(store.chain),_.copy(store.pool),_.copy(store.code),store.secret,_.copy(store.unit_store));
     }
     store.checking(false);

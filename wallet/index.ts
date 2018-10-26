@@ -6,16 +6,26 @@ import * as TxSet from '../core/tx'
 import * as BlockSet from '../core/block'
 import * as StateSet from '../core/state'
 import * as P from 'p-iteration'
+import level from 'level-browserify'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate, pow_target,pos_diff,all_issue} from './con'
 import { Tx_to_Pool } from '../core/tx_pool';
 import {store} from './main'
-import {trie_ins} from './client/db'
 import * as gen from '../genesis/index';
 import { RunVM } from '../core/code';
 import { client } from './main'
 import {BigNumber} from 'bignumber.js'
 
 
+const db = level('./db');
+export const trie_ins = (root:string)=>{
+    try{
+        return new Trie(db,root);
+    }
+    catch(e){
+        console.log(e);
+        return new Trie(db);
+    }
+}
 
 const output_keys = (tx:T.Tx)=>{
     if(tx.meta.kind==="request") return [];
@@ -82,11 +92,6 @@ export const locations_for_tx = async (tx:T.Tx,chain:T.Block[],L_Trie:Trie)=>{
         }
         else return array.concat(getted);
     },[]);
-    /*Object.values(await L_Trie.filter(key=>{
-        if(target.meta.data.base.indexOf(key)!=-1) return true;
-        else if(target.meta.data.solvency===key&&target.meta.data.base.indexOf(key)===-1) return true;
-        else return false;
-    }));*/
     return result;
 }
 
@@ -97,35 +102,6 @@ export const states_for_block = async (block:T.Block,chain:T.Block[],S_Trie:Trie
     const unit_validator_state:T.State = await S_Trie.get(unit_validator) || StateSet.CreateState(0,unit_validator,unit);
     const targets = block.txs.concat(block.natives).concat(block.units).map(pure=>TxSet.pure_to_tx(pure,block));
     const tx_states:T.State[] = await P.reduce(targets,async (result:T.State[],tx:T.Tx)=>result.concat(await states_for_tx(tx,chain,S_Trie)),[]);
-    /*const native_states:T.State[] = await P.map(block.natives,async (tx:T.Tx)=>{
-        const key = (()=>{
-            if(tx.meta.kind==="request") return tx.hash;
-            else return tx.meta.data.request;
-        })()
-        const b = (()=>{
-            if(tx.meta.kind==="request") return block;
-            else return chain[tx.meta.data.index] || BlockSet.empty_block();
-        })();
-        const i = b.natives.map(t=>t.hash).indexOf(key);
-        const raw = b.raws[b.txs.length+i] || TxSet.empty_tx().raw;
-        return await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],native,0);
-    });
-    const unit_states:T.State[] = await P.reduce(block.units,async (result:T.State[],tx:T.Tx)=>{
-        const key = (()=>{
-            if(tx.meta.kind==="request") return tx.hash;
-            else return tx.meta.data.request;
-        })()
-        const b = (()=>{
-            if(tx.meta.kind==="request") return block;
-            else return chain[tx.meta.data.index] || BlockSet.empty_block();
-        })();
-        const i = b.units.map(t=>t.hash).indexOf(key);
-        const raw = b.raws[b.txs.length+b.natives.length+i] || TxSet.empty_tx().raw;
-        const remiter:T.State = await S_Trie.get(raw.raw[1])||StateSet.CreateState(0,raw.raw[1],native,0);
-        const units:T.Unit[] = JSON.parse(raw.raw[2]||"[]");
-        const sellers:T.State[] = await P.map(units, async (u:T.Unit)=>await S_Trie.get(u.payee)||StateSet.CreateState(0,u.payee,native,0));
-        return result.concat(sellers).concat(remiter);
-    },[]) || [];*/
     const all_units:T.State[] = Object.values(await S_Trie.filter((key,state:T.State)=>{
         return state.kind==="state"&&state.token===unit;
     }));
@@ -469,12 +445,17 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         })
         const relate_pre_tx = (()=>{
             if(req_tx.meta.pre.flag===false) return TxSet.empty_tx();
-            for(let block of _.copy(chain).slice().reverse()){
-                let txs = _.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
-                let hashes = _.copy(txs).map(tx=>tx.meta.purehash);
-                let i = hashes.indexOf(req_tx.meta.pre.hash);
+            let block:T.Block;
+            let txs:T.TxPure[];
+            let hashes:string[];
+            let i:number;
+            let tx:T.TxPure;
+            for(block of _.copy(chain).slice().reverse()){
+                txs = _.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
+                hashes = _.copy(txs).map(tx=>tx.meta.purehash);
+                i = hashes.indexOf(req_tx.meta.pre.hash);
                 if(i!=-1){
-                    let tx = _.copy(_.copy(txs)[i]);
+                    tx = _.copy(_.copy(txs)[i]);
                     if(tx.meta.kind=="request"&&tx.meta.next.flag===true&&tx.meta.next.hash===req_tx.meta.purehash){
                         return TxSet.pure_to_tx(_.copy(tx),_.copy(block));
                     }
@@ -484,12 +465,17 @@ export const send_refresh_tx = async (roots:{[key:string]:string},secret:string,
         })();
         const relate_next_tx = (()=>{
             if(req_tx.meta.next.flag===false) return TxSet.empty_tx();
-            for(let block of _.copy(chain).slice().reverse()){
-                let txs =_.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
-                let hashes = _.copy(txs).map(tx=>tx.meta.purehash);
-                let i = hashes.indexOf(req_tx.meta.next.hash);
+            let block:T.Block;
+            let txs:T.TxPure[];
+            let hashes:string[];
+            let i:number;
+            let tx:T.TxPure;
+            for(block of _.copy(chain).slice().reverse()){
+                txs =_.copy(_.copy(block).txs.concat(_.copy(block).natives).concat(_.copy(block).units));
+                hashes = _.copy(txs).map(tx=>tx.meta.purehash);
+                i = hashes.indexOf(req_tx.meta.next.hash);
                 if(i!=-1){
-                    let tx = _.copy(_.copy(txs)[i]);
+                    tx = _.copy(_.copy(txs)[i]);
                     if(tx.meta.kind=="request"&&tx.meta.pre.flag===true&&tx.meta.pre.hash===req_tx.meta.purehash){
                         return TxSet.pure_to_tx(_.copy(tx),_.copy(block));
                     }

@@ -20,6 +20,7 @@ import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_si
 import * as P from 'p-iteration'
 import readlineSync from 'readline-sync'
 import * as cluster from 'cluster'
+import socket from 'socket.io'
 
 
 export const port = process.env.vreath_port || "57750";
@@ -28,7 +29,7 @@ export const ip = process.env.vreath_ip || "localhost";
 
 const app = express();
 const server = http.createServer(app);
-const bayeux = new faye.NodeAdapter({mount: '/vreath'});
+const bayeux = new faye.NodeAdapter({mount: '/pubsub'});
 bayeux.addWebsocketExtension(deflate);
 bayeux.attach(server);
 
@@ -77,7 +78,16 @@ server.listen(port);
 const level_db = levelup(leveldown('./wallet/db'));
 export const store = new Store(true,json_read,json_write);
 
-export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
+const io = socket(server);
+
+io.on('connection',async (socket)=>{
+    socket.on('checkchain',async ()=>{
+        console.log('checked')
+        io.to(socket.id).emit('replacechain',_.copy(store.chain));
+    });
+});
+
+//export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
 
 server.on('close',()=>{
     console.log('lose connection');
@@ -104,7 +114,7 @@ process.on('SIGINT',()=>{
     process.exit(1);
 });
 
-client.subscribe('/data',async (data:Data)=>{
+/*client.subscribe('/data',async (data:Data)=>{
     if(data.type==="block") store.push_yet_data(_.copy(data));
     const S_Trie = trie_ins(store.roots.stateroot);
     const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.secret));
@@ -130,7 +140,7 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
         return 0;
     }
     catch(e){throw new Error(e);}
-});
+});*/
 
 (async ()=>{
     json_write("code",{});
@@ -140,19 +150,19 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     json_write("candidates",gen.candidates);
     json_write("unit_store",{});
     json_write('yet_data',[]);
-    set_config(level_db,store,client);
+    set_config(level_db,store);
     const secret = readlineSync.question("What is your secret?");
     store.refresh_secret(secret);
     const gen_S_Trie = trie_ins("");
     await P.forEach(gen.state,async (s:T.State)=>{
         await gen_S_Trie.put(s.owner,s);
     });
-    const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
+    /*const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
     const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
     if(last_address!=store.my_address){
         store.checking(true);
         client.publish("/checkchain",last_address);
-    }
+    }*/
     const balance = await get_balance(store.my_address);
     store.refresh_balance(balance);
     setImmediate(compute_tx);

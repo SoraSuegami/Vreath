@@ -1,24 +1,13 @@
 import {Store,Data,set_config,compute_tx,get_balance,send_request_tx,trie_ins,check_chain} from './index'
 import * as T from '../../core/types'
-import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
-import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate,compatible_version} from '../con'
-import {peer_list} from './peer_list'
-import Vue from 'vue'
-import Vuex from 'vuex'
-import AtComponents from 'at-ui'
-import VueRouter from 'vue-router'
 import * as gen from '../../genesis/index';
-import vm from 'js-vm';
 import * as P from 'p-iteration'
-import faye from 'faye'
-import * as TxSet from '../../core/tx'
-import * as BlockSet from '../../core/block'
-import * as StateSet from '../../core/state'
-import BigNumber from 'bignumber.js';
-import { read } from 'fs';
 import level from 'level-browserify'
-import axios from 'axios'
+import {peer_list} from './peer_list'
+import io from 'socket.io-client'
+import idb from 'idb'
+import {get,put} from './db'
 
 
 /*if('serviceWorker' in navigator){
@@ -47,6 +36,15 @@ export type Installed = {
 const storeName = 'vreath';
 let db;
 
+const port = peer_list[0].port || "57750";
+const ip = peer_list[0].ip || "localhost";
+console.log(ip)
+
+//const socket = io('http://'+ip+':'+port);
+
+
+
+
 /*const open_req = indexedDB.open(storeName,1);
 open_req.onupgradeneeded = (event)=>{
     db = open_req.result;
@@ -58,56 +56,39 @@ open_req.onsuccess = (event)=>{
     db.close();
 }
 open_req.onerror = ()=>console.log("fail to open db");*/
-
-
-export const read_db = <T>(key:string,def:T)=>{
-    const req = indexedDB.open('vreath',2);
-    let result = def;
-    req.onerror = ()=>console.log('fail to open db');
-    req.onupgradeneeded = (event)=>{
-        db = req.result;
-        db.createObjectStore(storeName,{keyPath:'id'});
-    }
-    req.onsuccess = (event)=>{
-        db = req.result;
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const get_req = store.get(key);
-        get_req.onsuccess = ()=>{
-            result = get_req.source.val
-        }
-        db.close();
-    }
-    return result;
+/*export const read_db = async <T>(key:string,def:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const result = await store.get(key)
+    db.close();
+    if(result==null) return def;
+    return result.val || def;
 }
 
-export const write_db = <T>(key:string,val:T)=>{
-    const req = indexedDB.open('vreath',2);
-    req.onerror = ()=>console.log('fail to open db');
-    req.onupgradeneeded = (event)=>{
-        db = req.result;
-        db.createObjectStore(storeName,{keyPath:'id'});
-    }
-    req.onsuccess = (event)=>{
-        db = req.result;
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const data = {
-            id:key,
-            val:val
-        };
-        const put_req = store.put(data);
-    }
-}
+export const write_db = async <T>(key:string,val:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    await store.put({
+        id:key,
+        val:val
+    });
+    return tx.complete;
+}*/
 
-export const delete_db = ()=>{
+/*export const delete_db = ()=>{
     const del_db_vreath = indexedDB.deleteDatabase('vreath');
     del_db_vreath.onsuccess = ()=>console.log('db delete success');
     del_db_vreath.onerror = ()=>console.log('db delete error');
     const del_db_level = indexedDB.deleteDatabase('level-js-./db');
     del_db_level.onsuccess = ()=>console.log('db delete success');
     del_db_level.onerror = ()=>console.log('db delete error');
-}
+}*/
 
 
 
@@ -135,25 +116,14 @@ const def_apps:{[key:string]:Installed} = {
 
 
 
-const level_db = level('./db')
+const level_db = level('./trie')
 
 
-export const store = new Store(false,read_db,write_db);
-
-
-
+export const store = new Store(false,get,put);
 
 
 
-
-/*const port = peer_list[0].port || "57750";
-const ip = peer_list[0].ip || "localhost";
-console.log(ip)
-
-
-export let client = new faye.Client('http://'+ip+':'+port+'/vreath');
-
-client.subscribe('/data',async (data:Data)=>{
+/*client.subscribe('/data',async (data:Data)=>{
     if(data.type==="block") store.push_yet_data(_.copy(data));
     const S_Trie = trie_ins(store.roots.stateroot);
     const unit_address = CryptoSet.GenereateAddress(unit,CryptoSet.PublicFromPrivate(store.secret));
@@ -183,8 +153,8 @@ client.bind('transport:down', ()=>{
     console.log('lose connection');
     delete_db();
     client = new faye.Client('http://'+ip+':'+port+'/vreath');
-});
-*/
+});*/
+
 /*(async ()=>{
     const gen_S_Trie = trie_ins("");
     await P.forEach(gen.state,async (s:T.State)=>{
@@ -213,24 +183,26 @@ self.onmessage = async (event)=>{
             case 'commit':
                 const key:string = event.data.key;
                 const val:any = event.data.val;
-                if(key!=null) store[key](val);
+                if(key!=null&&store[key]!=null) store[key](val);
                 break;
             case 'start':
-                delete_db();
-                set_config(level_db,store);
+                store.refresh_pool({});
+                store.replace_chain([gen.block]);
+                store.refresh_roots(gen.roots);
+                store.refresh_candidates(gen.candidates);
+                store.refresh_unit_store({});
+                store.refresh_yet_data([]);
+                await set_config(level_db,store);
                 const gen_S_Trie = trie_ins("");
                 await P.forEach(gen.state,async (s:T.State)=>{
                     await gen_S_Trie.put(s.owner,s);
                 });
-                /*const chain = read_db('chain',[gen.block]);
-                const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
-                const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-                if(last_address!=store.my_address){
-                    store.checking(true);
-                    client.publish("/checkchain",last_address);
-                }*/
                 const balance =  await get_balance(store.my_address);
                 store.refresh_balance(balance);
+                postMessage({
+                    key:'refresh_secret',
+                    val:store.secret
+                });
                 postMessage({
                     key:'refresh_balance',
                     val:balance
@@ -248,6 +220,7 @@ self.onmessage = async (event)=>{
                     amount:got_balance
                 });
                 break;
+            default:break;
         }
     }
     catch(e){

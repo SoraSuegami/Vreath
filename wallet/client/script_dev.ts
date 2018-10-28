@@ -2,6 +2,7 @@ import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
 import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate,compatible_version} from '../con'
+import {get,put} from './db'
 import {peer_list} from './peer_list'
 import Vue from 'vue'
 import Vuex from 'vuex'
@@ -15,6 +16,7 @@ import { setInterval } from 'timers';
 import * as TxSet from '../../core/tx'
 import * as BlockSet from '../../core/block'
 import * as StateSet from '../../core/state'
+import idb from 'idb'
 import BigNumber from 'bignumber.js';
 import {Chart} from 'chart.js'
 import {Bar, mixins} from 'vue-chartjs'
@@ -66,53 +68,39 @@ const codes = {
 }
 
 const storeName = 'vreath';
-let db;
+let db :IDBDatabase;
+let db_ver = 1;
 
-export const read_db = <T>(key:string,def:T)=>{
-    const req = indexedDB.open('vreath',2);
-    let result = def;
-    req.onerror = ()=>console.log('fail to open db');
-    req.onupgradeneeded = (event)=>{
-        db = req.result;
-        db.createObjectStore(storeName,{keyPath:'id'});
-    }
-    req.onsuccess = (event)=>{
-        db = req.result;
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const get_req = store.get(key);
-        get_req.onsuccess = ()=>{
-            result = get_req.source.val
-        }
-        db.close();
-    }
-    return result;
+/*export const read_db = async <T>(key:string,def:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const result = await store.get(key)
+    db.close();
+    if(result==null) return def;
+    return result.val || def;
 }
 
-export const write_db = <T>(key:string,val:T)=>{
-    const req = indexedDB.open('vreath',2);
-    req.onerror = ()=>console.log('fail to open db');
-    req.onupgradeneeded = (event)=>{
-        db = req.result;
-        db.createObjectStore(storeName,{keyPath:'id'});
-    }
-    req.onsuccess = (event)=>{
-        db = req.result;
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const data = {
-            id:key,
-            val:val
-        };
-        const put_req = store.put(data);
-    }
+export const write_db = async <T>(key:string,val:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    await store.put({
+        id:key,
+        val:val
+    });
+    db.close();
 }
 
 export const delete_db = ()=>{
     const del_db = indexedDB.deleteDatabase('vreath');
     del_db.onsuccess = ()=>console.log('db delete success');
     del_db.onerror = ()=>console.log('db delete error');
-}
+}*/
 
 
 const commit = <T>(key:string,val:T)=>{
@@ -246,7 +234,7 @@ Vue.use(AtComponents)
 
 const store = new Vuex.Store({
     state:{
-        apps:read_db('app',def_apps),
+        apps:def_apps,
         registed:false,
         secret:CryptoSet.GenerateKeys(),
         balance:0,
@@ -258,15 +246,16 @@ const store = new Vuex.Store({
     mutations:{
         add_app(state,obj:Installed){
             state.apps[obj.name] = _.copy(obj);
-            write_db('app',state.apps);
+            put('app',state.apps);
         },
         del_app(state,key:string){
             delete state.apps[key];
-            write_db('app',state.apps);
+            put('app',state.apps);
         },
         refresh_secret(state,secret:string){
             state.secret = secret;
             commit('refresh_secret',secret);
+            put('secret',secret);
         },
         regist(state){
             state.registed = true;
@@ -277,8 +266,20 @@ const store = new Vuex.Store({
         replaceing(state,bool:boolean){
             state.replace_mode = bool;
         }
+    },
+    actions:{
+        async read({state,commit}){
+            const secret = await get('secret',state.secret);
+            const balance = await get('balance',state.balance);
+            commit('refresh_secret',secret);
+            commit('refresh_balance',balance);
+        }
     }
-})
+});
+
+(async ()=>{
+    await store.dispatch('read');
+})();
 
 
 
@@ -340,13 +341,13 @@ const Registration = {
 }
 
 const Wallet = {
+    store,
     data:function(){
         return{
-            to:"",
-            amount:""
+            to:this.$store.getters.my_address,
+            amount:0
         }
     },
-    store,
     computed:{
         from:function():string{
             return this.$store.getters.my_address;
@@ -360,17 +361,6 @@ const Wallet = {
         replace_mode:function():boolean{
             return this.$store.state.replace_mode;
         }
-    },
-    created:function(){
-        worker.postMessage({
-            type:'get_balance',
-            address:store.getters.my_address
-        })
-        worker.addEventListener('message',(event)=>{
-            const key:string = event.data.key;
-            const val:any = event.data.val;
-            if(key!=null) store.commit(key,val);
-        });
     },
     methods:{
         remit:async function(){
@@ -391,6 +381,18 @@ const Wallet = {
             }
             catch(e){console.log(e)}
         }
+    },
+    created:function(){
+        worker.postMessage({
+            type:'get_balance',
+            address:store.getters.my_address
+        })
+        worker.addEventListener('message',(event)=>{
+            const key:string = event.data.key;
+            const val:any = event.data.val;
+            if(key!=null) store.commit(key,val);
+        });
+        //this.methods.remit();
     },
     template:`
     <div>
@@ -722,4 +724,3 @@ const app = new Vue({
 worker.postMessage({
     type:'start'
 });
-

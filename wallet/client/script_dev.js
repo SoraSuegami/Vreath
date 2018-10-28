@@ -13,6 +13,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const CryptoSet = __importStar(require("../../core/crypto_set"));
 const _ = __importStar(require("../../core/basic"));
 const con_1 = require("../con");
+const db_1 = require("./db");
 const vue_1 = __importDefault(require("vue"));
 const vuex_1 = __importDefault(require("vuex"));
 const at_ui_1 = __importDefault(require("at-ui"));
@@ -50,49 +51,37 @@ const codes = {
 };
 const storeName = 'vreath';
 let db;
-exports.read_db = (key, def) => {
-    const req = indexedDB.open('vreath', 2);
-    let result = def;
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
-        db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
-        db = req.result;
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const get_req = store.get(key);
-        get_req.onsuccess = () => {
-            result = get_req.source.val;
-        };
-        db.close();
-    };
-    return result;
-};
-exports.write_db = (key, val) => {
-    const req = indexedDB.open('vreath', 2);
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
-        db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
-        db = req.result;
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        const data = {
-            id: key,
-            val: val
-        };
-        const put_req = store.put(data);
-    };
-};
-exports.delete_db = () => {
+let db_ver = 1;
+/*export const read_db = async <T>(key:string,def:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const result = await store.get(key)
+    db.close();
+    if(result==null) return def;
+    return result.val || def;
+}
+
+export const write_db = async <T>(key:string,val:T)=>{
+    const db = await idb.open('vreath',2,upgradeDB=>{
+        upgradeDB.createObjectStore('vreath',{keyPath:'id'});
+    });
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    await store.put({
+        id:key,
+        val:val
+    });
+    db.close();
+}
+
+export const delete_db = ()=>{
     const del_db = indexedDB.deleteDatabase('vreath');
-    del_db.onsuccess = () => console.log('db delete success');
-    del_db.onerror = () => console.log('db delete error');
-};
+    del_db.onsuccess = ()=>console.log('db delete success');
+    del_db.onerror = ()=>console.log('db delete error');
+}*/
 const commit = (key, val) => {
     worker.postMessage({
         type: 'commit',
@@ -219,7 +208,7 @@ vue_1.default.use(at_ui_1.default);
 });*/
 const store = new vuex_1.default.Store({
     state: {
-        apps: exports.read_db('app', def_apps),
+        apps: def_apps,
         registed: false,
         secret: CryptoSet.GenerateKeys(),
         balance: 0,
@@ -231,15 +220,16 @@ const store = new vuex_1.default.Store({
     mutations: {
         add_app(state, obj) {
             state.apps[obj.name] = _.copy(obj);
-            exports.write_db('app', state.apps);
+            db_1.put('app', state.apps);
         },
         del_app(state, key) {
             delete state.apps[key];
-            exports.write_db('app', state.apps);
+            db_1.put('app', state.apps);
         },
         refresh_secret(state, secret) {
             state.secret = secret;
             commit('refresh_secret', secret);
+            db_1.put('secret', secret);
         },
         regist(state) {
             state.registed = true;
@@ -250,8 +240,19 @@ const store = new vuex_1.default.Store({
         replaceing(state, bool) {
             state.replace_mode = bool;
         }
+    },
+    actions: {
+        async read({ state, commit }) {
+            const secret = await db_1.get('secret', state.secret);
+            const balance = await db_1.get('balance', state.balance);
+            commit('refresh_secret', secret);
+            commit('refresh_balance', balance);
+        }
     }
 });
+(async () => {
+    await store.dispatch('read');
+})();
 const Home = {
     data: function () {
         return {
@@ -308,13 +309,13 @@ const Registration = {
     `
 };
 const Wallet = {
+    store,
     data: function () {
         return {
-            to: "",
-            amount: ""
+            to: this.$store.getters.my_address,
+            amount: 0
         };
     },
-    store,
     computed: {
         from: function () {
             return this.$store.getters.my_address;
@@ -328,18 +329,6 @@ const Wallet = {
         replace_mode: function () {
             return this.$store.state.replace_mode;
         }
-    },
-    created: function () {
-        worker.postMessage({
-            type: 'get_balance',
-            address: store.getters.my_address
-        });
-        worker.addEventListener('message', (event) => {
-            const key = event.data.key;
-            const val = event.data.val;
-            if (key != null)
-                store.commit(key, val);
-        });
     },
     methods: {
         remit: async function () {
@@ -362,6 +351,19 @@ const Wallet = {
                 console.log(e);
             }
         }
+    },
+    created: function () {
+        worker.postMessage({
+            type: 'get_balance',
+            address: store.getters.my_address
+        });
+        worker.addEventListener('message', (event) => {
+            const key = event.data.key;
+            const val = event.data.val;
+            if (key != null)
+                store.commit(key, val);
+        });
+        //this.methods.remit();
     },
     template: `
     <div>

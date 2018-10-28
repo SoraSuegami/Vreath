@@ -106978,8 +106978,6 @@ exports.write_db = (key, val) => {
             val: val
         };
         const put_req = store.put(data);
-        put_req.onsuccess = () => console.log('write data success');
-        tx.oncomplete = () => console.log('transaction complete');
     };
 };
 exports.delete_db = () => {
@@ -107596,7 +107594,7 @@ exports.my_version = 0;
 exports.native = "native";
 exports.unit = "unit";
 exports.token_name_maxsize = 256;
-exports.block_time = 500;
+exports.block_time = 1000;
 exports.max_blocks = 20;
 exports.block_size = 10000000;
 exports.gas_limit = 25;

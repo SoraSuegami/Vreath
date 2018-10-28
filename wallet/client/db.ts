@@ -1,19 +1,18 @@
 import level from 'level-browserify'
 import {Trie} from '../../core/merkle_patricia'
 
-const db = level('./db');
+const db = level('./vreath');
 
-export const get = async (key:string)=>{
+export const get = async <T>(key:string,def:T):Promise<T>=>{
     try{
-        return await db.get(key,{asBuffer:false});
+        return JSON.parse(await db.get(key,{asBuffer:false}));
     }
     catch(e){
-        console.log(e);
-        return {};
+        return def;
     }
 }
 
-export const put = async (key:string,val:any)=>{
+export const put = async <T>(key:string,val:T):Promise<void>=>{
     try{
         await db.put(key,JSON.stringify(val));
     }

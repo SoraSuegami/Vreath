@@ -1,98 +1,130 @@
-"use strict";
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
-};
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const http = __importStar(require("http"));
-const express_1 = __importDefault(require("express"));
-const faye_1 = __importDefault(require("faye"));
-const levelup_1 = __importDefault(require("levelup"));
-const leveldown_1 = __importDefault(require("leveldown"));
-const index_1 = require("./client/index");
-const fs = __importStar(require("fs"));
-const gen = __importStar(require("../genesis/index"));
-const permessage_deflate_1 = __importDefault(require("permessage-deflate"));
-const _ = __importStar(require("../core/basic"));
-const P = __importStar(require("p-iteration"));
-const readline_sync_1 = __importDefault(require("readline-sync"));
-const socket_io_1 = __importDefault(require("socket.io"));
-exports.port = process.env.vreath_port || "57750";
-exports.ip = process.env.vreath_ip || "localhost";
-const app = express_1.default();
+import * as http from 'http'
+import express from 'express'
+import faye from 'faye'
+import levelup from 'levelup'
+import leveldown from 'leveldown'
+import {Store,Data,set_config,trie_ins,compute_tx,tx_accept,block_accept,check_chain,unit_buying,send_key_block,send_micro_block,get_balance,send_request_tx,send_refresh_tx} from './client/index'
+import * as T from '../core/types'
+import * as fs from 'fs'
+import * as gen from '../genesis/index'
+import deflate from 'permessage-deflate'
+import Vue from 'vue'
+import Vuex from 'vuex'
+import * as _ from '../core/basic'
+import * as CryptoSet from '../core/crypto_set'
+import * as StateSet from '../core/state'
+import * as TxSet from '../core/tx'
+import * as BlockSet from '../core/block'
+import BigNumber from 'bignumber.js';
+import {my_version,native,unit,token_name_maxsize,block_time,max_blocks,block_size,gas_limit,rate,compatible_version} from './con'
+import * as P from 'p-iteration'
+import readlineSync from 'readline-sync'
+import * as cluster from 'cluster'
+import socket from 'socket.io'
+
+
+
+export const port = process.env.vreath_port || "57750";
+export const ip = process.env.vreath_ip || "localhost";
+
+
+const app = express();
 const server = http.createServer(app);
-const bayeux = new faye_1.default.NodeAdapter({ mount: '/pubsub' });
-bayeux.addWebsocketExtension(permessage_deflate_1.default);
+const bayeux = new faye.NodeAdapter({mount: '/pubsub'});
+bayeux.addWebsocketExtension(deflate);
 bayeux.attach(server);
+
+
+
+
 const codes = {
-    "native": "const main = () => {};",
-    "unit": "const main = () => {};"
-};
-exports.json_read = (key, def) => {
-    try {
-        const path = __dirname + '/json/' + key + '.json';
-        const get = JSON.parse(fs.readFileSync(path, 'utf-8') || JSON.stringify(def));
+    "native":"const main = () => {};",//"function main(){const state = vreath.states[0];const type = input[0];const other = input[1];const amount = Number(input[2]);switch (type) {case 'remit':if (tx.meta.data.type != 'scrap' || state.owner != tx.meta.data.address || amount >= 0 || state.amount < amount) {console.log('error'); return 0;} const remited = vreath.create_state(state.nonce + 1, state.owner, state.token, state.amount + amount, state.data, state.product);console.log(remited);vreath.change_states([state], [remited]);}}",
+    "unit":"const main = () => {};"
+}
+
+
+export const json_read = <T>(key:string,def:T):T=>{
+    try{
+        const path =  __dirname+'/json/'+key+'.json'
+        const get:T = JSON.parse(fs.readFileSync(path,'utf-8')||JSON.stringify(def));
         return get;
     }
-    catch (e) {
+    catch(e){
         console.log(e);
         return def;
     }
-};
-exports.json_write = (key, val) => {
-    try {
-        const path = __dirname + '/json/' + key + '.json';
-        fs.writeFileSync(path, JSON.stringify(val, null, '    '));
+}
+
+export const json_write = <T>(key:string,val:T):void=>{
+    try{
+        const path = __dirname+'/json/'+key+'.json'
+        fs.writeFileSync(path,JSON.stringify(val,null, '    '));
     }
-    catch (e) {
+    catch(e){
         console.log(e);
     }
-};
-app.use(express_1.default.static(__dirname + '/client'));
+}
+
+app.use(express.static(__dirname+'/client'));
 /*app.get('/',(req, res) => {
     console.log('calleddddd!')
     throw new Error('calleddddd!')
     res.sendFile(__dirname + '/client/index.html');
 });*/
-server.listen(exports.port);
-const level_db = levelup_1.default(leveldown_1.default('./wallet/db'));
-exports.store = new index_1.Store(true, exports.json_read, exports.json_write);
-const io = socket_io_1.default(server);
-io.on('connection', async (socket) => {
-    socket.on('checkchain', async () => {
-        console.log('checked');
-        io.to(socket.id).emit('replacechain', _.copy(exports.store.chain));
+
+
+
+server.listen(port);
+
+const level_db = levelup(leveldown('./wallet/db'));
+export const store = new Store(true,json_read,json_write);
+
+//export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
+
+const io = socket(server);
+
+io.on('connection',async (socket)=>{
+    socket.on('tx',async (data:Data)=>{
+        /*const unit_amount = await get_balance(store.unit_address);
+        if(data.type==="tx"&&unit_amount>0) store.push_yet_data(_.copy(data));*/
+        io.emit('tx',_.copy(data));
+    });
+    socket.on('block',async (data:Data)=>{
+        //if(data.type==="block") store.push_yet_data(_.copy(data));
+        io.emit('block',_.copy(data));
+    });
+    socket.on('checkchain',async ()=>{
+        console.log('checked')
+        io.to(socket.id).emit('replacechain',_.copy(store.chain));
     });
 });
-//export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
-server.on('close', () => {
+
+
+
+server.on('close',()=>{
     console.log('lose connection');
-    exports.json_write("code", {});
-    exports.json_write("pool", {});
-    exports.json_write("chain", [gen.block]);
-    exports.json_write("roots", gen.roots);
-    exports.json_write("candidates", gen.candidates);
-    exports.json_write("unit_store", {});
-    exports.json_write('yet_data', []);
+    json_write("code",{});
+    json_write("pool",{});
+    json_write("chain",[gen.block]);
+    json_write("roots",gen.roots);
+    json_write("candidates",gen.candidates);
+    json_write("unit_store",{});
+    json_write('yet_data',[]);
 });
-server.on('error', (e) => console.log(e));
-process.on('SIGINT', () => {
-    console.log('lose connection');
-    exports.json_write("code", {});
-    exports.json_write("pool", {});
-    exports.json_write("chain", [gen.block]);
-    exports.json_write("roots", gen.roots);
-    exports.json_write("candidates", gen.candidates);
-    exports.json_write("unit_store", {});
-    exports.json_write('yet_data', []);
+
+server.on('error',(e)=>console.log(e));
+
+process.on('SIGINT',()=>{
+    json_write("code",{});
+    json_write("pool",{});
+    json_write("chain",[gen.block]);
+    json_write("roots",gen.roots);
+    json_write("candidates",gen.candidates);
+    json_write("unit_store",{});
+    json_write('yet_data',[]);
     process.exit(1);
 });
+
 /*client.subscribe('/data',async (data:Data)=>{
     if(data.type==="block") store.push_yet_data(_.copy(data));
     const S_Trie = trie_ins(store.roots.stateroot);
@@ -120,32 +152,29 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     }
     catch(e){throw new Error(e);}
 });*/
-(async () => {
-    exports.json_write("code", {});
-    exports.json_write("pool", {});
-    exports.json_write("chain", [gen.block]);
-    exports.json_write("roots", gen.roots);
-    exports.json_write("candidates", gen.candidates);
-    exports.json_write("unit_store", {});
-    exports.json_write('yet_data', []);
-    index_1.set_config(level_db, exports.store);
-    const secret = readline_sync_1.default.question("What is your secret?");
-    exports.store.refresh_secret(secret);
-    const gen_S_Trie = index_1.trie_ins("");
-    await P.forEach(gen.state, async (s) => {
-        await gen_S_Trie.put(s.owner, s);
+
+(async ()=>{
+    json_write("code",{});
+    json_write("pool",{});
+    json_write("chain",[gen.block]);
+    json_write("roots",gen.roots);
+    json_write("candidates",gen.candidates);
+    json_write("unit_store",{});
+    json_write('yet_data',[]);
+    await set_config(level_db,store);
+    const secret = readlineSync.question("What is your secret?");
+    store.refresh_secret(secret);
+    const gen_S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        await gen_S_Trie.put(s.owner,s);
     });
-    /*const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
-    const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-    if(last_address!=store.my_address){
-        store.checking(true);
-        client.publish("/checkchain",last_address);
-    }*/
-    const balance = await index_1.get_balance(exports.store.my_address);
-    exports.store.refresh_balance(balance);
-    setImmediate(index_1.compute_tx);
+    const balance = await get_balance(store.my_address);
+    store.refresh_balance(balance);
+    setImmediate(compute_tx);
     //setImmediate(compute_yet);
-})();
+})()
+
+
 /*if(cluster.isMaster){
     (async ()=>{
         json_write("./wallet/json/code.json",{});

@@ -63,14 +63,23 @@ app.use(express_1.default.static(__dirname + '/client'));
 server.listen(exports.port);
 const level_db = levelup_1.default(leveldown_1.default('./wallet/db'));
 exports.store = new index_1.Store(true, exports.json_read, exports.json_write);
+//export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
 const io = socket_io_1.default(server);
 io.on('connection', async (socket) => {
+    socket.on('tx', async (data) => {
+        /*const unit_amount = await get_balance(store.unit_address);
+        if(data.type==="tx"&&unit_amount>0) store.push_yet_data(_.copy(data));*/
+        io.emit('tx', _.copy(data));
+    });
+    socket.on('block', async (data) => {
+        //if(data.type==="block") store.push_yet_data(_.copy(data));
+        io.emit('block', _.copy(data));
+    });
     socket.on('checkchain', async () => {
         console.log('checked');
         io.to(socket.id).emit('replacechain', _.copy(exports.store.chain));
     });
 });
-//export const client = new faye.Client('http://'+ip+':'+port+'/vreath');
 server.on('close', () => {
     console.log('lose connection');
     exports.json_write("code", {});
@@ -83,7 +92,6 @@ server.on('close', () => {
 });
 server.on('error', (e) => console.log(e));
 process.on('SIGINT', () => {
-    console.log('lose connection');
     exports.json_write("code", {});
     exports.json_write("pool", {});
     exports.json_write("chain", [gen.block]);
@@ -128,19 +136,13 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     exports.json_write("candidates", gen.candidates);
     exports.json_write("unit_store", {});
     exports.json_write('yet_data', []);
-    index_1.set_config(level_db, exports.store);
+    await index_1.set_config(level_db, exports.store);
     const secret = readline_sync_1.default.question("What is your secret?");
     exports.store.refresh_secret(secret);
     const gen_S_Trie = index_1.trie_ins("");
     await P.forEach(gen.state, async (s) => {
         await gen_S_Trie.put(s.owner, s);
     });
-    /*const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
-    const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
-    if(last_address!=store.my_address){
-        store.checking(true);
-        client.publish("/checkchain",last_address);
-    }*/
     const balance = await index_1.get_balance(exports.store.my_address);
     exports.store.refresh_balance(balance);
     setImmediate(index_1.compute_tx);

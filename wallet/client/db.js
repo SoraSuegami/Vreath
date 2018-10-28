@@ -5,14 +5,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const level_browserify_1 = __importDefault(require("level-browserify"));
 const merkle_patricia_1 = require("../../core/merkle_patricia");
-const db = level_browserify_1.default('./db');
-exports.get = async (key) => {
+const db = level_browserify_1.default('./vreath');
+exports.get = async (key, def) => {
     try {
-        return await db.get(key, { asBuffer: false });
+        return JSON.parse(await db.get(key, { asBuffer: false }));
     }
     catch (e) {
-        console.log(e);
-        return {};
+        return def;
     }
 };
 exports.put = async (key, val) => {

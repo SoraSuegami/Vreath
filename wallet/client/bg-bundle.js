@@ -91041,6 +91041,7 @@ const _ = __importStar(__webpack_require__(/*! ../../core/basic */ "./core/basic
 const gen = __importStar(__webpack_require__(/*! ../../genesis/index */ "./genesis/index.js"));
 const P = __importStar(__webpack_require__(/*! p-iteration */ "./node_modules/p-iteration/index.js"));
 const level_browserify_1 = __importDefault(__webpack_require__(/*! level-browserify */ "./node_modules/level-browserify/browser.js"));
+const db_1 = __webpack_require__(/*! ./db */ "./wallet/client/db.js");
 const storeName = 'vreath';
 let db;
 /*const open_req = indexedDB.open(storeName,1);
@@ -91054,52 +91055,54 @@ open_req.onsuccess = (event)=>{
     db.close();
 }
 open_req.onerror = ()=>console.log("fail to open db");*/
-exports.read_db = (key, def) => {
-    const req = indexedDB.open('vreath', 2);
+/*export const read_db = <T>(key:string,def:T)=>{
+    const req = indexedDB.open('vreath',2);
     let result = def;
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
         db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
         db = req.result;
         const tx = db.transaction(storeName, 'readonly');
         const store = tx.objectStore(storeName);
         const get_req = store.get(key);
-        get_req.onsuccess = () => {
-            result = get_req.source.val;
-        };
+        get_req.onsuccess = ()=>{
+            result = get_req.source.val
+        }
         db.close();
-    };
+    }
     return result;
-};
-exports.write_db = (key, val) => {
-    const req = indexedDB.open('vreath', 2);
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
+}
+
+export const write_db = <T>(key:string,val:T)=>{
+    const req = indexedDB.open('vreath',2);
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
         db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
         db = req.result;
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
         const data = {
-            id: key,
-            val: val
+            id:key,
+            val:val
         };
         const put_req = store.put(data);
-    };
-};
-exports.delete_db = () => {
+    }
+}
+
+export const delete_db = ()=>{
     const del_db_vreath = indexedDB.deleteDatabase('vreath');
-    del_db_vreath.onsuccess = () => console.log('db delete success');
-    del_db_vreath.onerror = () => console.log('db delete error');
+    del_db_vreath.onsuccess = ()=>console.log('db delete success');
+    del_db_vreath.onerror = ()=>console.log('db delete error');
     const del_db_level = indexedDB.deleteDatabase('level-js-./db');
-    del_db_level.onsuccess = () => console.log('db delete success');
-    del_db_level.onerror = () => console.log('db delete error');
-};
+    del_db_level.onsuccess = ()=>console.log('db delete success');
+    del_db_level.onerror = ()=>console.log('db delete error');
+}*/
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
 const wallet = {
     name: "wallet",
@@ -91118,7 +91121,7 @@ const def_apps = {
     setting: setting
 };
 const level_db = level_browserify_1.default('./db');
-exports.store = new index_1.Store(false, exports.read_db, exports.write_db);
+exports.store = new index_1.Store(false, db_1.get, db_1.put);
 /*const port = peer_list[0].port || "57750";
 const ip = peer_list[0].ip || "localhost";
 console.log(ip)
@@ -91188,8 +91191,8 @@ self.onmessage = async (event) => {
                     exports.store[key](val);
                 break;
             case 'start':
-                exports.delete_db();
-                index_1.set_config(level_db, exports.store);
+                //delete_db();
+                await index_1.set_config(level_db, exports.store);
                 const gen_S_Trie = index_1.trie_ins("");
                 await P.forEach(gen.state, async (s) => {
                     await gen_S_Trie.put(s.owner, s);
@@ -91228,6 +91231,59 @@ self.onmessage = async (event) => {
 };
 
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/timers-browserify/main.js */ "./node_modules/timers-browserify/main.js").setImmediate))
+
+/***/ }),
+
+/***/ "./wallet/client/db.js":
+/*!*****************************!*\
+  !*** ./wallet/client/db.js ***!
+  \*****************************/
+/*! no static exports found */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const level_browserify_1 = __importDefault(__webpack_require__(/*! level-browserify */ "./node_modules/level-browserify/browser.js"));
+const merkle_patricia_1 = __webpack_require__(/*! ../../core/merkle_patricia */ "./core/merkle_patricia.js");
+const db = level_browserify_1.default('./vreath');
+exports.get = async (key, def) => {
+    try {
+        return JSON.parse(await db.get(key, { asBuffer: false }));
+    }
+    catch (e) {
+        return def;
+    }
+};
+exports.put = async (key, val) => {
+    try {
+        await db.put(key, JSON.stringify(val));
+    }
+    catch (e) {
+        console.log(e);
+    }
+};
+exports.del = async (key) => {
+    try {
+        await db.del(key);
+    }
+    catch (e) {
+        console.log(e);
+    }
+};
+exports.trie_ins = (root) => {
+    try {
+        return new merkle_patricia_1.Trie(db, root);
+    }
+    catch (e) {
+        console.log(e);
+        return new merkle_patricia_1.Trie(db);
+    }
+};
+
 
 /***/ }),
 
@@ -91294,24 +91350,29 @@ class Store {
         this._req_index_map = {};
         this._return_chain = false;
         this._first_request = true;
-        if (this._isNode) {
-            this._code = read_func('code', codes);
-            this._pool = read_func('pool', {});
-            this._chain = read_func('chain', [gen.block]);
-            this._roots = read_func('roots', gen.roots);
-            this._candidates = read_func('candidates', gen.candidates);
-            this._unit_store = read_func('unit_store', {});
+    }
+    async read() {
+        this._code = await this.read_func('code', codes);
+        this._pool = await this.read_func('pool', {});
+        this._chain = await this.read_func('chain', [gen.block]);
+        this._roots = await this.read_func('roots', gen.roots);
+        this._candidates = await this.read_func('candidates', gen.candidates);
+        this._unit_store = await this.read_func('unit_store', {});
+        if (!this._isNode) {
+            this._secret = await this.read_func('secret', this._secret);
+            this._balance = await this.read_func('balance', 0);
+            this._peers = await this.read_func('peers', { type: 'client', ip: 'localhost', port: 57750, time: 0 });
         }
-        else {
-            this._code = read_func('code', codes);
-            this._pool = read_func('pool', {});
-            this._chain = read_func('chain', [gen.block]);
-            this._roots = read_func('roots', gen.roots);
-            this._candidates = read_func('candidates', gen.candidates);
-            this._unit_store = read_func('unit_store', {});
-            this._secret = read_func('secret', this._secret);
-            this._balance = read_func('balance', 0);
-            this._peers = read_func('peers', { type: 'client', ip: 'localhost', port: 57750, time: 0 });
+    }
+    async write() {
+        await this.write_func('pool', _.copy(this.pool));
+        await this.write_func('chain', _.copy(this.chain));
+        await this.write_func('roots', _.copy(this.roots));
+        await this.write_func('candidates', _.copy(this.candidates));
+        await this.write_func('unit_store', _.copy(this.unit_store));
+        if (!this.isNode) {
+            await this.write_func('secret', _.copy(this.secret));
+            await this.write_func('balance', _.copy(this.balance));
         }
     }
     get isNode() {
@@ -91983,7 +92044,7 @@ exports.send_request_tx = async (secret, type, token, base, input_raw, log, root
             console.log("invalid infomations");
         else {
             console.log('remit!');
-            store.requested(true);
+            store.requested(false);
             client.publish('/data', { type: 'tx', tx: [tx], block: [] });
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
@@ -92450,9 +92511,10 @@ exports.send_blocks = async () => {
         await exports.send_request_tx(store.secret, "issue", con_1.native, [store.my_address, store.my_address], ["remit", JSON.stringify([0])], [], _.copy(store.roots), _.copy(store.chain));
     }
 };
-exports.set_config = (_db, _store) => {
+exports.set_config = async (_db, _store) => {
     db = _db;
     store = _store;
+    await store.read();
     const last_block = _.copy(store.chain[store.chain.length - 1]) || _.copy(gen.block);
     const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
     if (last_address != store.my_address) {
@@ -92512,6 +92574,7 @@ exports.compute_tx = async () => {
         return store;
     });
     store.refresh_unit_store(new_unit_store);
+    await store.write();
     await exports.sleep(con_1.block_time);
     setImmediate(exports.compute_block);
 };
@@ -92816,6 +92879,7 @@ exports.compute_block = async () => {
                 }
                 console.log('yet:');
                 console.log(store.yet_data.length);
+                await store.write();
                 await exports.send_blocks();
                 if (!store.replace_mode || store.yet_data.length > 10)
                     await exports.sleep(con_1.block_time);
@@ -92896,7 +92960,7 @@ exports.my_version = 0;
 exports.native = "native";
 exports.unit = "unit";
 exports.token_name_maxsize = 256;
-exports.block_time = 1000;
+exports.block_time = 500;
 exports.max_blocks = 20;
 exports.block_size = 10000000;
 exports.gas_limit = 25;

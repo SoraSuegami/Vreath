@@ -15,6 +15,7 @@ const _ = __importStar(require("../../core/basic"));
 const gen = __importStar(require("../../genesis/index"));
 const P = __importStar(require("p-iteration"));
 const level_browserify_1 = __importDefault(require("level-browserify"));
+const db_1 = require("./db");
 const storeName = 'vreath';
 let db;
 /*const open_req = indexedDB.open(storeName,1);
@@ -28,52 +29,54 @@ open_req.onsuccess = (event)=>{
     db.close();
 }
 open_req.onerror = ()=>console.log("fail to open db");*/
-exports.read_db = (key, def) => {
-    const req = indexedDB.open('vreath', 2);
+/*export const read_db = <T>(key:string,def:T)=>{
+    const req = indexedDB.open('vreath',2);
     let result = def;
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
         db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
         db = req.result;
         const tx = db.transaction(storeName, 'readonly');
         const store = tx.objectStore(storeName);
         const get_req = store.get(key);
-        get_req.onsuccess = () => {
-            result = get_req.source.val;
-        };
+        get_req.onsuccess = ()=>{
+            result = get_req.source.val
+        }
         db.close();
-    };
+    }
     return result;
-};
-exports.write_db = (key, val) => {
-    const req = indexedDB.open('vreath', 2);
-    req.onerror = () => console.log('fail to open db');
-    req.onupgradeneeded = (event) => {
+}
+
+export const write_db = <T>(key:string,val:T)=>{
+    const req = indexedDB.open('vreath',2);
+    req.onerror = ()=>console.log('fail to open db');
+    req.onupgradeneeded = (event)=>{
         db = req.result;
-        db.createObjectStore(storeName, { keyPath: 'id' });
-    };
-    req.onsuccess = (event) => {
+        db.createObjectStore(storeName,{keyPath:'id'});
+    }
+    req.onsuccess = (event)=>{
         db = req.result;
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
         const data = {
-            id: key,
-            val: val
+            id:key,
+            val:val
         };
         const put_req = store.put(data);
-    };
-};
-exports.delete_db = () => {
+    }
+}
+
+export const delete_db = ()=>{
     const del_db_vreath = indexedDB.deleteDatabase('vreath');
-    del_db_vreath.onsuccess = () => console.log('db delete success');
-    del_db_vreath.onerror = () => console.log('db delete error');
+    del_db_vreath.onsuccess = ()=>console.log('db delete success');
+    del_db_vreath.onerror = ()=>console.log('db delete error');
     const del_db_level = indexedDB.deleteDatabase('level-js-./db');
-    del_db_level.onsuccess = () => console.log('db delete success');
-    del_db_level.onerror = () => console.log('db delete error');
-};
+    del_db_level.onsuccess = ()=>console.log('db delete success');
+    del_db_level.onerror = ()=>console.log('db delete error');
+}*/
 const test_secret = "f836d7c5aa3f9fcf663d56e803972a573465a988d6457f1111e29e43ed7a1041";
 const wallet = {
     name: "wallet",
@@ -92,7 +95,7 @@ const def_apps = {
     setting: setting
 };
 const level_db = level_browserify_1.default('./db');
-exports.store = new index_1.Store(false, exports.read_db, exports.write_db);
+exports.store = new index_1.Store(false, db_1.get, db_1.put);
 /*const port = peer_list[0].port || "57750";
 const ip = peer_list[0].ip || "localhost";
 console.log(ip)
@@ -162,8 +165,8 @@ self.onmessage = async (event) => {
                     exports.store[key](val);
                 break;
             case 'start':
-                exports.delete_db();
-                index_1.set_config(level_db, exports.store);
+                //delete_db();
+                await index_1.set_config(level_db, exports.store);
                 const gen_S_Trie = index_1.trie_ins("");
                 await P.forEach(gen.state, async (s) => {
                     await gen_S_Trie.put(s.owner, s);

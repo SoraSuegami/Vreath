@@ -18,6 +18,8 @@ import * as StateSet from '../../core/state'
 import BigNumber from 'bignumber.js';
 import {Chart} from 'chart.js'
 import {Bar, mixins} from 'vue-chartjs'
+import {get,put} from './db'
+import { read } from 'fs';
 
 const worker = new Worker('bg-bundle.js');
 
@@ -68,7 +70,7 @@ const codes = {
 const storeName = 'vreath';
 let db;
 
-export const read_db = <T>(key:string,def:T)=>{
+/*export const read_db = <T>(key:string,def:T)=>{
     const req = indexedDB.open('vreath',2);
     let result = def;
     req.onerror = ()=>console.log('fail to open db');
@@ -112,7 +114,7 @@ export const delete_db = ()=>{
     const del_db = indexedDB.deleteDatabase('vreath');
     del_db.onsuccess = ()=>console.log('db delete success');
     del_db.onerror = ()=>console.log('db delete error');
-}
+}*/
 
 
 const commit = <T>(key:string,val:T)=>{
@@ -244,9 +246,10 @@ Vue.use(AtComponents)
     store.commit(key,val);
 });*/
 
+
 const store = new Vuex.Store({
     state:{
-        apps:read_db('app',def_apps),
+        apps:def_apps,
         registed:false,
         secret:CryptoSet.GenerateKeys(),
         balance:0,
@@ -277,10 +280,25 @@ const store = new Vuex.Store({
         replaceing(state,bool:boolean){
             state.replace_mode = bool;
         }
+    },
+    actions:{
+        async read({state,commit}){
+            const secret:string = await get('secret',state.secret);
+            const balance = await get('balance',0);
+            commit('refresh_secret',secret);
+            commit('refresh_balance',balance);
+        },
+        async write({state}){
+            await put('secret',state.secret);
+            await put('balance',state.balance);
+        }
     }
-})
+});
 
 
+(async ()=>{
+    await store.dispatch('read');
+})()
 
 const Home = {
     data:function(){
@@ -323,6 +341,7 @@ const Registration = {
             try{
                 store.commit('refresh_secret',this.secret);
                 store.commit('regist');
+                store.dispatch('read');
                 router.push({ path: '/' });
             }
             catch(e){
@@ -370,6 +389,7 @@ const Wallet = {
             const key:string = event.data.key;
             const val:any = event.data.val;
             if(key!=null) store.commit(key,val);
+            store.dispatch('read');
         });
     },
     methods:{

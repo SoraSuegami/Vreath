@@ -150,7 +150,7 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     json_write("candidates",gen.candidates);
     json_write("unit_store",{});
     json_write('yet_data',[]);
-    set_config(level_db,store);
+    await set_config(level_db,store);
     const secret = readlineSync.question("What is your secret?");
     store.refresh_secret(secret);
     const gen_S_Trie = trie_ins("");

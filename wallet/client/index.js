@@ -53,24 +53,29 @@ class Store {
         this._req_index_map = {};
         this._return_chain = false;
         this._first_request = true;
-        if (this._isNode) {
-            this._code = read_func('code', codes);
-            this._pool = read_func('pool', {});
-            this._chain = read_func('chain', [gen.block]);
-            this._roots = read_func('roots', gen.roots);
-            this._candidates = read_func('candidates', gen.candidates);
-            this._unit_store = read_func('unit_store', {});
+    }
+    async read() {
+        this._code = await this.read_func('code', codes);
+        this._pool = await this.read_func('pool', {});
+        this._chain = await this.read_func('chain', [gen.block]);
+        this._roots = await this.read_func('roots', gen.roots);
+        this._candidates = await this.read_func('candidates', gen.candidates);
+        this._unit_store = await this.read_func('unit_store', {});
+        if (!this._isNode) {
+            this._secret = await this.read_func('secret', this._secret);
+            this._balance = await this.read_func('balance', 0);
+            this._peers = await this.read_func('peers', { type: 'client', ip: 'localhost', port: 57750, time: 0 });
         }
-        else {
-            this._code = read_func('code', codes);
-            this._pool = read_func('pool', {});
-            this._chain = read_func('chain', [gen.block]);
-            this._roots = read_func('roots', gen.roots);
-            this._candidates = read_func('candidates', gen.candidates);
-            this._unit_store = read_func('unit_store', {});
-            this._secret = read_func('secret', this._secret);
-            this._balance = read_func('balance', 0);
-            this._peers = read_func('peers', { type: 'client', ip: 'localhost', port: 57750, time: 0 });
+    }
+    async write() {
+        await this.write_func('pool', _.copy(this.pool));
+        await this.write_func('chain', _.copy(this.chain));
+        await this.write_func('roots', _.copy(this.roots));
+        await this.write_func('candidates', _.copy(this.candidates));
+        await this.write_func('unit_store', _.copy(this.unit_store));
+        if (!this.isNode) {
+            await this.write_func('secret', _.copy(this.secret));
+            await this.write_func('balance', _.copy(this.balance));
         }
     }
     get isNode() {
@@ -742,7 +747,7 @@ exports.send_request_tx = async (secret, type, token, base, input_raw, log, root
             console.log("invalid infomations");
         else {
             console.log('remit!');
-            store.requested(true);
+            store.requested(false);
             client.publish('/data', { type: 'tx', tx: [tx], block: [] });
             //await store.dispatch("tx_accept",_.copy(tx));
             //await tx_accept(tx,chain,roots,pool,secret,mode,candidates,codes,socket);
@@ -1209,9 +1214,10 @@ exports.send_blocks = async () => {
         await exports.send_request_tx(store.secret, "issue", con_1.native, [store.my_address, store.my_address], ["remit", JSON.stringify([0])], [], _.copy(store.roots), _.copy(store.chain));
     }
 };
-exports.set_config = (_db, _store) => {
+exports.set_config = async (_db, _store) => {
     db = _db;
     store = _store;
+    await store.read();
     const last_block = _.copy(store.chain[store.chain.length - 1]) || _.copy(gen.block);
     const last_address = CryptoSet.GenereateAddress(con_1.native, _.reduce_pub(last_block.meta.validatorPub));
     if (last_address != store.my_address) {
@@ -1271,6 +1277,7 @@ exports.compute_tx = async () => {
         return store;
     });
     store.refresh_unit_store(new_unit_store);
+    await store.write();
     await exports.sleep(con_1.block_time);
     setImmediate(exports.compute_block);
 };
@@ -1575,6 +1582,7 @@ exports.compute_block = async () => {
                 }
                 console.log('yet:');
                 console.log(store.yet_data.length);
+                await store.write();
                 await exports.send_blocks();
                 if (!store.replace_mode || store.yet_data.length > 10)
                     await exports.sleep(con_1.block_time);

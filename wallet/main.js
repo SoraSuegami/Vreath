@@ -128,7 +128,7 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     exports.json_write("candidates", gen.candidates);
     exports.json_write("unit_store", {});
     exports.json_write('yet_data', []);
-    index_1.set_config(level_db, exports.store);
+    await index_1.set_config(level_db, exports.store);
     const secret = readline_sync_1.default.question("What is your secret?");
     exports.store.refresh_secret(secret);
     const gen_S_Trie = index_1.trie_ins("");

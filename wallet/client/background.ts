@@ -19,6 +19,7 @@ import BigNumber from 'bignumber.js';
 import { read } from 'fs';
 import level from 'level-browserify'
 import axios from 'axios'
+import {get,put} from './db'
 
 
 /*if('serviceWorker' in navigator){
@@ -60,7 +61,7 @@ open_req.onsuccess = (event)=>{
 open_req.onerror = ()=>console.log("fail to open db");*/
 
 
-export const read_db = <T>(key:string,def:T)=>{
+/*export const read_db = <T>(key:string,def:T)=>{
     const req = indexedDB.open('vreath',2);
     let result = def;
     req.onerror = ()=>console.log('fail to open db');
@@ -107,7 +108,7 @@ export const delete_db = ()=>{
     const del_db_level = indexedDB.deleteDatabase('level-js-./db');
     del_db_level.onsuccess = ()=>console.log('db delete success');
     del_db_level.onerror = ()=>console.log('db delete error');
-}
+}*/
 
 
 
@@ -138,7 +139,7 @@ const def_apps:{[key:string]:Installed} = {
 const level_db = level('./db')
 
 
-export const store = new Store(false,read_db,write_db);
+export const store = new Store(false,get,put);
 
 
 
@@ -216,8 +217,8 @@ self.onmessage = async (event)=>{
                 if(key!=null) store[key](val);
                 break;
             case 'start':
-                delete_db();
-                set_config(level_db,store);
+                //delete_db();
+                await set_config(level_db,store);
                 const gen_S_Trie = trie_ins("");
                 await P.forEach(gen.state,async (s:T.State)=>{
                     await gen_S_Trie.put(s.owner,s);

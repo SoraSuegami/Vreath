@@ -345,7 +345,18 @@ socket.on('replacechain',async (chain:T.Block[])=>{
     return 0;
 });
 
-socket.on('disconnect',()=>{
+/*socket.on('disconnect',()=>{
+    store.refresh_pool({});
+    store.replace_chain([gen.block]);
+    store.refresh_roots(gen.roots);
+    store.refresh_candidates(gen.candidates);
+    store.refresh_unit_store({});
+    store.refresh_yet_data([]);
+});*/
+
+client.bind('transport:down', ()=>{
+    console.log('lose connection');
+    store.refresh_balance(0);
     store.refresh_pool({});
     store.replace_chain([gen.block]);
     store.refresh_roots(gen.roots);
@@ -576,9 +587,12 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 p=>{
                     block.txs.concat(block.natives).concat(block.units).forEach(tx=>{
                         Object.values(p).forEach(t=>{
-                            if(t.meta.kind==="refresh"&&t.meta.data.index===tx.meta.data.index&&t.meta.data.request===tx.meta.data.request){
+                            if(tx.meta.kind==="refresh"&&t.meta.kind==="refresh"&&t.meta.data.index===tx.meta.data.index&&t.meta.data.request===tx.meta.data.request){
                                 delete p[t.hash];
                                 delete p[t.meta.data.request];
+                            }
+                            else if(tx.meta.kind==="request"&&t.meta.kind==="request"&&tx.hash===t.hash){
+                                delete p[t.hash];
                             }
                         });
                     });
@@ -1176,7 +1190,7 @@ export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:strin
         const native_LocationData = await locations_for_tx(native_tx,chain,L_Trie);
         const unit_StateData = await states_for_tx(unit_tx,chain,S_Trie);
         const unit_LocationData = await locations_for_tx(unit_tx,chain,L_Trie);
-        if(!TxSet.ValidRequestTx(native_tx,my_version,native,unit,false,native_StateData,native_LocationData)||!TxSet.ValidRequestTx(unit_tx,my_version,native,unit,false,unit_StateData,unit_LocationData)) console.log("fail to buy units");
+        if(!TxSet.ValidRequestTx(native_tx,my_version,native,unit,true,native_StateData,native_LocationData)||!TxSet.ValidRequestTx(unit_tx,my_version,native,unit,true,unit_StateData,unit_LocationData)) console.log("fail to buy units");
         else{
             console.log("buy unit!");
             store.buying_unit(true);
@@ -1206,7 +1220,7 @@ export const send_blocks = async ()=>{
     if(!store.replace_mode&&_.reduce_pub(last_key.meta.validatorPub)===CryptoSet.PublicFromPrivate(store.secret)&&last_micros.length<=max_blocks) await send_micro_block(_.copy(store.pool),store.secret,_.copy(store.chain),_.copy(store.candidates),_.copy(store.roots),store.unit_store);
     if(!store.replace_mode&&unit_amount>0&&date.getTime()-last_key.meta.timestamp>block_time*max_blocks) await send_key_block(_.copy(store.chain),store.secret,_.copy(store.candidates),_.copy(store.roots));
 
-    if(store.isNode&&store.first_request&&!store.replace_mode&&unit_amount>0&&_.copy(store.chain).filter(b=>b.natives.length>0).length===0) {
+    if(store.isNode&&store.first_request&&!store.replace_mode&&unit_amount>0&&_.copy(store.chain).filter(b=>b.natives.length>0).length===0){
         await send_request_tx(store.secret,"issue",native,[store.my_address,store.my_address],["remit",JSON.stringify([0])],[],_.copy(store.roots),_.copy(store.chain));
     }
 }

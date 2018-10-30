@@ -343,7 +343,17 @@ socket.on('replacechain', async (chain) => {
     console.log(store.yet_data.length);
     return 0;
 });
-socket.on('disconnect', () => {
+/*socket.on('disconnect',()=>{
+    store.refresh_pool({});
+    store.replace_chain([gen.block]);
+    store.refresh_roots(gen.roots);
+    store.refresh_candidates(gen.candidates);
+    store.refresh_unit_store({});
+    store.refresh_yet_data([]);
+});*/
+client.bind('transport:down', () => {
+    console.log('lose connection');
+    store.refresh_balance(0);
     store.refresh_pool({});
     store.replace_chain([gen.block]);
     store.refresh_roots(gen.roots);
@@ -578,9 +588,12 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
         const new_pool = _.new_obj(pool, p => {
             block.txs.concat(block.natives).concat(block.units).forEach(tx => {
                 Object.values(p).forEach(t => {
-                    if (t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
+                    if (tx.meta.kind === "refresh" && t.meta.kind === "refresh" && t.meta.data.index === tx.meta.data.index && t.meta.data.request === tx.meta.data.request) {
                         delete p[t.hash];
                         delete p[t.meta.data.request];
+                    }
+                    else if (tx.meta.kind === "request" && t.meta.kind === "request" && tx.hash === t.hash) {
+                        delete p[t.hash];
                     }
                 });
             });
@@ -1179,7 +1192,7 @@ exports.unit_buying = async (secret, units, roots, chain) => {
         const native_LocationData = await exports.locations_for_tx(native_tx, chain, L_Trie);
         const unit_StateData = await exports.states_for_tx(unit_tx, chain, S_Trie);
         const unit_LocationData = await exports.locations_for_tx(unit_tx, chain, L_Trie);
-        if (!TxSet.ValidRequestTx(native_tx, con_1.my_version, con_1.native, con_1.unit, false, native_StateData, native_LocationData) || !TxSet.ValidRequestTx(unit_tx, con_1.my_version, con_1.native, con_1.unit, false, unit_StateData, unit_LocationData))
+        if (!TxSet.ValidRequestTx(native_tx, con_1.my_version, con_1.native, con_1.unit, true, native_StateData, native_LocationData) || !TxSet.ValidRequestTx(unit_tx, con_1.my_version, con_1.native, con_1.unit, true, unit_StateData, unit_LocationData))
             console.log("fail to buy units");
         else {
             console.log("buy unit!");

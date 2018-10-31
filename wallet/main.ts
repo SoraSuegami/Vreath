@@ -21,6 +21,7 @@ import * as P from 'p-iteration'
 import readlineSync from 'readline-sync'
 import * as cluster from 'cluster'
 import socket from 'socket.io'
+import JSZip from 'jszip'
 
 
 export const port = process.env.vreath_port || "57750";
@@ -82,8 +83,24 @@ const io = socket(server);
 
 io.on('connection',async (socket)=>{
     socket.on('checkchain',async ()=>{
-        console.log('checked')
+        console.log('checked');
         io.to(socket.id).emit('replacechain',_.copy(store.chain));
+    });
+    socket.on('rebuildinfo',async ()=>{
+        console.log('send rebuild info');
+        const roots = _.copy(store.roots);
+        const S_Trie = trie_ins(roots.stateroot);
+        const L_Trie = trie_ins(roots.locationroot);
+        const states:T.State[] = Object.values(await S_Trie.filter());
+        const locations:T.Location[] = Object.values(await L_Trie.filter());
+        const zip = new JSZip();
+        const folder = zip.folder('rebuild');
+        folder.file('chain.json',JSON.stringify(_.copy(store.chain)));
+        folder.file('states.json',JSON.stringify(_.copy(states)));
+        folder.file('locations.json',JSON.stringify(_.copy(locations)));
+        folder.file('canidates.json',JSON.stringify(_.copy(store.candidates)));
+        const blob = await zip.generateAsync({type:'nodebuffer'});
+        io.to(socket.id).emit('rebuildchain',blob);
     });
 });
 

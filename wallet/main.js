@@ -23,6 +23,7 @@ const _ = __importStar(require("../core/basic"));
 const P = __importStar(require("p-iteration"));
 const readline_sync_1 = __importDefault(require("readline-sync"));
 const socket_io_1 = __importDefault(require("socket.io"));
+const jszip_1 = __importDefault(require("jszip"));
 exports.port = process.env.vreath_port || "57750";
 exports.ip = process.env.vreath_ip || "localhost";
 const app = express_1.default();
@@ -68,6 +69,22 @@ io.on('connection', async (socket) => {
     socket.on('checkchain', async () => {
         console.log('checked');
         io.to(socket.id).emit('replacechain', _.copy(exports.store.chain));
+    });
+    socket.on('rebuildinfo', async () => {
+        console.log('send rebuild info');
+        const roots = _.copy(exports.store.roots);
+        const S_Trie = index_1.trie_ins(roots.stateroot);
+        const L_Trie = index_1.trie_ins(roots.locationroot);
+        const states = Object.values(await S_Trie.filter());
+        const locations = Object.values(await L_Trie.filter());
+        const zip = new jszip_1.default();
+        const folder = zip.folder('rebuild');
+        folder.file('chain.json', JSON.stringify(_.copy(exports.store.chain)));
+        folder.file('states.json', JSON.stringify(_.copy(states)));
+        folder.file('locations.json', JSON.stringify(_.copy(locations)));
+        folder.file('canidates.json', JSON.stringify(_.copy(exports.store.candidates)));
+        const blob = await zip.generateAsync({ type: 'nodebuffer' });
+        io.to(socket.id).emit('rebuildchain', blob);
     });
 });
 //export const client = new faye.Client('http://'+ip+':'+port+'/vreath');

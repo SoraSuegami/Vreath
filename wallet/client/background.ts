@@ -1,4 +1,4 @@
-import {Store,Data,set_config,compute_tx,get_balance,send_request_tx,trie_ins,check_chain} from './index'
+import {Store,Data,set_config,compute_tx,get_balance,send_request_tx,trie_ins,call_rebuild} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
@@ -248,6 +248,9 @@ self.onmessage = async (event)=>{
                     address:event.data.address,
                     amount:got_balance
                 });
+                break;
+            case 'rebuild':
+                call_rebuild();
                 break;
         }
     }

@@ -197,6 +197,9 @@ self.onmessage = async (event) => {
                     amount: got_balance
                 });
                 break;
+            case 'rebuild':
+                index_1.call_rebuild();
+                break;
         }
     }
     catch (e) {

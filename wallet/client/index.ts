@@ -14,6 +14,8 @@ import {BigNumber} from 'bignumber.js'
 import faye from 'faye'
 import * as io from 'socket.io-client'
 import {peer_list} from './peer_list'
+import { async } from 'rxjs/internal/scheduler/async';
+import JSZip from 'jszip'
 
 export type Data = {
     type:'tx'|'block';
@@ -342,6 +344,20 @@ socket.on('replacechain',async (chain:T.Block[])=>{
     store.checking(false);
     //setImmediate(compute_tx);
     console.log(store.yet_data.length);
+    console.log(store.chain.length)
+    return 0;
+});
+
+socket.on('rebuildchain',async (blob:Blob)=>{
+    const zip = await JSZip.loadAsync(blob);
+    const folder = zip.folder('rebuild');
+    const chain:T.Block[] = JSON.parse(await folder.file('chain.json').async('text'));
+    const states:T.State[] = JSON.parse(await folder.file('states.json').async('text'));
+    const locations:T.Location[] = JSON.parse(await folder.file('locations.json').async('text'));
+    const candidates:T.Candidates[] = JSON.parse(await folder.file('canidates.json').async('text'));
+    await rebuild_chain(_.copy(chain),_.copy(states),_.copy(locations),_.copy(candidates));
+    store.checking(false);
+    console.log('rebuild chain');
     return 0;
 });
 
@@ -545,6 +561,7 @@ export const tx_accept = async (tx:T.Tx,chain:T.Block[],roots:{[key:string]:stri
 }
 
 export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Candidates[],roots:{[key:string]:string},pool:T.Pool,not_refreshed:T.Tx[],now_buying:boolean,unit_store:{[key:string]:T.Unit[]})=>{
+    try{
         console.log("block_accept");
         const stateroot = roots.stateroot;
         const S_Trie:Trie = trie_ins(stateroot);
@@ -706,6 +723,19 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
                 unit_store:_.copy(unit_store)
             }
         }
+    }
+    catch(e){
+        console.log(e);
+        return{
+            pool:_.copy(pool),
+            roots:_.copy(roots),
+            candidates:_.copy(candidates),
+            chain:_.copy(chain),
+            not_refreshed_tx:_.copy(not_refreshed),
+            now_buying:now_buying,
+            unit_store:_.copy(unit_store)
+        }
+    }
 }
 
 export const tx_check = (block:T.Block,chain:T.Block[],StateData:T.State[],LocationData:T.Location[])=>{
@@ -744,10 +774,16 @@ export const tx_check = (block:T.Block,chain:T.Block[],StateData:T.State[],Locat
 }
 
 export const get_balance = async (address:string)=>{
-    const S_Trie = trie_ins(store.roots.stateroot||"");
-    const state:T.State = await S_Trie.get(address);
-    if(state==null) return 0;
-    return new BigNumber(state.amount).toNumber();
+    try{
+        const S_Trie = trie_ins(store.roots.stateroot);
+        const state:T.State = await S_Trie.get(address);
+        if(state==null) return 0;
+        return new BigNumber(state.amount).toNumber();
+    }
+    catch(e){
+        console.log(e);
+        return 0;
+    }
 }
 
 export const send_request_tx = async (secret:string,type:T.TxTypes,token:string,base:string[],input_raw:string[],log:string[],roots:{[key:string]:string},chain:T.Block[],pre=TxSet.empty_tx_pure().meta.pre,next=TxSet.empty_tx_pure().meta.next)=>{
@@ -1020,27 +1056,41 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
 }
 
 const get_pre_info = async (chain:T.Block[]):Promise<[{stateroot:string,locationroot:string},T.Candidates[]]>=>{
-    const pre_block = chain[chain.length-1] || BlockSet.empty_block();
-    const S_Trie = trie_ins(pre_block.meta.stateroot);
-    const StateData = await states_for_block(pre_block,chain.slice(0,pre_block.meta.index),S_Trie);
-    const L_Trie = trie_ins(pre_block.meta.locationroot);
-    const LocationData = await locations_for_block(pre_block,chain.slice(0,pre_block.meta.index),L_Trie);
-    /*const pre_block2 = chain[chain.length-2] || BlockSet.empty_block();
-    const pre_S_Trie = trie_ins(pre_block2.meta.stateroot);
-    const pre_StateData = await states_for_block(pre_block2,chain.slice(0,pre_block.meta.index-1),pre_S_Trie);*/
-    const candidates = BlockSet.CandidatesForm(BlockSet.get_units(unit,StateData));
-    const accepted = await BlockSet.AcceptBlock(pre_block,_.copy(chain).slice(0,pre_block.meta.index),0,my_version,block_time,max_blocks,block_size,_.copy(candidates),S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
-    await P.forEach(accepted.state, async (state:T.State)=>{
-        await S_Trie.put(state.owner,state);
-    });
-    await P.forEach(accepted.location, async (loc:T.Location)=>{
-        await L_Trie.put(loc.address,loc);
-    });
-    const pre_root = {
-        stateroot:S_Trie.now_root(),
-        locationroot:L_Trie.now_root()
+    try{
+        const pre_block = chain[chain.length-1] || BlockSet.empty_block();
+        const S_Trie = trie_ins(pre_block.meta.stateroot);
+        const StateData = await states_for_block(pre_block,chain.slice(0,pre_block.meta.index),S_Trie);
+        const L_Trie = trie_ins(pre_block.meta.locationroot);
+        const LocationData = await locations_for_block(pre_block,chain.slice(0,pre_block.meta.index),L_Trie);
+        /*const pre_block2 = chain[chain.length-2] || BlockSet.empty_block();
+        const pre_S_Trie = trie_ins(pre_block2.meta.stateroot);
+        const pre_StateData = await states_for_block(pre_block2,chain.slice(0,pre_block.meta.index-1),pre_S_Trie);*/
+        const candidates = BlockSet.CandidatesForm(BlockSet.get_units(unit,StateData));
+        const accepted = await BlockSet.AcceptBlock(pre_block,_.copy(chain).slice(0,pre_block.meta.index),0,my_version,block_time,max_blocks,block_size,_.copy(candidates),S_Trie.now_root(),L_Trie.now_root(),native,unit,rate,token_name_maxsize,all_issue,StateData,LocationData);
+        if(accepted.block.length>0){
+            await P.forEach(accepted.state, async (state:T.State)=>{
+                await S_Trie.put(state.owner,state);
+            });
+            await P.forEach(accepted.location, async (loc:T.Location)=>{
+                await L_Trie.put(loc.address,loc);
+            });
+        }
+        const pre_root = {
+            stateroot:S_Trie.now_root(),
+            locationroot:L_Trie.now_root()
+        }
+        return [_.copy(pre_root),_.copy(accepted.candidates)];
     }
-    return [_.copy(pre_root),_.copy(accepted.candidates)];
+    catch(e){
+        console.log(e);
+        return [
+            {
+                stateroot:gen.roots.stateroot,
+                locationroot:gen.roots.locationroot
+            },
+            gen.candidates
+        ];
+    }
 }
 
 export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.Pool,codes:{[key:string]:string},secret:string,unit_store:{[key:string]:T.Unit[]})=>{
@@ -1105,6 +1155,45 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
         console.log("not replace");
         store.replaceing(false);
     }
+}
+
+export const call_rebuild = ()=>{
+    socket.emit('rebuildinfo');
+}
+
+export const rebuild_chain = async (new_chain:T.Block[],states:T.State[],locations:T.Location[],candidates:T.Candidates[])=>{
+    /*const state_map:{[key:string]:number} = new_chain.reduce((map:{[key:string]:number},block)=>{
+        const pures = _.copy(block.txs.concat(block.natives).concat(block.units));
+        return pures.reduce((ma,pure)=>{
+            if(pure.meta.kind==="request") return ma;
+            const index = _.copy(pure).meta.data.index;
+            const req_tx = TxSet.find_req_tx(TxSet.pure_to_tx(_.copy(pure),_.copy(block)),_.copy(chain));
+            const bases = _.copy(req_tx.meta.data.base);
+            return bases.reduce((m,key)=>{
+                m[key] = index;
+                return _.copy(m);
+            },ma)
+        },map);
+    },{});*/
+    const S_Trie = trie_ins(gen.roots.stateroot);
+    const L_Trie = trie_ins(gen.roots.locationroot);
+    await P.forEach(states, async (s:T.State)=>{
+        await S_Trie.put(s.owner,_.copy(s));
+    });
+    await P.forEach(locations, async (l:T.Location)=>{
+        await L_Trie.put(l.address,_.copy(l));
+    });
+
+    const new_roots = {
+        stateroot:S_Trie.now_root(),
+        locationroot:L_Trie.now_root()
+    }
+    store.replace_chain(_.copy(new_chain));
+    store.refresh_roots(_.copy(new_roots));
+    store.refresh_candidates(_.copy(candidates));
+
+    const amount = await get_balance(store.my_address);
+    store.refresh_balance(amount);
 }
 
 export const unit_buying = async (secret:string,units:T.Unit[],roots:{[key:string]:string},chain:T.Block[])=>{
@@ -1299,6 +1388,7 @@ export const compute_block = async ():Promise<void>=>{
         await send_blocks();
         console.log('yet:')
         console.log(store.yet_data.length);
+        console.log(store.chain.length)
         await sleep(block_time);
         //return await compute_yet();
     }
@@ -1588,6 +1678,7 @@ export const compute_block = async ():Promise<void>=>{
                 }
                 console.log('yet:')
                 console.log(store.yet_data.length);
+                console.log(store.chain.length)
                 await store.write();
                 await send_blocks();
                 if(!store.replace_mode||store.yet_data.length>10) await sleep(block_time);
@@ -1597,12 +1688,13 @@ export const compute_block = async ():Promise<void>=>{
                 const now_yets:Data[] = _.copy(store.yet_data);
                 const reduced = now_yets.filter(d=>{
                     if(d.type==="tx"&&d.tx[0]!=null) return true;
-                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
+                    else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>chain.length-1
                     else return false;
                 });
                 store.refresh_yet_data(_.copy(reduced));
                 console.log('yet:')
                 console.log(store.yet_data.length);
+                console.log(store.chain.length)
                 await sleep(block_time);
                 //return await compute_yet();
             }
@@ -1611,12 +1703,13 @@ export const compute_block = async ():Promise<void>=>{
             const now_yets:Data[] = _.copy(store.yet_data);
             const reduced = now_yets.filter(d=>{
                 if(d.type==="tx"&&d.tx[0]!=null) return true;
-                else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>block.meta.index
+                else if(d.type==="block"&&d.block[0]!=null) return d.block[0].meta.index>chain.length-1
                 else return false;
             });
             store.refresh_yet_data(_.copy(reduced));
             console.log('yet:')
             console.log(store.yet_data.length);
+            console.log(store.chain.length)
             await sleep(block_time);
             //return await compute_yet();
         }

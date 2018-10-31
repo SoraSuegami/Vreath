@@ -381,6 +381,16 @@ const Wallet = {
             catch (e) {
                 console.log(e);
             }
+        },
+        rebuild: async function () {
+            try {
+                worker.postMessage({
+                    type: 'rebuild'
+                });
+            }
+            catch (e) {
+                console.log(e);
+            }
         }
     },
     template: `
@@ -393,6 +403,7 @@ const Wallet = {
         <at-button v-on:click="remit">Remit</at-button>
         <h3>Balance:{{ balance }}</h3>
         <h3 v-if="replace_mode">Syncing...</h3>
+        <at-button v-on:click="rebuild">Sync Quickly</at-button>
     </div>
     `
 };

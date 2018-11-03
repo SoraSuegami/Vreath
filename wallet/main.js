@@ -162,10 +162,11 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     exports.store.refresh_balance(balance);
     //setImmediate(compute_tx);
     //setImmediate(compute_yet);
-    while (1) {
-        await index_1.compute_tx();
-        await index_1.compute_block();
-    }
+    /*while(1){
+        await compute_tx();
+        await compute_block();
+    }*/
+    await index_1.start();
 })();
 /*if(cluster.isMaster){
     (async ()=>{

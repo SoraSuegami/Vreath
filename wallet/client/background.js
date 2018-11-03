@@ -185,10 +185,11 @@ self.onmessage = async (event) => {
                     val: balance
                 });
                 //setImmediate(compute_tx);
-                while (1) {
-                    await index_1.compute_tx();
-                    await index_1.compute_block();
-                }
+                /*while(1){
+                    await compute_tx();
+                    await compute_block();
+                }*/
+                await index_1.start();
                 break;
             case 'send_request':
                 const options = event.data;

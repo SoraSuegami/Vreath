@@ -6,7 +6,7 @@ import {cloneDeep} from 'lodash'
 
 
 export const copy = <T>(data:T)=>{
-  return cloneDeep(data)
+  return cloneDeep(data);
 }
 
 
@@ -89,9 +89,12 @@ export const tx_fee = (tx:T.Tx)=>{
 }
 
 export const find_tx = (chain:T.Block[],hash:string)=>{
-  for(let block of copy(chain)){
-    let txs = block.txs.concat(block.natives).concat(block.units);
-    let i = txs.map(tx=>tx.hash).indexOf(hash);
+  let block:T.Block;
+  let txs:T.TxPure[];
+  let i:number;
+  for(block of copy(chain)){
+    txs = block.txs.concat(block.natives).concat(block.units);
+    i = txs.map(tx=>tx.hash).indexOf(hash);
     if(i!=-1) return copy(txs[i]);
   }
   return TxSet.empty_tx_pure();

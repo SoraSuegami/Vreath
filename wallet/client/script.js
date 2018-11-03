@@ -621,6 +621,9 @@ const Best_lang = {
                 title: {
                     display: true,
                     text: 'best-lang'
+                },
+                tooltips: {
+                    enabled: false
                 }
             };
         }

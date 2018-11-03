@@ -79,9 +79,12 @@ exports.tx_fee = (tx) => {
     return new bignumber_js_1.BigNumber(price).times(Buffer.from(target).length).toNumber();
 };
 exports.find_tx = (chain, hash) => {
-    for (let block of exports.copy(chain)) {
-        let txs = block.txs.concat(block.natives).concat(block.units);
-        let i = txs.map(tx => tx.hash).indexOf(hash);
+    let block;
+    let txs;
+    let i;
+    for (block of exports.copy(chain)) {
+        txs = block.txs.concat(block.natives).concat(block.units);
+        i = txs.map(tx => tx.hash).indexOf(hash);
         if (i != -1)
             return exports.copy(txs[i]);
     }

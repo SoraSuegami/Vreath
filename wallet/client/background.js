@@ -184,7 +184,11 @@ self.onmessage = async (event) => {
                     key: 'refresh_balance',
                     val: balance
                 });
-                setImmediate(index_1.compute_tx);
+                //setImmediate(compute_tx);
+                while (1) {
+                    await index_1.compute_tx();
+                    await index_1.compute_block();
+                }
                 break;
             case 'send_request':
                 const options = event.data;

@@ -79,4 +79,10 @@ export class Trie {
       catch(e){reject(e)}
     });
   }
+
+  async checkRoot(root:string){
+    const result:boolean = await promisify(this.trie.checkRoot).bind(this.trie)(en_key(root));
+    if(result==null) return false;
+    return de_value(result);
+  }
 }

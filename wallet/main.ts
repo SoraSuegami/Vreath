@@ -3,7 +3,7 @@ import express from 'express'
 import faye from 'faye'
 import levelup from 'levelup'
 import leveldown from 'leveldown'
-import {Store,set_config,trie_ins,compute_tx,get_balance} from './client/index'
+import {Store,set_config,trie_ins,compute_tx,compute_block,get_balance} from './client/index'
 import * as T from '../core/types'
 import * as fs from 'fs'
 import * as gen from '../genesis/index'
@@ -182,8 +182,12 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     }*/
     const balance = await get_balance(store.my_address);
     store.refresh_balance(balance);
-    setImmediate(compute_tx);
+    //setImmediate(compute_tx);
     //setImmediate(compute_yet);
+    while(1){
+        await compute_tx();
+        await compute_block();
+    }
 })()
 
 

@@ -373,7 +373,7 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     })();
     const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
-    const unit_validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === unit_validator && s.token === unit; })[0] || StateSet.CreateState(0, unit_validator, unit, 0, {}, []);
+    const unit_validator_state = StateData.filter(s => s.kind === "state" && s.owner === unit_validator && s.token === unit)[0] || StateSet.CreateState(0, unit_validator, unit, 0, {}, []);
     /*console.log("dgw:")
     console.log(unit_validator_state.amount/pos_diff)
     console.log(chain.map(block=>{
@@ -421,10 +421,10 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
         console.log("invalid timestamp");
         return false;
     }
-    else if (candidates != _.ObjectHash(right_candidates)) {
+    /*else if(candidates!=_.ObjectHash(right_candidates)){
         console.log("invalid candidates");
         return false;
-    }
+    }*/
     else if (stateroot != right_stateroot) {
         console.log("invalid stateroot");
         return false;
@@ -487,7 +487,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
-    const validator_state = StateData.filter(s => { return s.kind === "state" && s.token === unit && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
+    const validator_state = StateData.filter(s => s.kind === "state" && s.token === unit && s.owner === validator)[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
     /*const native_request_check = natives.some(pure=>{
         if(pure.meta.kind==="refresh") return false;
         return pure.meta.data.base.indexOf(native_validator)!=-1;
@@ -551,10 +551,10 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("invalid validator public key");
         return false;
     }
-    else if (candidates != _.ObjectHash(right_candidates)) {
+    /*else if(candidates!=_.ObjectHash(right_candidates)){
         console.log("invalid candidates");
         return false;
-    }
+    }*/
     else if (stateroot != right_stateroot) {
         console.log("invalid stateroot");
         return false;
@@ -1165,6 +1165,12 @@ class Trie {
                 reject(e);
             }
         });
+    }
+    async checkRoot(root) {
+        const result = await util_promisify_1.default(this.trie.checkRoot).bind(this.trie)(en_key(root));
+        if (result == null)
+            return false;
+        return de_value(result);
     }
 }
 exports.Trie = Trie;
@@ -103391,7 +103397,7 @@ module.exports = yeast;
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(setImmediate) {
+
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -103577,7 +103583,11 @@ self.onmessage = async (event) => {
                     key: 'refresh_balance',
                     val: balance
                 });
-                setImmediate(index_1.compute_tx);
+                //setImmediate(compute_tx);
+                while (1) {
+                    await index_1.compute_tx();
+                    await index_1.compute_block();
+                }
                 break;
             case 'send_request':
                 const options = event.data;
@@ -103600,7 +103610,6 @@ self.onmessage = async (event) => {
     }
 };
 
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/timers-browserify/main.js */ "./node_modules/timers-browserify/main.js").setImmediate))
 
 /***/ }),
 
@@ -103665,7 +103674,7 @@ exports.trie_ins = (root) => {
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
-/* WEBPACK VAR INJECTION */(function(Buffer, setImmediate) {
+/* WEBPACK VAR INJECTION */(function(Buffer) {
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -103715,12 +103724,14 @@ class Store {
         this._check_mode = false;
         this._replace_mode = false;
         this._replace_index = 0;
+        this._rebuild_mode = false;
         this._not_refreshed_tx = [];
         this._now_buying = false;
         this._now_refreshing = [];
         this._req_index_map = {};
         this._return_chain = false;
         this._first_request = true;
+        this._invalids = 0;
     }
     async read() {
         this._code = await this.read_func('code', codes);
@@ -103785,6 +103796,9 @@ class Store {
     get replace_index() {
         return this._replace_index;
     }
+    get rebuild_mode() {
+        return this._rebuild_mode;
+    }
     get not_refreshed_tx() {
         return this._not_refreshed_tx;
     }
@@ -103802,6 +103816,9 @@ class Store {
     }
     get first_request() {
         return this._first_request;
+    }
+    get invalids() {
+        return this._invalids;
     }
     get my_address() {
         return CryptoSet.GenereateAddress(con_1.native, CryptoSet.PublicFromPrivate(this._secret)) || "";
@@ -103945,6 +103962,14 @@ class Store {
             val:index
         },location.protocol+'//'+location.host);*/
     }
+    rebuilding(bool) {
+        this._rebuild_mode = bool;
+        if (bool === true) {
+            setTimeout(() => {
+                this._rebuild_mode = false;
+            }, con_1.block_time * 10);
+        }
+    }
     add_not_refreshed(tx) {
         this._not_refreshed_tx = this._not_refreshed_tx.concat(_.copy(tx));
         /*self.postMessage({
@@ -103985,6 +104010,9 @@ class Store {
     requested(bool) {
         this._first_request = bool;
     }
+    refresh_invalids(num) {
+        this._invalids = num;
+    }
 }
 exports.Store = Store;
 let db;
@@ -104001,6 +104029,7 @@ client.subscribe('/data', async (data) => {
     const unit_amount = await exports.get_balance(store.unit_address);
     if (data.type === "tx" && unit_amount > 0)
         store.push_yet_data(_.copy(data));
+    //setImmediate(compute_tx);
     return 0;
 });
 socket.on('replacechain', async (chain) => {
@@ -104020,7 +104049,7 @@ socket.on('rebuildchain', async (blob) => {
     const locations = JSON.parse(await folder.file('locations.json').async('text'));
     const candidates = JSON.parse(await folder.file('canidates.json').async('text'));
     await exports.rebuild_chain(_.copy(chain), _.copy(states), _.copy(locations), _.copy(candidates));
-    store.checking(false);
+    store.rebuilding(false);
     console.log('rebuild chain');
     return 0;
 });
@@ -104283,9 +104312,12 @@ exports.block_accept = async (block, chain, candidates, roots, pool, not_refresh
             });
             const new_chain = _.copy(chain).concat(_.copy(accepted.block[0]));
             store.refresh_pool(_.copy(new_pool));
-            store.refresh_roots(_.copy(new_roots));
-            store.refresh_candidates(_.copy(accepted.candidates));
-            store.add_block(_.copy(accepted.block[0]));
+            if (!store.rebuild_mode)
+                store.refresh_roots(_.copy(new_roots));
+            if (!store.rebuild_mode)
+                store.refresh_candidates(_.copy(accepted.candidates));
+            if (!store.rebuild_mode)
+                store.add_block(_.copy(accepted.block[0]));
             const reqs_pure = block.txs.filter(tx => tx.meta.kind === "request").concat(block.natives.filter(tx => tx.meta.kind === "request")).concat(block.units.filter(tx => tx.meta.kind === "request"));
             const refs_pure = block.txs.filter(tx => tx.meta.kind === "refresh").concat(block.natives.filter(tx => tx.meta.kind === "refresh")).concat(block.units.filter(tx => tx.meta.kind === "refresh"));
             const added_not_refresh_tx = reqs_pure.reduce((result, pure) => {
@@ -104739,9 +104771,20 @@ exports.send_micro_block = async (pool, secret, chain, candidates, roots, unit_s
 const get_pre_info = async (chain) => {
     try {
         const pre_block = chain[chain.length - 1] || BlockSet.empty_block();
-        const S_Trie = exports.trie_ins(pre_block.meta.stateroot);
+        const pre_stateroot = pre_block.meta.stateroot;
+        const pre_locationroot = pre_block.meta.locationroot;
+        const S_Trie = exports.trie_ins(pre_stateroot);
+        const L_Trie = exports.trie_ins(pre_locationroot);
+        if (!(await S_Trie.checkRoot) || !(await L_Trie.checkRoot)) {
+            return [
+                {
+                    stateroot: store.roots.stateroot,
+                    locationroot: store.roots.locationroot
+                },
+                gen.candidates
+            ];
+        }
         const StateData = await exports.states_for_block(pre_block, chain.slice(0, pre_block.meta.index), S_Trie);
-        const L_Trie = exports.trie_ins(pre_block.meta.locationroot);
         const LocationData = await exports.locations_for_block(pre_block, chain.slice(0, pre_block.meta.index), L_Trie);
         /*const pre_block2 = chain[chain.length-2] || BlockSet.empty_block();
         const pre_S_Trie = trie_ins(pre_block2.meta.stateroot);
@@ -104792,7 +104835,8 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
         console.log(add_blocks);
         /*const back_chain:T.Block[] = [gen.block];
         const add_blocks = new_chain.slice(1);*/
-        store.replace_chain(_.copy(back_chain));
+        if (!store.rebuild_mode)
+            store.replace_chain(_.copy(back_chain));
         const info = await (async () => {
             if (back_chain.length === 1) {
                 return {
@@ -104802,11 +104846,25 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
                     chain: _.copy(back_chain)
                 };
             }
-            const pre_info = await get_pre_info(back_chain);
+            //const pre_info = await get_pre_info(back_chain);
+            const S_Trie = exports.trie_ins(add_blocks[0].meta.stateroot);
+            const L_Trie = exports.trie_ins(add_blocks[0].meta.locationroot);
+            if (!(await S_Trie.checkRoot) || !(await L_Trie.checkRoot)) {
+                return {
+                    pool: _.copy(store.pool),
+                    roots: _.copy(store.roots),
+                    candidates: _.copy(store.candidates),
+                    chain: _.copy(store.chain)
+                };
+            }
+            const roots = {
+                stateroot: add_blocks[0].meta.stateroot,
+                locationroot: add_blocks[0].meta.locationroot
+            };
             return {
                 pool: _.copy(pool),
-                roots: _.copy(pre_info[0]),
-                candidates: _.copy(pre_info)[1],
+                roots: _.copy(roots),
+                candidates: [],
                 chain: _.copy(back_chain)
             };
         })();
@@ -104818,20 +104876,25 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
             };
             return data;
         });
-        store.refresh_roots(_.copy(info.roots));
-        store.refresh_candidates(_.copy(info.candidates));
-        store.replaceing(true);
-        store.rep_limit(_.copy(add_blocks[add_blocks.length - 1]).meta.index);
+        if (!store.rebuild_mode)
+            store.refresh_roots(_.copy(info.roots));
+        //if(!store.rebuild_mode) store.refresh_candidates(_.copy(info.candidates));
+        if (!store.rebuild_mode)
+            store.replaceing(true);
+        if (!store.rebuild_mode)
+            store.rep_limit(_.copy(add_blocks[add_blocks.length - 1]).meta.index);
         /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
             const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
         },info);*/
-        store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(store.yet_data)));
+        if (!store.rebuild_mode)
+            store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(store.yet_data)));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         store.commit("checking",false);*/
         const amount = await exports.get_balance(store.my_address);
-        store.refresh_balance(amount);
+        if (!store.rebuild_mode)
+            store.refresh_balance(amount);
     }
     else {
         console.log("not replace");
@@ -104839,7 +104902,10 @@ exports.check_chain = async (new_chain, my_chain, pool, codes, secret, unit_stor
     }
 };
 exports.call_rebuild = () => {
-    socket.emit('rebuildinfo');
+    if (!store.rebuild_mode) {
+        store.rebuilding(true);
+        socket.emit('rebuildinfo');
+    }
 };
 exports.rebuild_chain = async (new_chain, states, locations, candidates) => {
     /*const state_map:{[key:string]:number} = new_chain.reduce((map:{[key:string]:number},block)=>{
@@ -105042,7 +105108,7 @@ exports.compute_tx = async () => {
     store.refresh_unit_store(new_unit_store);
     await store.write();
     await exports.sleep(con_1.block_time);
-    setImmediate(exports.compute_block);
+    //setImmediate(compute_block);
 };
 exports.compute_block = async () => {
     const data = _.copy(store.yet_data[0]);
@@ -105209,6 +105275,18 @@ exports.compute_block = async () => {
                             return false;
                     });
                     store.refresh_yet_data(reduced);
+                    store.refresh_invalids(store.invalids + 1);
+                    /*if(store.invalids>=5){
+                        store.refresh_invalids(0);
+                        store.rebuilding(true);
+                        const roots = _.copy(store.roots);
+                        const S_Trie = trie_ins(roots.stateroot);
+                        const L_Trie = trie_ins(roots.locationroot);
+                        const states:T.State[] = Object.values(await S_Trie.filter());
+                        const locations:T.Location[] = Object.values(await L_Trie.filter());
+                        await rebuild_chain(_.copy(store.chain),_.copy(states),_.copy(locations),_.copy(store.candidates));
+                        store.rebuilding(false);
+                    }*/
                 }
                 const balance = await exports.get_balance(store.my_address);
                 store.refresh_balance(balance);
@@ -105389,10 +105467,10 @@ exports.compute_block = async () => {
             //return await compute_yet();
         }
     }
-    setImmediate(exports.compute_tx);
+    //setImmediate(compute_tx);
 };
 
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/node-libs-browser/node_modules/buffer/index.js */ "./node_modules/node-libs-browser/node_modules/buffer/index.js").Buffer, __webpack_require__(/*! ./../../node_modules/timers-browserify/main.js */ "./node_modules/timers-browserify/main.js").setImmediate))
+/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(/*! ./../../node_modules/node-libs-browser/node_modules/buffer/index.js */ "./node_modules/node-libs-browser/node_modules/buffer/index.js").Buffer))
 
 /***/ }),
 

@@ -75,5 +75,11 @@ class Trie {
             }
         });
     }
+    async checkRoot(root) {
+        const result = await util_promisify_1.default(this.trie.checkRoot).bind(this.trie)(en_key(root));
+        if (result == null)
+            return false;
+        return de_value(result);
+    }
 }
 exports.Trie = Trie;

@@ -373,7 +373,7 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
     })();
     const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
-    const unit_validator_state = StateData.filter(s => { return s.kind === "state" && s.owner === unit_validator && s.token === unit; })[0] || StateSet.CreateState(0, unit_validator, unit, 0, {}, []);
+    const unit_validator_state = StateData.filter(s => s.kind === "state" && s.owner === unit_validator && s.token === unit)[0] || StateSet.CreateState(0, unit_validator, unit, 0, {}, []);
     /*console.log("dgw:")
     console.log(unit_validator_state.amount/pos_diff)
     console.log(chain.map(block=>{
@@ -421,10 +421,10 @@ exports.ValidKeyBlock = (block, chain, my_shard_id, my_version, right_candidates
         console.log("invalid timestamp");
         return false;
     }
-    else if (candidates != _.ObjectHash(right_candidates)) {
+    /*else if(candidates!=_.ObjectHash(right_candidates)){
         console.log("invalid candidates");
         return false;
-    }
+    }*/
     else if (stateroot != right_stateroot) {
         console.log("invalid stateroot");
         return false;
@@ -487,7 +487,7 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
     const native_validator = CryptoSet.GenereateAddress(native, _.reduce_pub(validatorPub));
     const unit_validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
     const validator = CryptoSet.GenereateAddress(unit, _.reduce_pub(validatorPub));
-    const validator_state = StateData.filter(s => { return s.kind === "state" && s.token === unit && s.owner === validator; })[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
+    const validator_state = StateData.filter(s => s.kind === "state" && s.token === unit && s.owner === validator)[0] || StateSet.CreateState(0, validator, unit, 0, {}, []);
     /*const native_request_check = natives.some(pure=>{
         if(pure.meta.kind==="refresh") return false;
         return pure.meta.data.base.indexOf(native_validator)!=-1;
@@ -551,10 +551,10 @@ exports.ValidMicroBlock = (block, chain, my_shard_id, my_version, right_candidat
         console.log("invalid validator public key");
         return false;
     }
-    else if (candidates != _.ObjectHash(right_candidates)) {
+    /*else if(candidates!=_.ObjectHash(right_candidates)){
         console.log("invalid candidates");
         return false;
-    }
+    }*/
     else if (stateroot != right_stateroot) {
         console.log("invalid stateroot");
         return false;
@@ -1020,6 +1020,12 @@ class Trie {
                 reject(e);
             }
         });
+    }
+    async checkRoot(root) {
+        const result = await util_promisify_1.default(this.trie.checkRoot).bind(this.trie)(en_key(root));
+        if (result == null)
+            return false;
+        return de_value(result);
     }
 }
 exports.Trie = Trie;

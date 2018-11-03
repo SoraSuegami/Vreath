@@ -160,8 +160,12 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     }*/
     const balance = await index_1.get_balance(exports.store.my_address);
     exports.store.refresh_balance(balance);
-    setImmediate(index_1.compute_tx);
+    //setImmediate(compute_tx);
     //setImmediate(compute_yet);
+    while (1) {
+        await index_1.compute_tx();
+        await index_1.compute_block();
+    }
 })();
 /*if(cluster.isMaster){
     (async ()=>{

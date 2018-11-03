@@ -42,12 +42,14 @@ export class Store {
     private _check_mode:boolean = false;
     private _replace_mode:boolean = false;
     private _replace_index:number = 0;
+    private _rebuild_mode:boolean = false;
     private _not_refreshed_tx:T.Tx[] = [];
     private _now_buying:boolean = false;
     private _now_refreshing:string[] = [];
     private _req_index_map:{[key:string]:number} = {};
     private _return_chain:boolean = false;
     private _first_request:boolean = true;
+    private _invalids:number = 0;
 
     constructor(private _isNode:boolean,private read_func:<T>(key:string,def:T)=>Promise<T>,private write_func:<T>(key:string,val:T)=>Promise<void>){}
 
@@ -116,6 +118,9 @@ export class Store {
     get replace_index(){
         return this._replace_index;
     }
+    get rebuild_mode(){
+        return this._rebuild_mode;
+    }
     get not_refreshed_tx(){
         return this._not_refreshed_tx;
     }
@@ -133,6 +138,9 @@ export class Store {
     }
     get first_request(){
         return this._first_request
+    }
+    get invalids(){
+        return this._invalids
     }
     get my_address(){
         return CryptoSet.GenereateAddress(native,CryptoSet.PublicFromPrivate(this._secret)) || ""
@@ -276,6 +284,14 @@ export class Store {
             val:index
         },location.protocol+'//'+location.host);*/
     }
+    rebuilding(bool:boolean){
+        this._rebuild_mode = bool;
+        if(bool===true){
+            setTimeout(()=>{
+                this._rebuild_mode = false;
+            },block_time*10);
+        }
+    }
     add_not_refreshed(tx:T.Tx){
         this._not_refreshed_tx = this._not_refreshed_tx.concat(_.copy(tx));
         /*self.postMessage({
@@ -316,6 +332,9 @@ export class Store {
     requested(bool:boolean){
         this._first_request = bool;
     }
+    refresh_invalids(num:number){
+        this._invalids = num;
+    }
 
 }
 
@@ -336,6 +355,7 @@ client.subscribe('/data',async (data:Data)=>{
     }
     const unit_amount = await get_balance(store.unit_address);
     if(data.type==="tx"&&unit_amount>0) store.push_yet_data(_.copy(data));
+    //setImmediate(compute_tx);
     return 0;
 });
 
@@ -356,7 +376,7 @@ socket.on('rebuildchain',async (blob:Blob)=>{
     const locations:T.Location[] = JSON.parse(await folder.file('locations.json').async('text'));
     const candidates:T.Candidates[] = JSON.parse(await folder.file('canidates.json').async('text'));
     await rebuild_chain(_.copy(chain),_.copy(states),_.copy(locations),_.copy(candidates));
-    store.checking(false);
+    store.rebuilding(false);
     console.log('rebuild chain');
     return 0;
 });
@@ -618,9 +638,9 @@ export const block_accept = async (block:T.Block,chain:T.Block[],candidates:T.Ca
             );
             const new_chain = _.copy(chain).concat(_.copy(accepted.block[0]));
             store.refresh_pool(_.copy(new_pool));
-            store.refresh_roots(_.copy(new_roots));
-            store.refresh_candidates(_.copy(accepted.candidates));
-            store.add_block(_.copy(accepted.block[0]));
+            if(!store.rebuild_mode) store.refresh_roots(_.copy(new_roots));
+            if(!store.rebuild_mode) store.refresh_candidates(_.copy(accepted.candidates));
+            if(!store.rebuild_mode) store.add_block(_.copy(accepted.block[0]));
 
             const reqs_pure = block.txs.filter(tx=>tx.meta.kind==="request").concat(block.natives.filter(tx=>tx.meta.kind==="request")).concat(block.units.filter(tx=>tx.meta.kind==="request"));
             const refs_pure = block.txs.filter(tx=>tx.meta.kind==="refresh").concat(block.natives.filter(tx=>tx.meta.kind==="refresh")).concat(block.units.filter(tx=>tx.meta.kind==="refresh"));
@@ -1058,9 +1078,20 @@ export const send_micro_block = async (pool:T.Pool,secret:string,chain:T.Block[]
 const get_pre_info = async (chain:T.Block[]):Promise<[{stateroot:string,locationroot:string},T.Candidates[]]>=>{
     try{
         const pre_block = chain[chain.length-1] || BlockSet.empty_block();
-        const S_Trie = trie_ins(pre_block.meta.stateroot);
+        const pre_stateroot = pre_block.meta.stateroot;
+        const pre_locationroot = pre_block.meta.locationroot;
+        const S_Trie = trie_ins(pre_stateroot);
+        const L_Trie = trie_ins(pre_locationroot);
+        if(!(await S_Trie.checkRoot)||!(await L_Trie.checkRoot)){
+            return [
+                {
+                    stateroot:store.roots.stateroot,
+                    locationroot:store.roots.locationroot
+                },
+                gen.candidates
+            ];
+        }
         const StateData = await states_for_block(pre_block,chain.slice(0,pre_block.meta.index),S_Trie);
-        const L_Trie = trie_ins(pre_block.meta.locationroot);
         const LocationData = await locations_for_block(pre_block,chain.slice(0,pre_block.meta.index),L_Trie);
         /*const pre_block2 = chain[chain.length-2] || BlockSet.empty_block();
         const pre_S_Trie = trie_ins(pre_block2.meta.stateroot);
@@ -1109,7 +1140,7 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
         console.log(add_blocks);
         /*const back_chain:T.Block[] = [gen.block];
         const add_blocks = new_chain.slice(1);*/
-        store.replace_chain(_.copy(back_chain));
+        if(!store.rebuild_mode) store.replace_chain(_.copy(back_chain));
         const info = await (async ()=>{
             if(back_chain.length===1){
                 return{
@@ -1119,11 +1150,25 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
                     chain:_.copy(back_chain)
                 }
             }
-            const pre_info = await get_pre_info(back_chain);
+            //const pre_info = await get_pre_info(back_chain);
+            const S_Trie = trie_ins(add_blocks[0].meta.stateroot);
+            const L_Trie = trie_ins(add_blocks[0].meta.locationroot);
+            if(!(await S_Trie.checkRoot)||!(await L_Trie.checkRoot)){
+                return {
+                    pool:_.copy(store.pool),
+                    roots:_.copy(store.roots),
+                    candidates:_.copy(store.candidates),
+                    chain:_.copy(store.chain)
+                }
+            }
+            const roots = {
+                stateroot:add_blocks[0].meta.stateroot,
+                locationroot:add_blocks[0].meta.locationroot
+            }
             return {
                 pool:_.copy(pool),
-                roots:_.copy(pre_info[0]),
-                candidates:_.copy(pre_info)[1],
+                roots:_.copy(roots),
+                candidates:[],
                 chain:_.copy(back_chain)
             }
         })();
@@ -1137,20 +1182,20 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
             return data;
         });
 
-        store.refresh_roots(_.copy(info.roots));
-        store.refresh_candidates(_.copy(info.candidates));
-        store.replaceing(true);
-        store.rep_limit(_.copy(add_blocks[add_blocks.length-1]).meta.index);
+        if(!store.rebuild_mode) store.refresh_roots(_.copy(info.roots));
+        //if(!store.rebuild_mode) store.refresh_candidates(_.copy(info.candidates));
+        if(!store.rebuild_mode) store.replaceing(true);
+        if(!store.rebuild_mode) store.rep_limit(_.copy(add_blocks[add_blocks.length-1]).meta.index);
         /*await P.reduce(add_blocks,async (result:{pool:T.Pool,roots:{[key:string]:string},candidates:T.Candidates[],chain:T.Block[]},block:T.Block)=>{
             const accepted = await block_accept(block,result.chain.slice(),result.candidates.slice(),_.copy(result.roots),_.copy(result.pool),codes,secret,unit_store);
             return _.copy(accepted);
         },info);*/
-        store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(store.yet_data)));
+        if(!store.rebuild_mode) store.refresh_yet_data(_.copy(add_blocks_data).concat(_.copy(store.yet_data)));
         //add_blocks.forEach(block=>store.commit('push_yet_block',block));
         /*store.commit("checking",true);
         store.commit("checking",false);*/
         const amount = await get_balance(store.my_address);
-        store.refresh_balance(amount);
+        if(!store.rebuild_mode) store.refresh_balance(amount);
     }else{
         console.log("not replace");
         store.replaceing(false);
@@ -1158,7 +1203,10 @@ export const check_chain = async (new_chain:T.Block[],my_chain:T.Block[],pool:T.
 }
 
 export const call_rebuild = ()=>{
-    socket.emit('rebuildinfo');
+    if(!store.rebuild_mode){
+        store.rebuilding(true);
+        socket.emit('rebuildinfo');
+    }
 }
 
 export const rebuild_chain = async (new_chain:T.Block[],states:T.State[],locations:T.Location[],candidates:T.Candidates[])=>{
@@ -1378,7 +1426,7 @@ export const compute_tx = async ():Promise<void>=>{
     store.refresh_unit_store(new_unit_store);
     await store.write();
     await sleep(block_time);
-    setImmediate(compute_block);
+    //setImmediate(compute_block);
 }
 
 export const compute_block = async ():Promise<void>=>{
@@ -1542,6 +1590,19 @@ export const compute_block = async ():Promise<void>=>{
                         else return false;
                     });
                     store.refresh_yet_data(reduced);
+
+                    store.refresh_invalids(store.invalids+1);
+                    /*if(store.invalids>=5){
+                        store.refresh_invalids(0);
+                        store.rebuilding(true);
+                        const roots = _.copy(store.roots);
+                        const S_Trie = trie_ins(roots.stateroot);
+                        const L_Trie = trie_ins(roots.locationroot);
+                        const states:T.State[] = Object.values(await S_Trie.filter());
+                        const locations:T.Location[] = Object.values(await L_Trie.filter());
+                        await rebuild_chain(_.copy(store.chain),_.copy(states),_.copy(locations),_.copy(store.candidates));
+                        store.rebuilding(false);
+                    }*/
                 }
                 const balance = await get_balance(store.my_address);
                 store.refresh_balance(balance);
@@ -1714,5 +1775,6 @@ export const compute_block = async ():Promise<void>=>{
             //return await compute_yet();
         }
     }
-    setImmediate(compute_tx);
+    //setImmediate(compute_tx);
 }
+

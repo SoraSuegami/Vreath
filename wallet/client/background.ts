@@ -1,4 +1,4 @@
-import {Store,Data,set_config,compute_tx,get_balance,send_request_tx,trie_ins,call_rebuild} from './index'
+import {Store,Data,set_config,compute_tx,compute_block,get_balance,send_request_tx,trie_ins,call_rebuild} from './index'
 import * as T from '../../core/types'
 import * as CryptoSet from '../../core/crypto_set'
 import * as  _ from '../../core/basic'
@@ -236,7 +236,11 @@ self.onmessage = async (event)=>{
                     key:'refresh_balance',
                     val:balance
                 });
-                setImmediate(compute_tx);
+                //setImmediate(compute_tx);
+                while(1){
+                    await compute_tx();
+                    await compute_block();
+                }
                 break;
             case 'send_request':
                 const options = event.data;

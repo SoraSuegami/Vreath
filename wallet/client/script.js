@@ -233,12 +233,12 @@ const store = new vuex_1.default.Store({
     },
     mutations: {
         add_app(state, obj) {
-            state.apps[obj.name] = _.copy(obj);
-            write_db('app', state.apps);
+            state.apps[obj.name] = obj;
+            //write_db('app',state.apps);
         },
         del_app(state, key) {
             delete state.apps[key];
-            write_db('app', state.apps);
+            //write_db('app',state.apps);
         },
         refresh_secret(state, secret) {
             state.secret = secret;
@@ -670,7 +670,7 @@ const Best_lang = {
                     address: lang.address
                 });
             });
-        }, con_1.block_time);
+        }, con_1.block_time * 5);
         worker.addEventListener('message', (event) => {
             const index = this.langs.map((lang) => lang.address).indexOf(event.data.address);
             if (index != -1) {

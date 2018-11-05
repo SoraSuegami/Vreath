@@ -92,10 +92,10 @@ export const find_tx = (chain:T.Block[],hash:string)=>{
   let block:T.Block;
   let txs:T.TxPure[];
   let i:number;
-  for(block of copy(chain)){
+  for(block of chain){
     txs = block.txs.concat(block.natives).concat(block.units);
     i = txs.map(tx=>tx.hash).indexOf(hash);
-    if(i!=-1) return copy(txs[i]);
+    if(i!=-1) return txs[i];
   }
   return TxSet.empty_tx_pure();
 }

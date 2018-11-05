@@ -503,7 +503,7 @@ const reduce_units = (states:T.State[],rate:number)=>{
 }
 
 export const CandidatesForm = (states:T.State[]):T.Candidates[]=>{
-    return _.copy(states).slice().sort((a,b)=>{
+    return states.slice().sort((a,b)=>{
         return _.Hex_to_Num(_.toHash(a.owner))-_.Hex_to_Num(_.toHash(b.owner))
     }).map(state=>{
         return {address:state.owner,amount:state.amount}

@@ -82,11 +82,11 @@ exports.find_tx = (chain, hash) => {
     let block;
     let txs;
     let i;
-    for (block of exports.copy(chain)) {
+    for (block of chain) {
         txs = block.txs.concat(block.natives).concat(block.units);
         i = txs.map(tx => tx.hash).indexOf(hash);
         if (i != -1)
-            return exports.copy(txs[i]);
+            return txs[i];
     }
     return TxSet.empty_tx_pure();
 };

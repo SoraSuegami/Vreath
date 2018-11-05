@@ -726,9 +726,9 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
             let block;
             let txs;
             let tx;
-            for (block of _.copy(chain).slice().reverse()) {
+            for (block of chain.slice().reverse()) {
                 txs = block.txs.concat(block.natives).concat(block.units);
-                for (tx of _.copy(txs)) {
+                for (tx of txs) {
                     if (tx.meta.kind === "refresh" && tx.meta.data.request === u.request && tx.meta.data.index === u.index)
                         return tx;
                 }

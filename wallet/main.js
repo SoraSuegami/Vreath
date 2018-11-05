@@ -20,7 +20,6 @@ const fs = __importStar(require("fs"));
 const gen = __importStar(require("../genesis/index"));
 const permessage_deflate_1 = __importDefault(require("permessage-deflate"));
 const _ = __importStar(require("../core/basic"));
-const P = __importStar(require("p-iteration"));
 const readline_sync_1 = __importDefault(require("readline-sync"));
 const socket_io_1 = __importDefault(require("socket.io"));
 const jszip_1 = __importDefault(require("jszip"));
@@ -148,17 +147,17 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     await index_1.set_config(level_db, exports.store);
     const secret = readline_sync_1.default.question("What is your secret?");
     exports.store.refresh_secret(secret);
-    const gen_S_Trie = index_1.trie_ins("");
-    await P.forEach(gen.state, async (s) => {
-        await gen_S_Trie.put(s.owner, s);
-    });
+    /*const gen_S_Trie = trie_ins("");
+    await P.forEach(gen.state,async (s:T.State)=>{
+        await gen_S_Trie.put(s.owner,s);
+    });*/
     /*const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
     const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
     if(last_address!=store.my_address){
         store.checking(true);
         client.publish("/checkchain",last_address);
     }*/
-    const balance = await index_1.get_balance(exports.store.my_address);
+    const balance = await index_1.get_balance(exports.store.my_address, exports.store);
     exports.store.refresh_balance(balance);
     //setImmediate(compute_tx);
     //setImmediate(compute_yet);

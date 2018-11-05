@@ -219,10 +219,6 @@ self.onmessage = async (event)=>{
             case 'start':
                 //delete_db();
                 await set_config(level_db,store);
-                const gen_S_Trie = trie_ins("");
-                await P.forEach(gen.state,async (s:T.State)=>{
-                    await gen_S_Trie.put(s.owner,s);
-                });
                 /*const chain = read_db('chain',[gen.block]);
                 const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
                 const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
@@ -230,7 +226,7 @@ self.onmessage = async (event)=>{
                     store.checking(true);
                     client.publish("/checkchain",last_address);
                 }*/
-                const balance =  await get_balance(store.my_address);
+                const balance =  await get_balance(store.my_address,store);
                 store.refresh_balance(balance);
                 postMessage({
                     key:'refresh_balance',
@@ -241,14 +237,14 @@ self.onmessage = async (event)=>{
                     await compute_tx();
                     await compute_block();
                 }*/
-                await start();
+                if(store.loop_mode) await start();
                 break;
             case 'send_request':
                 const options = event.data;
                 await send_request_tx(store.secret,options.tx_type,options.token,options.base,options.input_raw,options.log,_.copy(store.roots),_.copy(store.chain));
                 break;
             case 'get_balance':
-                const got_balance = await get_balance(event.data.address) || 0;
+                const got_balance = await get_balance(event.data.address,store) || 0;
                 postMessage({
                     address:event.data.address,
                     amount:got_balance
@@ -256,6 +252,7 @@ self.onmessage = async (event)=>{
                 break;
             case 'rebuild':
                 call_rebuild();
+                await store.rebuilding(true);
                 break;
         }
     }

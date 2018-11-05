@@ -178,11 +178,11 @@ exports.find_tx = (chain, hash) => {
     let block;
     let txs;
     let i;
-    for (block of exports.copy(chain)) {
+    for (block of chain) {
         txs = block.txs.concat(block.natives).concat(block.units);
         i = txs.map(tx => tx.hash).indexOf(hash);
         if (i != -1)
-            return exports.copy(txs[i]);
+            return txs[i];
     }
     return TxSet.empty_tx_pure();
 };
@@ -695,7 +695,7 @@ const reduce_units = (states, rate) => {
     });
 };
 exports.CandidatesForm = (states) => {
-    return _.copy(states).slice().sort((a, b) => {
+    return states.slice().sort((a, b) => {
         return _.Hex_to_Num(_.toHash(a.owner)) - _.Hex_to_Num(_.toHash(b.owner));
     }).map(state => {
         return { address: state.owner, amount: state.amount };
@@ -1828,9 +1828,9 @@ exports.unit_code = (StateData, req_tx, pre_tx, native, unit, chain) => {
             let block;
             let txs;
             let tx;
-            for (block of _.copy(chain).slice().reverse()) {
+            for (block of chain.slice().reverse()) {
                 txs = block.txs.concat(block.natives).concat(block.units);
-                for (tx of _.copy(txs)) {
+                for (tx of txs) {
                     if (tx.meta.kind === "refresh" && tx.meta.data.request === u.request && tx.meta.data.index === u.index)
                         return tx;
                 }
@@ -126789,12 +126789,12 @@ const store = new vuex_1.default.Store({
     },
     mutations: {
         add_app(state, obj) {
-            state.apps[obj.name] = _.copy(obj);
-            write_db('app', state.apps);
+            state.apps[obj.name] = obj;
+            //write_db('app',state.apps);
         },
         del_app(state, key) {
             delete state.apps[key];
-            write_db('app', state.apps);
+            //write_db('app',state.apps);
         },
         refresh_secret(state, secret) {
             state.secret = secret;
@@ -127226,7 +127226,7 @@ const Best_lang = {
                     address: lang.address
                 });
             });
-        }, con_1.block_time);
+        }, con_1.block_time * 5);
         worker.addEventListener('message', (event) => {
             const index = this.langs.map((lang) => lang.address).indexOf(event.data.address);
             if (index != -1) {

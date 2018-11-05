@@ -12,8 +12,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const index_1 = require("./index");
 const _ = __importStar(require("../../core/basic"));
-const gen = __importStar(require("../../genesis/index"));
-const P = __importStar(require("p-iteration"));
 const level_browserify_1 = __importDefault(require("level-browserify"));
 const db_1 = require("./db");
 const storeName = 'vreath';
@@ -167,10 +165,6 @@ self.onmessage = async (event) => {
             case 'start':
                 //delete_db();
                 await index_1.set_config(level_db, exports.store);
-                const gen_S_Trie = index_1.trie_ins("");
-                await P.forEach(gen.state, async (s) => {
-                    await gen_S_Trie.put(s.owner, s);
-                });
                 /*const chain = read_db('chain',[gen.block]);
                 const last_block:T.Block = _.copy(chain[chain.length-1]) || _.copy(gen.block);
                 const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
@@ -178,7 +172,7 @@ self.onmessage = async (event) => {
                     store.checking(true);
                     client.publish("/checkchain",last_address);
                 }*/
-                const balance = await index_1.get_balance(exports.store.my_address);
+                const balance = await index_1.get_balance(exports.store.my_address, exports.store);
                 exports.store.refresh_balance(balance);
                 postMessage({
                     key: 'refresh_balance',
@@ -189,14 +183,15 @@ self.onmessage = async (event) => {
                     await compute_tx();
                     await compute_block();
                 }*/
-                await index_1.start();
+                if (exports.store.loop_mode)
+                    await index_1.start();
                 break;
             case 'send_request':
                 const options = event.data;
                 await index_1.send_request_tx(exports.store.secret, options.tx_type, options.token, options.base, options.input_raw, options.log, _.copy(exports.store.roots), _.copy(exports.store.chain));
                 break;
             case 'get_balance':
-                const got_balance = await index_1.get_balance(event.data.address) || 0;
+                const got_balance = await index_1.get_balance(event.data.address, exports.store) || 0;
                 postMessage({
                     address: event.data.address,
                     amount: got_balance
@@ -204,6 +199,7 @@ self.onmessage = async (event) => {
                 break;
             case 'rebuild':
                 index_1.call_rebuild();
+                await exports.store.rebuilding(true);
                 break;
         }
     }

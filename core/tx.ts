@@ -749,9 +749,9 @@ export const unit_code = (StateData:T.State[],req_tx:T.Tx,pre_tx:T.Tx,native:str
       let block:T.Block;
       let txs:T.TxPure[];
       let tx:T.TxPure;
-      for(block of _.copy(chain).slice().reverse()){
+      for(block of chain.slice().reverse()){
         txs = block.txs.concat(block.natives).concat(block.units);
-        for(tx of _.copy(txs)){
+        for(tx of txs){
           if(tx.meta.kind==="refresh"&&tx.meta.data.request===u.request&&tx.meta.data.index===u.index) return tx;
         }
       }

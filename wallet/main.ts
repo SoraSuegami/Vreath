@@ -170,17 +170,17 @@ client.subscribe('/replacechain',async (chain:T.Block[])=>{
     await set_config(level_db,store);
     const secret = readlineSync.question("What is your secret?");
     store.refresh_secret(secret);
-    const gen_S_Trie = trie_ins("");
+    /*const gen_S_Trie = trie_ins("");
     await P.forEach(gen.state,async (s:T.State)=>{
         await gen_S_Trie.put(s.owner,s);
-    });
+    });*/
     /*const last_block:T.Block = _.copy(store.chain[store.chain.length-1]) || _.copy(gen.block);
     const last_address = CryptoSet.GenereateAddress(native,_.reduce_pub(last_block.meta.validatorPub));
     if(last_address!=store.my_address){
         store.checking(true);
         client.publish("/checkchain",last_address);
     }*/
-    const balance = await get_balance(store.my_address);
+    const balance = await get_balance(store.my_address,store);
     store.refresh_balance(balance);
     //setImmediate(compute_tx);
     //setImmediate(compute_yet);
